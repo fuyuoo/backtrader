@@ -1,0 +1,114 @@
+import json
+import datetime
+import pandas as pd
+import backtrader as bt
+from pathlib import Path
+from backtrader.my_strategy.strategy import StockData, StockCommission, MyStrategy
+
+
+def load_config(config_path='config.json'):
+    with open(config_path, 'r') as f:
+        return json.load(f)
+
+
+def load_feeds(cfg):
+    """读取所有股票的指标 CSV，返回 (name, feed) 列表。"""
+    stocks = pd.read_csv(cfg['stock_list_path'])['ts_code'].tolist()
+    data_dir = Path(cfg['data_dir'])
+    start = datetime.datetime.strptime(cfg['start_date'], '%Y%m%d')
+    end = datetime.datetime.strptime(cfg['end_date'], '%Y%m%d')
+
+    feeds = []
+    for ts_code in stocks:
+        path = data_dir / f"{ts_code}_indicators.csv"
+        if not path.exists():
+            print(f"SKIP {ts_code}: 指标文件不存在，请先运行 calc_indicators.py")
+            continue
+        df = pd.read_csv(path, parse_dates=['trade_date'])
+        df = df.sort_values('trade_date').reset_index(drop=True)
+        df.index = df['trade_date']
+        feed = StockData(dataname=df, fromdate=start, todate=end)
+        feeds.append((ts_code, feed))
+    return feeds
+
+
+def setup_cerebro(cfg, feeds):
+    cerebro = bt.Cerebro()
+
+    for name, feed in feeds:
+        cerebro.adddata(feed, name=name)
+
+    cerebro.broker.set_cash(cfg['initial_cash'])
+
+    comm = StockCommission(
+        commission=cfg['commission_rate'],
+        stamp_duty=cfg['stamp_duty'],
+    )
+    cerebro.broker.addcommissioninfo(comm)
+
+    cerebro.broker.set_slippage_perc(perc=0.0001)
+
+    cerebro.addstrategy(
+        MyStrategy,
+        initial_cash=cfg['initial_cash'],
+        max_positions=cfg['max_positions'],
+        take_profit_1_pct=cfg['take_profit_1_pct'],
+        take_profit_2_pct=cfg['take_profit_2_pct'],
+        dea_lookback_days=cfg['dea_lookback_days'],
+    )
+
+    cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name='_AnnualReturn')
+    cerebro.addanalyzer(bt.analyzers.DrawDown, _name='_DrawDown')
+    cerebro.addanalyzer(bt.analyzers.Returns, _name='_Returns', tann=252)
+    cerebro.addanalyzer(bt.analyzers.SharpeRatio_A, _name='_SharpeRatio_A')
+    cerebro.addanalyzer(bt.analyzers.TimeReturn, _name='_TimeReturn')
+
+    return cerebro
+
+
+def print_results(result, cfg):
+    r = result[0]
+    annual_ret = r.analyzers._Returns.get_analysis().get('rnorm100', 'N/A')
+    max_dd = r.analyzers._DrawDown.get_analysis()['max']['drawdown']
+    sharpe = r.analyzers._SharpeRatio_A.get_analysis().get('sharperatio', 'N/A')
+
+    print("\n========== 回测结果 ==========")
+    print(f"年化收益率：{annual_ret:.2f}%" if isinstance(annual_ret, float) else f"年化收益率：{annual_ret}")
+    print(f"最大回撤：{max_dd:.2f}%")
+    print(f"年化夏普比率：{sharpe:.3f}" if isinstance(sharpe, float) else f"年化夏普比率：{sharpe}")
+    print("==============================\n")
+
+    results_dir = Path(cfg['results_dir'])
+    results_dir.mkdir(exist_ok=True)
+
+    trade_df = pd.DataFrame(r.order_log)
+    if not trade_df.empty:
+        trade_df.to_csv(results_dir / 'trade_list.csv', index=False)
+        print(f"交易记录已保存到 {results_dir / 'trade_list.csv'}")
+
+    time_return = pd.Series(r.analyzers._TimeReturn.get_analysis())
+    equity = (1 + time_return).cumprod()
+    equity.plot(title='Equity Curve').get_figure().savefig(
+        results_dir / 'equity_curve.png', dpi=150
+    )
+    print(f"资金曲线已保存到 {results_dir / 'equity_curve.png'}")
+
+
+def main():
+    cfg = load_config()
+    feeds = load_feeds(cfg)
+    if not feeds:
+        print("没有可用的数据文件，请先运行 downloader.py 和 calc_indicators.py")
+        return
+
+    cerebro = setup_cerebro(cfg, feeds)
+    print(f"初始资金：{cfg['initial_cash']:,.0f}")
+    print(f"加载股票数：{len(feeds)}")
+    print("开始回测...")
+
+    result = cerebro.run()
+    print_results(result, cfg)
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,44 @@
+import json
+import pandas as pd
+from pathlib import Path
+
+
+def load_config(config_path='config.json'):
+    with open(config_path, 'r') as f:
+        return json.load(f)
+
+
+def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df['ma25'] = df['close'].rolling(window=25, min_periods=25).mean()
+    df['ma60'] = df['close'].rolling(window=60, min_periods=60).mean()
+
+    ema12 = df['close'].ewm(span=12, adjust=False).mean()
+    ema26 = df['close'].ewm(span=26, adjust=False).mean()
+    dif = ema12 - ema26
+    df['dea'] = dif.ewm(span=9, adjust=False).mean()
+
+    df['prev_close'] = df['close'].shift(1)
+    return df
+
+
+def main():
+    cfg = load_config()
+    data_dir = Path(cfg['data_dir'])
+    stocks = pd.read_csv(cfg['stock_list_path'])['ts_code'].tolist()
+
+    for i, ts_code in enumerate(stocks):
+        src = data_dir / f"{ts_code}.csv"
+        dst = data_dir / f"{ts_code}_indicators.csv"
+        if not src.exists():
+            print(f"[{i+1}/{len(stocks)}] {ts_code} SKIP (no raw data)")
+            continue
+        df = pd.read_csv(src, parse_dates=['trade_date'])
+        df = df.sort_values('trade_date').reset_index(drop=True)
+        result = compute_indicators(df)
+        result.to_csv(dst, index=False)
+        print(f"[{i+1}/{len(stocks)}] {ts_code} OK")
+
+
+if __name__ == '__main__':
+    main()

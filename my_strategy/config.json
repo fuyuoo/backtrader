@@ -1,0 +1,15 @@
+{
+  "tushare_token": "6c07eb83d0933edda3ee061585600d3940ff1bfef9beb0a0ab8bd7e3",
+  "start_date": "20180101",
+  "end_date": "20241231",
+  "initial_cash": 100000000,
+  "max_positions": 200,
+  "commission_rate": 0.0003,
+  "stamp_duty": 0.001,
+  "stock_list_path": "stock_list.csv",
+  "data_dir": "data/",
+  "results_dir": "results/",
+  "dea_lookback_days": 5,
+  "take_profit_1_pct": 0.05,
+  "take_profit_2_pct": 0.10
+}
