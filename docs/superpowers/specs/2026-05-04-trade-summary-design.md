@@ -88,7 +88,7 @@ for d in self.datas:
 | `exit_reason` | str | 最终出场原因：`MA60止损` / `MA25清仓` / `未平仓` |
 | `status` | str | `completed` / `incomplete` |
 
-`trade_list.csv` 在原有列基础上新增 `reason` 列，与 `trade_summary.csv` 通过 `ts_code + episode` 关联。
+`trade_list.csv` 在原有列基础上新增 `reason` 列和 `episode` 列，可通过 `ts_code + episode` 与 `trade_summary.csv` 关联查看每笔完整交易的子订单明细。
 
 ---
 
