@@ -3,7 +3,7 @@ import datetime
 import pandas as pd
 import backtrader as bt
 from pathlib import Path
-from backtrader.my_strategy.strategy import StockData, StockCommission, MyStrategy
+from strategy import StockData, StockCommission, MyStrategy
 
 
 def load_config(config_path='config.json'):
@@ -15,8 +15,8 @@ def load_feeds(cfg):
     """读取所有股票的指标 CSV，返回 (name, feed) 列表。"""
     stocks = pd.read_csv(cfg['stock_list_path'])['ts_code'].tolist()
     data_dir = Path(cfg['data_dir'])
-    start = datetime.datetime.strptime(cfg['start_date'], '%Y%m%d')
-    end = datetime.datetime.strptime(cfg['end_date'], '%Y%m%d')
+    start = datetime.datetime.strptime(cfg['backTest_Start_data'], '%Y%m%d')
+    end = datetime.datetime.strptime(cfg['backTest_end_data'], '%Y%m%d')
 
     feeds = []
     for ts_code in stocks:
@@ -39,6 +39,7 @@ def setup_cerebro(cfg, feeds):
         cerebro.adddata(feed, name=name)
 
     cerebro.broker.set_cash(cfg['initial_cash'])
+    cerebro.broker.set_coc(True)  # 14:50尾盘操作，以当日收盘价成交
 
     comm = StockCommission(
         commission=cfg['commission_rate'],

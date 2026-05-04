@@ -20,45 +20,64 @@ def get_last_date(csv_path):
     return df['trade_date'].max()
 
 
-def download_stock(pro, ts_code, start_date, end_date, data_dir):
-    """下载单只股票数据，支持增量更新。"""
+def _year_chunks(start_date: str, end_date: str):
+    """按年切分日期区间，避免单次拉取数据量过大。"""
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    cur = start
+    while cur <= end:
+        year_end = min(pd.Timestamp(f"{cur.year}1231"), end)
+        yield cur.strftime('%Y%m%d'), year_end.strftime('%Y%m%d')
+        cur = pd.Timestamp(f"{cur.year + 1}0101")
+
+
+def _apply_qfq(df, pro, ts_code, start_date):
+    """对已拼接的原始日线 df 应用前复权，以今日 adj_factor 为基准。"""
+    today = pd.Timestamp.today().strftime('%Y%m%d')
+    fcts = pro.adj_factor(ts_code=ts_code, start_date=start_date, end_date=today)[['trade_date', 'adj_factor']]
+    fcts['trade_date'] = pd.to_datetime(fcts['trade_date'])
+    fcts = fcts.sort_values('trade_date').reset_index(drop=True)
+    latest_factor = float(fcts['adj_factor'].iloc[-1])
+    df = df.merge(fcts, on='trade_date', how='left')
+    df['adj_factor'] = df['adj_factor'].ffill().bfill()
+    for col in ['open', 'high', 'low', 'close']:
+        df[col] = (df[col] * df['adj_factor'] / latest_factor).round(2)
+    return df.drop(columns='adj_factor')
+
+
+def download_stock(ts_code, start_date, end_date, data_dir):
+    """下载单只股票前复权日线数据，全量重新下载以保证复权基准一致。"""
     csv_path = Path(data_dir) / f"{ts_code}.csv"
+    pro = ts.pro_api()
 
-    if csv_path.exists():
-        last_date = get_last_date(csv_path)
-        next_date = pd.Timestamp(last_date) + pd.Timedelta(days=1)
-        actual_start = next_date.strftime('%Y%m%d')
-        if actual_start >= end_date:
-            return
-    else:
-        actual_start = start_date
+    chunks = []
+    for seg_start, seg_end in _year_chunks(start_date, end_date):
+        seg = ts.pro_bar(
+            ts_code=ts_code,
+            adj=None,
+            start_date=seg_start,
+            end_date=seg_end,
+        )
+        if seg is not None and not seg.empty:
+            chunks.append(seg)
+        time.sleep(0.2)
 
-    df = ts.pro_bar(
-        ts_code=ts_code,
-        adj='qfq',
-        start_date=actual_start,
-        end_date=end_date,
-        fields='trade_date,open,high,low,close,vol'
-    )
-    if df is None or df.empty:
+    if not chunks:
         return
 
+    df = pd.concat(chunks, ignore_index=True)
     df = df.rename(columns={'vol': 'volume'})
     df['trade_date'] = pd.to_datetime(df['trade_date'])
-    df = df.sort_values('trade_date').reset_index(drop=True)
+    df = df.drop_duplicates(subset='trade_date').sort_values('trade_date').reset_index(drop=True)
 
-    if csv_path.exists():
-        existing = pd.read_csv(csv_path, parse_dates=['trade_date'])
-        df = pd.concat([existing, df], ignore_index=True)
-        df = df.drop_duplicates(subset='trade_date').sort_values('trade_date')
-
+    df = _apply_qfq(df, pro, ts_code, start_date)
+    df = df[['trade_date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg']]
     df.to_csv(csv_path, index=False)
 
 
 def main():
     cfg = load_config()
     ts.set_token(cfg['tushare_token'])
-    pro = ts.pro_api()
 
     stocks = pd.read_csv(cfg['stock_list_path'])['ts_code'].tolist()
     data_dir = cfg['data_dir']
@@ -66,12 +85,11 @@ def main():
 
     for i, ts_code in enumerate(stocks):
         try:
-            download_stock(pro, ts_code, cfg['start_date'], cfg['end_date'], data_dir)
+            download_stock(ts_code, cfg['start_date'], cfg['end_date'], data_dir)
             print(f"[{i+1}/{len(stocks)}] {ts_code} OK")
         except Exception as e:
             logging.error(f"{ts_code}: {e}")
             print(f"[{i+1}/{len(stocks)}] {ts_code} FAILED: {e}")
-        time.sleep(0.3)
 
 
 if __name__ == '__main__':

@@ -3,12 +3,11 @@ import backtrader as bt
 
 class StockData(bt.feeds.PandasData):
     """自定义数据 feed，读取预计算好的指标列。"""
-    lines = ('ma25', 'ma60', 'dea', 'prev_close')
+    lines = ('ma25', 'ma60', 'dea')
     params = (
         ('ma25', -1),
         ('ma60', -1),
         ('dea', -1),
-        ('prev_close', -1),
     )
 
 
@@ -47,6 +46,9 @@ class MyStrategy(bt.Strategy):
                 'take_profit_count': 0,
                 'in_ma60_obs': False,
                 'in_ma25_obs': False,
+                'entry_price': None,
+                'big_candle_seen': False,
+                'add_count': 0,
             }
 
         self.order_log = []
@@ -60,6 +62,9 @@ class MyStrategy(bt.Strategy):
             'take_profit_count': 0,
             'in_ma60_obs': False,
             'in_ma25_obs': False,
+            'entry_price': None,
+            'big_candle_seen': False,
+            'add_count': 0,
         }
 
     def _has_pending_order(self, d):
@@ -68,9 +73,16 @@ class MyStrategy(bt.Strategy):
 
     def notify_order(self, order):
         if order.status in (order.Completed, order.Canceled, order.Rejected):
+            if order.status == order.Completed and order.isbuy():
+                state = self.stock_state[order.data]
+                if state['entry_price'] is None:
+                    state['entry_price'] = order.executed.price
+
             side = 'buy' if order.isbuy() else 'sell'
+            ts_code = order.data._name
             self.order_log.append({
-                'date': self.data.datetime.date(0),
+                'date': bt.num2date(order.executed.dt).date(),
+                'ts_code': ts_code,
                 'side': side,
                 'size': order.executed.size,
                 'price': order.executed.price,
@@ -95,13 +107,18 @@ class MyStrategy(bt.Strategy):
                 continue
 
             if pos.size > 0:
-                avg_price = pos.price
-                pnl_pct = (close - avg_price) / avg_price
+                entry_price = state['entry_price'] or pos.price
+                pnl_pct = (close - entry_price) / entry_price
+
+                # 记录阳线（持仓期间出现 >1% 阳线则禁止加仓）
+                open_ = d.open[0]
+                if open_ > 0 and (close - open_) / open_ > 0.01:
+                    state['big_candle_seen'] = True
 
                 # MA60 止损
                 if state['in_ma60_obs']:
                     if close < ma60:
-                        o = self.close(data=d, exectype=bt.Order.Close)
+                        o = self.close(data=d, exectype=bt.Order.Market)
                         self.orders[d] = o
                         self._reset_state(d)
                         continue
@@ -114,7 +131,7 @@ class MyStrategy(bt.Strategy):
                 if state['take_profit_count'] >= 2 and ma25 == ma25:
                     if state['in_ma25_obs']:
                         if close < ma25:
-                            o = self.close(data=d, exectype=bt.Order.Close)
+                            o = self.close(data=d, exectype=bt.Order.Market)
                             self.orders[d] = o
                             self._reset_state(d)
                             continue
@@ -123,22 +140,42 @@ class MyStrategy(bt.Strategy):
                     elif close < ma25:
                         state['in_ma25_obs'] = True
 
-                # 止盈
+                # 止盈（以原始建仓价为基准）
                 if state['take_profit_count'] == 0 and pnl_pct >= self.p.take_profit_1_pct:
                     sell_size = int(pos.size / 3 / 100) * 100
                     if sell_size > 0:
-                        o = self.sell(data=d, size=sell_size, exectype=bt.Order.Close)
+                        o = self.sell(data=d, size=sell_size, exectype=bt.Order.Market)
                         self.orders[d] = o
                         state['take_profit_count'] = 1
+                        continue
                 elif state['take_profit_count'] == 1 and pnl_pct >= self.p.take_profit_2_pct:
                     sell_size = int(pos.size / 3 / 100) * 100
                     if sell_size > 0:
-                        o = self.sell(data=d, size=sell_size, exectype=bt.Order.Close)
+                        o = self.sell(data=d, size=sell_size, exectype=bt.Order.Market)
                         self.orders[d] = o
                         state['take_profit_count'] = 2
+                        continue
+
+                # 加仓（最多2次，满足与买入相同条件，且未出现大阳线）
+                if state['add_count'] < 2 and not state['big_candle_seen']:
+                    prev_close = d.close[-1]
+                    dea = d.dea[0]
+                    if (
+                        prev_close == prev_close
+                        and close < prev_close
+                        and close > ma60
+                        and dea > 0
+                    ):
+                        past_deas = [d.dea[-i] for i in range(1, self.p.dea_lookback_days + 1)]
+                        if any(v < 0 for v in past_deas if v == v):
+                            add_size = int(self.position_limit / 3 / close / 100) * 100
+                            if add_size > 0:
+                                o = self.buy(data=d, size=add_size)
+                                self.orders[d] = o
+                                state['add_count'] += 1
 
             else:
-                prev_close = d.prev_close[0]
+                prev_close = d.close[-1]
                 dea = d.dea[0]
 
                 if prev_close != prev_close:
@@ -154,14 +191,19 @@ class MyStrategy(bt.Strategy):
                     continue
                 n = self.p.dea_lookback_days
                 past_deas = [d.dea[-i] for i in range(1, n + 1)]
-                if any(v > 0 for v in past_deas if v == v):
+                if not any(v < 0 for v in past_deas if v == v):
                     continue
 
                 if self._current_position_count() >= self.p.max_positions:
                     continue
 
-                buy_value = self.position_limit / 3
-                buy_size = int(buy_value / close / 100) * 100
+                # 价格接近 MA60（距离 ≤ 1%）→ 直接满仓
+                if (close - ma60) / ma60 <= 0.01:
+                    buy_size = int(self.position_limit / close / 100) * 100
+                    state['add_count'] = 2
+                else:
+                    buy_size = int(self.position_limit / 3 / close / 100) * 100
+
                 if buy_size <= 0:
                     continue
 

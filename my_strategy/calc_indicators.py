@@ -10,15 +10,15 @@ def load_config(config_path='config.json'):
 
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df['ma25'] = df['close'].rolling(window=25, min_periods=25).mean()
-    df['ma60'] = df['close'].rolling(window=60, min_periods=60).mean()
+    df['ma25'] = df['close'].rolling(window=25, min_periods=25).mean().round(2)
+    df['ma60'] = df['close'].rolling(window=60, min_periods=60).mean().round(2)
 
     ema12 = df['close'].ewm(span=12, adjust=False).mean()
     ema26 = df['close'].ewm(span=26, adjust=False).mean()
-    dif = ema12 - ema26
-    df['dea'] = dif.ewm(span=9, adjust=False).mean()
+    df['dif'] = (ema12 - ema26).round(2)
+    df['dea'] = df['dif'].ewm(span=9, adjust=False).mean().round(2)
+    df['macd'] = (2 * (df['dif'] - df['dea'])).round(2)
 
-    df['prev_close'] = df['close'].shift(1)
     return df
 
 
