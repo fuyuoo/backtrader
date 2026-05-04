@@ -3,11 +3,12 @@
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import backtrader as bt
 import pandas as pd
 import numpy as np
-from backtrader.my_strategy.strategy import StockData, MyStrategy
+from strategy import StockData, MyStrategy
 
 
 def make_feed(n=150, start='2020-01-01'):
@@ -77,3 +78,34 @@ def test_take_profit_1_triggers():
     strat = run_backtest(df)
     sell_orders = [o for o in strat.order_log if o['side'] == 'sell']
     assert len(sell_orders) >= 1, "应至少有一笔卖出订单（止盈）"
+
+
+def test_order_log_has_reason_and_episode():
+    """order_log 每条记录应含 reason 和 episode 字段。"""
+    df = make_feed()
+    strat = run_backtest(df)
+    assert len(strat.order_log) > 0
+    for entry in strat.order_log:
+        assert 'reason' in entry, f"缺少 reason 字段: {entry}"
+        assert 'episode' in entry, f"缺少 episode 字段: {entry}"
+        assert entry['reason'] in (
+            'initial_buy', 'add_on', 'take_profit_1', 'take_profit_2',
+            'MA60_stop', 'MA25_stop', 'unknown'
+        ), f"未知 reason: {entry['reason']}"
+
+
+def test_trade_log_has_required_keys():
+    """trade_log 应存在且每条记录含所有必要字段。"""
+    df = make_feed()
+    strat = run_backtest(df)
+    assert hasattr(strat, 'trade_log'), "strategy 缺少 trade_log 属性"
+    # make_feed 价格持续上涨，持仓不会在回测内关闭，stop() 应产生 incomplete 条目
+    assert len(strat.trade_log) >= 1, "trade_log 应至少有一条记录"
+    required_keys = {
+        'ts_code', 'episode', 'entry_date', 'exit_date', 'holding_days',
+        'avg_cost', 'avg_exit_price', 'total_shares', 'gross_pnl',
+        'return_pct', 'add_count', 'take_profit_count', 'exit_reason', 'status'
+    }
+    for entry in strat.trade_log:
+        missing = required_keys - set(entry.keys())
+        assert not missing, f"trade_log 条目缺少字段: {missing}"

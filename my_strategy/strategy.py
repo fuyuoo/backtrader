@@ -53,6 +53,12 @@ class MyStrategy(bt.Strategy):
 
         self.order_log = []
         self.orders = {}
+        self.order_reasons = {}  # Maps Order id() to reason string
+        self.episode_state = {
+            d: {'buys': [], 'sells': [], 'episode_num': 1}
+            for d in self.datas
+        }
+        self.trade_log = []
 
     def _current_position_count(self):
         return sum(1 for d in self.datas if self.getposition(d).size > 0)
@@ -71,21 +77,94 @@ class MyStrategy(bt.Strategy):
         o = self.orders.get(d)
         return o is not None and o.alive()
 
+    def _finalize_episode(self, d, status='completed'):
+        ep = self.episode_state[d]
+        buys, sells = ep['buys'], ep['sells']
+        if not buys:
+            return
+        total_shares = sum(b['size'] for b in buys)
+        avg_cost = sum(b['size'] * b['price'] for b in buys) / total_shares
+        entry_date = buys[0]['date']
+        add_count = sum(1 for b in buys if b['reason'] == 'add_on')
+        if sells:
+            total_sold = sum(s['size'] for s in sells)
+            avg_exit_price = sum(s['size'] * s['price'] for s in sells) / total_sold
+            exit_date = sells[-1]['date']
+            holding_days = (exit_date - entry_date).days
+            gross_pnl = (avg_exit_price - avg_cost) * total_shares
+            return_pct = (avg_exit_price - avg_cost) / avg_cost * 100
+            take_profit_count = sum(
+                1 for s in sells if s['reason'] in ('take_profit_1', 'take_profit_2')
+            )
+            exit_reason = {'MA60_stop': 'MA60止损', 'MA25_stop': 'MA25清仓'}.get(
+                sells[-1]['reason'], sells[-1]['reason']
+            )
+        else:
+            avg_exit_price = exit_date = holding_days = gross_pnl = return_pct = None
+            take_profit_count = 0
+            exit_reason = '未平仓'
+        self.trade_log.append({
+            'ts_code': d._name,
+            'episode': ep['episode_num'],
+            'entry_date': entry_date,
+            'exit_date': exit_date,
+            'holding_days': holding_days,
+            'avg_cost': round(avg_cost, 4),
+            'avg_exit_price': round(avg_exit_price, 4) if avg_exit_price is not None else None,
+            'total_shares': int(total_shares),
+            'gross_pnl': round(gross_pnl, 2) if gross_pnl is not None else None,
+            'return_pct': round(return_pct, 4) if return_pct is not None else None,
+            'add_count': add_count,
+            'take_profit_count': take_profit_count,
+            'exit_reason': exit_reason,
+            'status': status,
+        })
+        ep['buys'] = []
+        ep['sells'] = []
+        ep['episode_num'] += 1
+
+    def stop(self):
+        for d in self.datas:
+            if self.episode_state[d]['buys']:
+                self._finalize_episode(d, status='incomplete')
+
     def notify_order(self, order):
         if order.status in (order.Completed, order.Canceled, order.Rejected):
-            if order.status == order.Completed and order.isbuy():
-                state = self.stock_state[order.data]
-                if state['entry_price'] is None:
-                    state['entry_price'] = order.executed.price
+            reason = self.order_reasons.pop(id(order), 'unknown')
+            ep = self.episode_state[order.data]
+            episode_num = ep['episode_num']  # capture before possible finalize
 
-            side = 'buy' if order.isbuy() else 'sell'
-            ts_code = order.data._name
+            if order.status == order.Completed:
+                if order.isbuy():
+                    state = self.stock_state[order.data]
+                    if state['entry_price'] is None:
+                        state['entry_price'] = order.executed.price
+                    ep['buys'].append({
+                        'date': bt.num2date(order.executed.dt).date(),
+                        'size': order.executed.size,
+                        'price': order.executed.price,
+                        'reason': reason,
+                    })
+                else:
+                    ep['sells'].append({
+                        'date': bt.num2date(order.executed.dt).date(),
+                        'size': abs(order.executed.size),
+                        'price': order.executed.price,
+                        'reason': reason,
+                    })
+                    total_bought = sum(b['size'] for b in ep['buys'])
+                    total_sold = sum(s['size'] for s in ep['sells'])
+                    if total_sold >= total_bought > 0:
+                        self._finalize_episode(order.data)
+
             self.order_log.append({
                 'date': bt.num2date(order.executed.dt).date(),
-                'ts_code': ts_code,
-                'side': side,
+                'ts_code': order.data._name,
+                'side': 'buy' if order.isbuy() else 'sell',
                 'size': order.executed.size,
                 'price': order.executed.price,
+                'reason': reason,
+                'episode': episode_num,
             })
             for d, o in list(self.orders.items()):
                 if o is order:
@@ -119,6 +198,7 @@ class MyStrategy(bt.Strategy):
                 if state['in_ma60_obs']:
                     if close < ma60:
                         o = self.close(data=d, exectype=bt.Order.Market)
+                        self.order_reasons[id(o)] = 'MA60_stop'
                         self.orders[d] = o
                         self._reset_state(d)
                         continue
@@ -132,6 +212,7 @@ class MyStrategy(bt.Strategy):
                     if state['in_ma25_obs']:
                         if close < ma25:
                             o = self.close(data=d, exectype=bt.Order.Market)
+                            self.order_reasons[id(o)] = 'MA25_stop'
                             self.orders[d] = o
                             self._reset_state(d)
                             continue
@@ -145,6 +226,7 @@ class MyStrategy(bt.Strategy):
                     sell_size = int(pos.size / 3 / 100) * 100
                     if sell_size > 0:
                         o = self.sell(data=d, size=sell_size, exectype=bt.Order.Market)
+                        self.order_reasons[id(o)] = 'take_profit_1'
                         self.orders[d] = o
                         state['take_profit_count'] = 1
                         continue
@@ -152,6 +234,7 @@ class MyStrategy(bt.Strategy):
                     sell_size = int(pos.size / 3 / 100) * 100
                     if sell_size > 0:
                         o = self.sell(data=d, size=sell_size, exectype=bt.Order.Market)
+                        self.order_reasons[id(o)] = 'take_profit_2'
                         self.orders[d] = o
                         state['take_profit_count'] = 2
                         continue
@@ -171,6 +254,7 @@ class MyStrategy(bt.Strategy):
                             add_size = int(self.position_limit / 3 / close / 100) * 100
                             if add_size > 0:
                                 o = self.buy(data=d, size=add_size)
+                                self.order_reasons[id(o)] = 'add_on'
                                 self.orders[d] = o
                                 state['add_count'] += 1
 
@@ -208,4 +292,5 @@ class MyStrategy(bt.Strategy):
                     continue
 
                 o = self.buy(data=d, size=buy_size)
+                self.order_reasons[id(o)] = 'initial_buy'
                 self.orders[d] = o
