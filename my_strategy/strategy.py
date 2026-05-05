@@ -44,6 +44,8 @@ class MyStrategy(bt.Strategy):
     def __init__(self):
         self.position_limit = self.p.initial_cash / self.p.max_positions
 
+        self.atr = {d: bt.indicators.ATR(d, period=self.p.atr_period) for d in self.datas}
+
         self.stock_state = {}
         for d in self.datas:
             self.stock_state[d] = {
@@ -53,6 +55,9 @@ class MyStrategy(bt.Strategy):
                 'entry_price': None,
                 'big_candle_seen': False,
                 'add_count': 0,
+                'tp1_pct': None,
+                'tp2_pct': None,
+                'initial_size': None,
             }
 
         self.order_log = []
@@ -83,6 +88,9 @@ class MyStrategy(bt.Strategy):
             'entry_price': None,
             'big_candle_seen': False,
             'add_count': 0,
+            'tp1_pct': None,
+            'tp2_pct': None,
+            'initial_size': None,
         }
 
     def _has_pending_order(self, d):
