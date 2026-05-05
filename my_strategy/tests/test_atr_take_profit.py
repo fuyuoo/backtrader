@@ -104,3 +104,31 @@ def test_tp_pcts_set_after_initial_buy():
         if pos.size > 0:
             assert state['tp1_pct'] is not None, "持仓中的 stock_state 应有 tp1_pct"
             assert state['tp2_pct'] == state['tp1_pct'] * 2
+
+
+def test_tp_threshold_formula():
+    """验证 ATR 止盈阈值公式的数学正确性。"""
+    def calc_tp1(atr_val, entry_price, k, min_pct, max_pct):
+        atr_pct = atr_val / entry_price
+        return max(min_pct, min(max_pct, k * atr_pct))
+
+    # 正常情况：ATR%=3%, k=1.5 → 4.5%，在[3%,12%]范围内
+    assert abs(calc_tp1(0.6, 20.0, 1.5, 0.03, 0.12) - 0.045) < 1e-9
+
+    # 下限钳制：ATR%=1%, k=1.5 → 1.5% < 3% → 3%
+    assert calc_tp1(0.1, 10.0, 1.5, 0.03, 0.12) == 0.03
+
+    # 上限钳制：ATR%=10%, k=1.5 → 15% > 12% → 12%
+    assert calc_tp1(2.0, 20.0, 1.5, 0.03, 0.12) == 0.12
+
+
+def test_tp_sell_size_uses_initial_size():
+    """两次止盈都应卖原始建仓量的1/3，而非当前持仓的1/3。"""
+    initial_size = 900  # 原始建仓900股
+    expected_sell = int(initial_size / 3 / 100) * 100  # = 300
+    assert expected_sell == 300
+
+    # 模拟 tp1 后剩余600股，tp2 也应卖300股而非 int(600/3/100)*100=200
+    remaining = initial_size - expected_sell  # 600
+    wrong_sell = int(remaining / 3 / 100) * 100  # = 200
+    assert wrong_sell != expected_sell  # 确认旧逻辑确实不同

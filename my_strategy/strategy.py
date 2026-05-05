@@ -256,19 +256,20 @@ class MyStrategy(bt.Strategy):
                     elif close < ma25:
                         state['in_ma25_obs'] = True
 
-                # 止盈（以原始建仓价为基准）
-                if state['take_profit_count'] == 0 and pnl_pct >= self.p.take_profit_1_pct:
-                    sell_size = int(pos.size / 3 / 100) * 100
-                    if sell_size > 0:
-                        o = self.sell(data=d, size=sell_size, exectype=bt.Order.Market)
+                # 止盈（阈值用 ATR 动态值，卖出量用原始建仓量的1/3）
+                tp1 = state['tp1_pct'] or self.p.take_profit_1_pct
+                tp2 = state['tp2_pct'] or self.p.take_profit_2_pct
+                tp_sell_size = int((state['initial_size'] or pos.size) / 3 / 100) * 100
+                if state['take_profit_count'] == 0 and pnl_pct >= tp1:
+                    if tp_sell_size > 0:
+                        o = self.sell(data=d, size=tp_sell_size, exectype=bt.Order.Market)
                         self.order_reasons[o.ref] = 'take_profit_1'
                         self.orders[d] = o
                         state['take_profit_count'] = 1
                         continue
-                elif state['take_profit_count'] == 1 and pnl_pct >= self.p.take_profit_2_pct:
-                    sell_size = int(pos.size / 3 / 100) * 100
-                    if sell_size > 0:
-                        o = self.sell(data=d, size=sell_size, exectype=bt.Order.Market)
+                elif state['take_profit_count'] == 1 and pnl_pct >= tp2:
+                    if tp_sell_size > 0:
+                        o = self.sell(data=d, size=tp_sell_size, exectype=bt.Order.Market)
                         self.order_reasons[o.ref] = 'take_profit_2'
                         self.orders[d] = o
                         state['take_profit_count'] = 2
