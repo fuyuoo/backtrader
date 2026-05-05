@@ -200,16 +200,16 @@ def _enrich_trade_summary(summary_df, cfg):
                 )
                 row['ma_alignment'] = _classify_ma_alignment(r)
                 row['macd_zone'] = _classify_macd_zone(r)
-                row['entry_circ_mv'] = (
-                    round(float(r['circ_mv']), 2)
-                    if 'circ_mv' in ind_df.columns and pd.notna(r.get('circ_mv'))
-                    else None
-                )
-                row['entry_week_kdj_j'] = (
-                    round(float(r['week_kdj_j']), 2)
-                    if 'week_kdj_j' in ind_df.columns and pd.notna(r.get('week_kdj_j'))
-                    else None
-                )
+                circ_mv_val = r.get('circ_mv') if 'circ_mv' in ind_df.columns else None
+                try:
+                    row['entry_circ_mv'] = round(float(circ_mv_val), 2) if pd.notna(circ_mv_val) else None
+                except (ValueError, TypeError):
+                    row['entry_circ_mv'] = None
+                week_kdj_j_val = r.get('week_kdj_j') if 'week_kdj_j' in ind_df.columns else None
+                try:
+                    row['entry_week_kdj_j'] = round(float(week_kdj_j_val), 2) if pd.notna(week_kdj_j_val) else None
+                except (ValueError, TypeError):
+                    row['entry_week_kdj_j'] = None
                 row['entry_week_macd_zone'] = (
                     r.get('week_macd_zone')
                     if 'week_macd_zone' in ind_df.columns and pd.notna(r.get('week_macd_zone'))
