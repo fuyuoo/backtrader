@@ -174,10 +174,15 @@ def _enrich_trade_summary(summary_df, cfg):
 
             if entry_date in ind_df.index:
                 r = ind_df.loc[entry_date]
+                if isinstance(r, pd.DataFrame):
+                    r = r.iloc[0]
                 kdj_j = r.get('kdj_j') if 'kdj_j' in ind_df.columns else None
                 ma60 = r.get('ma60')
                 close = r.get('close')
-                row['entry_kdj_j'] = round(float(kdj_j), 2) if pd.notna(kdj_j) else None
+                try:
+                    row['entry_kdj_j'] = round(float(kdj_j), 2) if pd.notna(kdj_j) else None
+                except (ValueError, TypeError):
+                    row['entry_kdj_j'] = None
                 row['entry_ma60_dist_pct'] = (
                     round((close - ma60) / ma60 * 100, 2)
                     if pd.notna(ma60) and ma60 > 0 and pd.notna(close)
