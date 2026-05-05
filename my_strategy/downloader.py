@@ -93,6 +93,42 @@ def download_stock(ts_code, start_date, end_date, data_dir):
     df.to_csv(csv_path, index=False)
 
 
+def download_weekly(ts_code, start_date, end_date, data_dir):
+    """下载周线 OHLC，存为 {ts_code}_weekly.csv。"""
+    csv_path = Path(data_dir) / f"{ts_code}_weekly.csv"
+    chunks = []
+    for seg_start, seg_end in _year_chunks(start_date, end_date):
+        seg = ts.pro_bar(ts_code=ts_code, adj=None, freq='W',
+                         start_date=seg_start, end_date=seg_end)
+        if seg is not None and not seg.empty:
+            chunks.append(seg)
+        time.sleep(0.2)
+    if not chunks:
+        return
+    df = pd.concat(chunks, ignore_index=True)
+    df['trade_date'] = pd.to_datetime(df['trade_date'])
+    df = df.drop_duplicates(subset='trade_date').sort_values('trade_date').reset_index(drop=True)
+    df[['trade_date', 'open', 'high', 'low', 'close']].to_csv(csv_path, index=False)
+
+
+def download_monthly(ts_code, start_date, end_date, data_dir):
+    """下载月线 OHLC，存为 {ts_code}_monthly.csv。"""
+    csv_path = Path(data_dir) / f"{ts_code}_monthly.csv"
+    chunks = []
+    for seg_start, seg_end in _year_chunks(start_date, end_date):
+        seg = ts.pro_bar(ts_code=ts_code, adj=None, freq='M',
+                         start_date=seg_start, end_date=seg_end)
+        if seg is not None and not seg.empty:
+            chunks.append(seg)
+        time.sleep(0.2)
+    if not chunks:
+        return
+    df = pd.concat(chunks, ignore_index=True)
+    df['trade_date'] = pd.to_datetime(df['trade_date'])
+    df = df.drop_duplicates(subset='trade_date').sort_values('trade_date').reset_index(drop=True)
+    df[['trade_date', 'open', 'high', 'low', 'close']].to_csv(csv_path, index=False)
+
+
 def download_index(ts_code, start_date, end_date, data_dir):
     """下载指数日线数据（无复权，直接存为 {ts_code}.csv）。"""
     csv_path = Path(data_dir) / f"{ts_code}.csv"
@@ -140,6 +176,8 @@ def main():
     for i, ts_code in enumerate(stocks):
         try:
             download_stock(ts_code, cfg['start_date'], cfg['end_date'], data_dir)
+            download_weekly(ts_code, cfg['start_date'], cfg['end_date'], data_dir)
+            download_monthly(ts_code, cfg['start_date'], cfg['end_date'], data_dir)
             print(f"[{i+1}/{len(stocks)}] {ts_code} OK")
         except Exception as e:
             logging.error(f"{ts_code}: {e}")
