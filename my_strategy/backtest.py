@@ -4,6 +4,7 @@ import pandas as pd
 import backtrader as bt
 from pathlib import Path
 from strategy import StockData, StockCommission, MyStrategy
+from calc_indicators import compute_indicators
 
 
 def load_config(config_path='config.json'):
@@ -236,6 +237,65 @@ def _compute_benchmarks_returns(cfg):
         annualized = ((df['close'].iloc[-1] / df['close'].iloc[0]) ** (1 / years_span) - 1) * 100
         results.append({'code': code, 'annual': annual, 'annualized': round(annualized, 2)})
     return results
+
+
+def run_index_strategy(cfg, index_code):
+    """对单个指数独立运行策略（max_positions=1，不与股票池竞争）。
+    返回 dict: code / annual_return(年化%) / total_return(总%) / win_rate(%) / n_trades。
+    """
+    path = Path(cfg['data_dir']) / f"{index_code}.csv"
+    if not path.exists():
+        return None
+
+    df = pd.read_csv(path, parse_dates=['trade_date'])
+    df = df.sort_values('trade_date').reset_index(drop=True)
+    df = compute_indicators(df)
+
+    start = datetime.datetime.strptime(cfg['backTest_Start_data'], '%Y%m%d')
+    end = datetime.datetime.strptime(cfg['backTest_end_data'], '%Y%m%d')
+
+    feed = StockData(dataname=df, fromdate=start, todate=end)
+
+    cerebro = bt.Cerebro()
+    cerebro.adddata(feed, name=index_code)
+    cerebro.broker.set_cash(cfg['initial_cash'])
+    cerebro.broker.set_coc(True)
+    comm = StockCommission(
+        commission=cfg['commission_rate'],
+        stamp_duty=cfg['stamp_duty'],
+    )
+    cerebro.broker.addcommissioninfo(comm)
+    cerebro.broker.set_slippage_perc(perc=0.0001)
+    cerebro.addstrategy(
+        MyStrategy,
+        initial_cash=cfg['initial_cash'],
+        max_positions=1,
+        take_profit_1_pct=cfg['take_profit_1_pct'],
+        take_profit_2_pct=cfg['take_profit_2_pct'],
+        dea_lookback_days=cfg['dea_lookback_days'],
+    )
+    cerebro.addanalyzer(bt.analyzers.Returns, _name='_Returns', tann=252)
+    cerebro.addanalyzer(bt.analyzers.TimeReturn, _name='_TimeReturn')
+
+    result = cerebro.run()
+    r = result[0]
+
+    annual_return = r.analyzers._Returns.get_analysis().get('rnorm100', 0.0)
+    time_return = pd.Series(r.analyzers._TimeReturn.get_analysis())
+    total_return = ((1 + time_return).cumprod().iloc[-1] - 1) * 100 if not time_return.empty else 0.0
+
+    trade_df = pd.DataFrame(r.trade_log)
+    completed = trade_df[trade_df['status'] == 'completed'] if not trade_df.empty else pd.DataFrame()
+    win_rate = (completed['return_pct'] > 0).mean() * 100 if not completed.empty else 0.0
+    n_trades = len(completed)
+
+    return {
+        'code': index_code,
+        'annual_return': round(annual_return, 2) if isinstance(annual_return, float) else 0.0,
+        'total_return': round(total_return, 2),
+        'win_rate': round(win_rate, 1),
+        'n_trades': n_trades,
+    }
 
 
 def _print_entry_quality_stats(df):
@@ -489,6 +549,25 @@ def print_results(result, cfg):
         results_dir / 'equity_curve.png', dpi=150
     )
     print(f"资金曲线已保存到 {results_dir / 'equity_curve.png'}")
+
+    # 指数策略模拟
+    benchmark_codes = cfg.get('benchmark_codes') or []
+    if not benchmark_codes and cfg.get('benchmark_code'):
+        benchmark_codes = [cfg['benchmark_code']]
+    if benchmark_codes:
+        print("\n========== 指数策略回测 ==========")
+        print(f"{'指数':<14}{'年化收益':>10}{'总收益':>10}{'胜率':>8}{'笔数':>6}")
+        print("-" * 50)
+        for code in benchmark_codes:
+            res = run_index_strategy(cfg, code)
+            if res is None:
+                print(f"{code:<14}  {'数据文件不存在':>30}")
+                continue
+            print(f"{res['code']:<14}{res['annual_return']:>+9.2f}%"
+                  f"{res['total_return']:>+9.2f}%"
+                  f"{res['win_rate']:>7.1f}%"
+                  f"{res['n_trades']:>6}")
+        print("==================================\n")
 
 
 def main():
