@@ -98,6 +98,9 @@ def download_sector_info(data_dir):
     """从 Tushare 下载股票行业分类，存为 stock_sector.csv。"""
     pro = ts.pro_api()
     df = pro.stock_basic(fields='ts_code,industry')
+    if df is None or df.empty:
+        print("警告：未获取到行业分类数据")
+        return
     df.to_csv(Path(data_dir) / 'stock_sector.csv', index=False)
     print(f"行业分类已保存：{len(df)} 条 → {Path(data_dir) / 'stock_sector.csv'}")
 
