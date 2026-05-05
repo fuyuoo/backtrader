@@ -367,7 +367,7 @@ def _print_trade_stats(df, annual_returns=None, benchmarks=None,
                 print(row)
             # 全区间行（年化）
             strat_ann_str = f"{strategy_annualized:>+7.2f}%" if isinstance(strategy_annualized, float) else "  N/A   "
-            row = f"{'全区间':<6}  {strat_ann_str:>8}"
+            row = f"{'全区间':<6}  {strat_ann_str}"
             for bm in benchmarks:
                 excess = strategy_annualized - bm['annualized'] if isinstance(strategy_annualized, float) else None
                 bm_str = f"{bm['annualized']:>+7.2f}%"
@@ -380,7 +380,7 @@ def _print_trade_stats(df, annual_returns=None, benchmarks=None,
             for y in years:
                 print(f"{y:<6}  {annual_returns[y] * 100:>+7.2f}%")
             strat_ann_str = f"{strategy_annualized:>+7.2f}%" if isinstance(strategy_annualized, float) else "  N/A   "
-            print(f"{'全区间':<6}  {strat_ann_str:>8}")
+            print(f"{'全区间':<6}  {strat_ann_str}")
 
     winners = completed[completed['return_pct'] > 0]
     losers = completed[completed['return_pct'] <= 0]
