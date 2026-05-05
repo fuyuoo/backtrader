@@ -59,6 +59,7 @@ class MyStrategy(bt.Strategy):
             for d in self.datas
         }
         self.trade_log = []
+        self.position_count_log = []
 
     def _current_position_count(self):
         return sum(1 for d in self.datas if self.getposition(d).size > 0)
@@ -96,9 +97,12 @@ class MyStrategy(bt.Strategy):
             take_profit_count = sum(
                 1 for s in sells if s['reason'] in ('take_profit_1', 'take_profit_2')
             )
-            exit_reason = {'MA60_stop': 'MA60止损', 'MA25_stop': 'MA25清仓'}.get(
-                sells[-1]['reason'], sells[-1]['reason']
-            )
+            exit_reason = {
+                'MA60_stop': 'MA60止损',
+                'MA25_stop': 'MA25清仓',
+                'take_profit_1': '止盈1',
+                'take_profit_2': '止盈2',
+            }.get(sells[-1]['reason'], sells[-1]['reason'])
         else:
             avg_exit_price = exit_date = holding_days = gross_pnl = return_pct = None
             take_profit_count = 0
@@ -130,7 +134,7 @@ class MyStrategy(bt.Strategy):
 
     def notify_order(self, order):
         if order.status in (order.Completed, order.Canceled, order.Rejected):
-            reason = self.order_reasons.pop(id(order), 'unknown')
+            reason = self.order_reasons.pop(order.ref, 'unknown')
             ep = self.episode_state[order.data]
             episode_num = ep['episode_num']  # capture before possible finalize
 
@@ -198,7 +202,7 @@ class MyStrategy(bt.Strategy):
                 if state['in_ma60_obs']:
                     if close < ma60:
                         o = self.close(data=d, exectype=bt.Order.Market)
-                        self.order_reasons[id(o)] = 'MA60_stop'
+                        self.order_reasons[o.ref] = 'MA60_stop'
                         self.orders[d] = o
                         self._reset_state(d)
                         continue
@@ -212,7 +216,7 @@ class MyStrategy(bt.Strategy):
                     if state['in_ma25_obs']:
                         if close < ma25:
                             o = self.close(data=d, exectype=bt.Order.Market)
-                            self.order_reasons[id(o)] = 'MA25_stop'
+                            self.order_reasons[o.ref] = 'MA25_stop'
                             self.orders[d] = o
                             self._reset_state(d)
                             continue
@@ -226,7 +230,7 @@ class MyStrategy(bt.Strategy):
                     sell_size = int(pos.size / 3 / 100) * 100
                     if sell_size > 0:
                         o = self.sell(data=d, size=sell_size, exectype=bt.Order.Market)
-                        self.order_reasons[id(o)] = 'take_profit_1'
+                        self.order_reasons[o.ref] = 'take_profit_1'
                         self.orders[d] = o
                         state['take_profit_count'] = 1
                         continue
@@ -234,7 +238,7 @@ class MyStrategy(bt.Strategy):
                     sell_size = int(pos.size / 3 / 100) * 100
                     if sell_size > 0:
                         o = self.sell(data=d, size=sell_size, exectype=bt.Order.Market)
-                        self.order_reasons[id(o)] = 'take_profit_2'
+                        self.order_reasons[o.ref] = 'take_profit_2'
                         self.orders[d] = o
                         state['take_profit_count'] = 2
                         continue
@@ -254,7 +258,7 @@ class MyStrategy(bt.Strategy):
                             add_size = int(self.position_limit / 3 / close / 100) * 100
                             if add_size > 0:
                                 o = self.buy(data=d, size=add_size)
-                                self.order_reasons[id(o)] = 'add_on'
+                                self.order_reasons[o.ref] = 'add_on'
                                 self.orders[d] = o
                                 state['add_count'] += 1
 
@@ -292,5 +296,7 @@ class MyStrategy(bt.Strategy):
                     continue
 
                 o = self.buy(data=d, size=buy_size)
-                self.order_reasons[id(o)] = 'initial_buy'
+                self.order_reasons[o.ref] = 'initial_buy'
                 self.orders[d] = o
+
+        self.position_count_log.append(self._current_position_count())
