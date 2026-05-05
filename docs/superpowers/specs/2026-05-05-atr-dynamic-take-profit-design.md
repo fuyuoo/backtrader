@@ -91,11 +91,22 @@ tp_sell_size = int((state['initial_size'] or pos.size) / 3 / 100) * 100
 
 原有 `take_profit_1_pct` / `take_profit_2_pct` 保留作 fallback（ATR 数据不足时使用）。
 
+## 输出到回测 CSV
+
+`_finalize_episode` 中在 `trade_log` 记录里新增两个字段：
+
+| 字段 | 含义 |
+|------|------|
+| `tp1_pct` | 本 episode 实际使用的止盈1阈值（ATR动态值或fallback固定值） |
+| `tp2_pct` | 本 episode 实际使用的止盈2阈值 |
+
+这两个值从 `stock_state` 读取，在 episode 结束时一并写入，最终体现在 `results/trade_summary.csv` 中。
+
 ## 改动文件
 
 | 文件 | 改动内容 |
 |------|----------|
-| `my_strategy/strategy.py` | 新增ATR指标初始化；`stock_state` 新增 `tp1_pct`/`tp2_pct`/`initial_size`；`notify_order` 中计算并写入；`next()` 中替换固定阈值和卖出数量 |
+| `my_strategy/strategy.py` | 新增ATR指标初始化；`stock_state` 新增 `tp1_pct`/`tp2_pct`/`initial_size`；`notify_order` 中计算并写入；`next()` 中替换固定阈值和卖出数量；`_finalize_episode` 输出 `tp1_pct`/`tp2_pct` 到 trade_log |
 | `my_strategy/config.json` | 新增4个参数 |
 
 ## 边界情况
