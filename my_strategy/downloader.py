@@ -75,6 +75,33 @@ def download_stock(ts_code, start_date, end_date, data_dir):
     df.to_csv(csv_path, index=False)
 
 
+def download_index(ts_code, start_date, end_date, data_dir):
+    """下载指数日线数据（无复权，直接存为 {ts_code}.csv）。"""
+    csv_path = Path(data_dir) / f"{ts_code}.csv"
+    pro = ts.pro_api()
+    chunks = []
+    for seg_start, seg_end in _year_chunks(start_date, end_date):
+        seg = pro.index_daily(ts_code=ts_code, start_date=seg_start, end_date=seg_end)
+        if seg is not None and not seg.empty:
+            chunks.append(seg)
+        time.sleep(0.2)
+    if not chunks:
+        return
+    df = pd.concat(chunks, ignore_index=True)
+    df = df.rename(columns={'vol': 'volume'})
+    df['trade_date'] = pd.to_datetime(df['trade_date'])
+    df = df.drop_duplicates(subset='trade_date').sort_values('trade_date').reset_index(drop=True)
+    df[['trade_date', 'open', 'high', 'low', 'close', 'volume']].to_csv(csv_path, index=False)
+
+
+def download_sector_info(data_dir):
+    """从 Tushare 下载股票行业分类，存为 stock_sector.csv。"""
+    pro = ts.pro_api()
+    df = pro.stock_basic(fields='ts_code,industry')
+    df.to_csv(Path(data_dir) / 'stock_sector.csv', index=False)
+    print(f"行业分类已保存：{len(df)} 条 → {Path(data_dir) / 'stock_sector.csv'}")
+
+
 def main():
     cfg = load_config()
     ts.set_token(cfg['tushare_token'])
@@ -90,6 +117,25 @@ def main():
         except Exception as e:
             logging.error(f"{ts_code}: {e}")
             print(f"[{i+1}/{len(stocks)}] {ts_code} FAILED: {e}")
+
+    # 下载基准指数（不做复权）
+    benchmark_codes = cfg.get('benchmark_codes') or []
+    if not benchmark_codes and cfg.get('benchmark_code'):
+        benchmark_codes = [cfg['benchmark_code']]
+    for code in benchmark_codes:
+        try:
+            download_index(code, cfg['start_date'], cfg['end_date'], data_dir)
+            print(f"基准指数 {code} OK")
+        except Exception as e:
+            logging.error(f"{code}: {e}")
+            print(f"基准指数 {code} FAILED: {e}")
+
+    # 下载行业分类
+    try:
+        download_sector_info(data_dir)
+    except Exception as e:
+        logging.error(f"sector info: {e}")
+        print(f"行业分类下载失败: {e}")
 
 
 if __name__ == '__main__':
