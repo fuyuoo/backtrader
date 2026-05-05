@@ -1,5 +1,6 @@
 import json
 import datetime
+import statistics
 import pandas as pd
 import backtrader as bt
 from pathlib import Path
@@ -233,7 +234,8 @@ def _compute_benchmarks_returns(cfg):
             int(y): (grp['close'].iloc[-1] / grp['close'].iloc[0] - 1) * 100
             for y, grp in df.groupby('year')
         }
-        years_span = (df['trade_date'].iloc[-1] - df['trade_date'].iloc[0]).days / 365
+        trading_days = len(df)
+        years_span = trading_days / 252
         annualized = ((df['close'].iloc[-1] / df['close'].iloc[0]) ** (1 / years_span) - 1) * 100
         results.append({'code': code, 'annual': annual, 'annualized': round(annualized, 2)})
     return results
@@ -346,7 +348,7 @@ def _print_entry_quality_stats(df):
         for _, row in grp.iterrows():
             print(f"{str(row['_kdj_bucket']):<12}{int(row['笔数']):>6}"
                   f"{row['胜率']:>7.1f}%{row['平均收益']:>+9.2f}%")
-        completed.drop(columns=['_kdj_bucket'], inplace=True)
+        completed = completed.drop(columns=['_kdj_bucket'])
 
     # MA60 距离分桶
     if 'entry_ma60_dist_pct' in completed.columns and completed['entry_ma60_dist_pct'].notna().any():
@@ -362,7 +364,7 @@ def _print_entry_quality_stats(df):
         for _, row in grp.iterrows():
             print(f"{str(row['_dist_bucket']):>10}{int(row['笔数']):>6}"
                   f"{row['胜率']:>7.1f}%{row['平均收益']:>+9.2f}%")
-        completed.drop(columns=['_dist_bucket'], inplace=True)
+        completed = completed.drop(columns=['_dist_bucket'])
 
     # 行业 Top 10
     if 'industry' in completed.columns and completed['industry'].notna().any():
@@ -392,7 +394,6 @@ def _print_trade_stats(df, annual_returns=None, benchmarks=None,
     n_completed = len(completed)
     print(f"总交易笔数：{total}（已完成 {n_completed}，未平仓 {total - n_completed}）")
     if position_count_log:
-        import statistics
         pc = position_count_log
         print(f"最大同时持仓：{max(pc)} 只")
         print(f"最小同时持仓：{min(pc)} 只")
@@ -414,7 +415,7 @@ def _print_trade_stats(df, annual_returns=None, benchmarks=None,
                 short = bm['code'].split('.')[0]
                 header += f"  {short:>8}  {'超额':>7}"
             print(header)
-            print("-" * (6 + 2 + 8 + len(benchmarks) * (2 + 8 + 2 + 7)))
+            print("-" * (6 + 2 + 8 + len(benchmarks) * (2 + 9 + 2 + 8)))
             for y in years:
                 s = annual_returns[y] * 100
                 row = f"{y:<6}  {s:>+7.2f}%"
