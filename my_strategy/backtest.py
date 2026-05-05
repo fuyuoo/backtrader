@@ -323,15 +323,21 @@ def _print_entry_quality_stats(df):
     print("==================================\n")
 
 
-def _print_trade_stats(df, annual_returns=None, benchmarks=None, max_cap_util=None):
+def _print_trade_stats(df, annual_returns=None, benchmarks=None,
+                       position_count_log=None, strategy_annualized=None):
     """benchmarks: list[dict]，每项含 code / annual {year: pct} / annualized pct。"""
     completed = df[df['status'] == 'completed'].copy() if 'status' in df.columns else pd.DataFrame()
     print("\n========== 交易统计 ==========")
     total = len(df)
     n_completed = len(completed)
     print(f"总交易笔数：{total}（已完成 {n_completed}，未平仓 {total - n_completed}）")
-    if max_cap_util is not None:
-        print(f"最大资金占用率：{max_cap_util * 100:.1f}%")
+    if position_count_log:
+        import statistics
+        pc = position_count_log
+        print(f"最大同时持仓：{max(pc)} 只")
+        print(f"最小同时持仓：{min(pc)} 只")
+        print(f"平均同时持仓：{sum(pc)/len(pc):.1f} 只")
+        print(f"中位数持仓：{statistics.median(pc):.1f} 只")
     if completed.empty:
         print("无已完成交易")
         print("==============================\n")
@@ -359,11 +365,22 @@ def _print_trade_stats(df, annual_returns=None, benchmarks=None, max_cap_util=No
                     else:
                         row += f"  {'N/A':>8}  {'N/A':>7}"
                 print(row)
+            # 全区间行（年化）
+            strat_ann_str = f"{strategy_annualized:>+7.2f}%" if isinstance(strategy_annualized, float) else "  N/A   "
+            row = f"{'全区间':<6}  {strat_ann_str:>8}"
+            for bm in benchmarks:
+                excess = strategy_annualized - bm['annualized'] if isinstance(strategy_annualized, float) else None
+                bm_str = f"{bm['annualized']:>+7.2f}%"
+                exc_str = f"{excess:>+6.2f}%" if excess is not None else "   N/A "
+                row += f"  {bm_str}  {exc_str}"
+            print(row)
         else:
             print(f"{'年份':<6}  {'策略收益':>8}")
             print("-" * 20)
             for y in years:
                 print(f"{y:<6}  {annual_returns[y] * 100:>+7.2f}%")
+            strat_ann_str = f"{strategy_annualized:>+7.2f}%" if isinstance(strategy_annualized, float) else "  N/A   "
+            print(f"{'全区间':<6}  {strat_ann_str:>8}")
 
     winners = completed[completed['return_pct'] > 0]
     losers = completed[completed['return_pct'] <= 0]
@@ -461,7 +478,8 @@ def print_results(result, cfg):
         summary_df if not summary_df.empty else pd.DataFrame(),
         annual_returns=annual_returns,
         benchmarks=benchmarks,
-        max_cap_util=getattr(r, 'max_capital_utilization', None),
+        position_count_log=getattr(r, 'position_count_log', None),
+        strategy_annualized=annual_ret if isinstance(annual_ret, float) else None,
     )
     _print_entry_quality_stats(summary_df if not summary_df.empty else pd.DataFrame())
 
