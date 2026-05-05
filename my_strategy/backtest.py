@@ -238,6 +238,91 @@ def _compute_benchmarks_returns(cfg):
     return results
 
 
+def _print_entry_quality_stats(df):
+    """打印进场质量聚合统计（只统计 completed 交易）。"""
+    completed = df[df['status'] == 'completed'].copy() if 'status' in df.columns else pd.DataFrame()
+    if completed.empty:
+        return
+
+    def _group_stats(group_col):
+        grp = completed.groupby(group_col).agg(
+            笔数=('return_pct', 'count'),
+            胜率=('return_pct', lambda x: (x > 0).mean() * 100),
+            平均收益=('return_pct', 'mean'),
+        ).reset_index()
+        return grp
+
+    print("\n========== 进场质量分析 ==========")
+
+    # MA 排列
+    if 'ma_alignment' in completed.columns and completed['ma_alignment'].notna().any():
+        print("\n--- MA 排列状态 ---")
+        grp = _group_stats('ma_alignment')
+        print(f"{'MA排列':<10}{'笔数':>6}{'胜率':>8}{'平均收益':>10}")
+        print("-" * 36)
+        for _, row in grp.iterrows():
+            print(f"{str(row['ma_alignment']):<10}{int(row['笔数']):>6}"
+                  f"{row['胜率']:>7.1f}%{row['平均收益']:>+9.2f}%")
+
+    # MACD 区间
+    if 'macd_zone' in completed.columns and completed['macd_zone'].notna().any():
+        print("\n--- MACD 区间 ---")
+        grp = _group_stats('macd_zone')
+        print(f"{'MACD区间':<10}{'笔数':>6}{'胜率':>8}{'平均收益':>10}")
+        print("-" * 36)
+        for _, row in grp.sort_values('macd_zone').iterrows():
+            print(f"{str(row['macd_zone']):<10}{int(row['笔数']):>6}"
+                  f"{row['胜率']:>7.1f}%{row['平均收益']:>+9.2f}%")
+
+    # KDJ_J 分桶
+    if 'entry_kdj_j' in completed.columns and completed['entry_kdj_j'].notna().any():
+        print("\n--- KDJ_J 分桶 ---")
+        bins = [-float('inf'), 20, 50, 80, float('inf')]
+        labels = ['<20', '20-50', '50-80', '>80']
+        completed['_kdj_bucket'] = pd.cut(completed['entry_kdj_j'], bins=bins, labels=labels)
+        grp = _group_stats('_kdj_bucket')
+        print(f"{'KDJ_J区间':<12}{'笔数':>6}{'胜率':>8}{'平均收益':>10}")
+        print("-" * 38)
+        for _, row in grp.iterrows():
+            print(f"{str(row['_kdj_bucket']):<12}{int(row['笔数']):>6}"
+                  f"{row['胜率']:>7.1f}%{row['平均收益']:>+9.2f}%")
+        completed.drop(columns=['_kdj_bucket'], inplace=True)
+
+    # MA60 距离分桶
+    if 'entry_ma60_dist_pct' in completed.columns and completed['entry_ma60_dist_pct'].notna().any():
+        print("\n--- 进场距 MA60 距离 ---")
+        bins = [0, 1, 3, 5, float('inf')]
+        labels = ['≤1%', '1-3%', '3-5%', '>5%']
+        completed['_dist_bucket'] = pd.cut(
+            completed['entry_ma60_dist_pct'].clip(lower=0), bins=bins, labels=labels
+        )
+        grp = _group_stats('_dist_bucket')
+        print(f"{'距MA60':>10}{'笔数':>6}{'胜率':>8}{'平均收益':>10}")
+        print("-" * 36)
+        for _, row in grp.iterrows():
+            print(f"{str(row['_dist_bucket']):>10}{int(row['笔数']):>6}"
+                  f"{row['胜率']:>7.1f}%{row['平均收益']:>+9.2f}%")
+        completed.drop(columns=['_dist_bucket'], inplace=True)
+
+    # 行业 Top 10
+    if 'industry' in completed.columns and completed['industry'].notna().any():
+        print("\n--- 按行业汇总（总盈亏 Top 10）---")
+        grp = completed.groupby('industry').agg(
+            笔数=('return_pct', 'count'),
+            胜率=('return_pct', lambda x: (x > 0).mean() * 100),
+            总盈亏=('gross_pnl', 'sum'),
+            平均收益=('return_pct', 'mean'),
+        ).reset_index()
+        top10 = grp.nlargest(10, '总盈亏')
+        print(f"{'行业':<12}{'笔数':>5}{'胜率':>8}{'总盈亏':>14}{'平均收益':>10}")
+        print("-" * 51)
+        for _, row in top10.iterrows():
+            print(f"{str(row['industry']):<12}{int(row['笔数']):>5}"
+                  f"{row['胜率']:>7.1f}%{row['总盈亏']:>14,.0f}{row['平均收益']:>+9.2f}%")
+
+    print("==================================\n")
+
+
 def _print_trade_stats(df, annual_returns=None, benchmarks=None, max_cap_util=None):
     """benchmarks: list[dict]，每项含 code / annual {year: pct} / annualized pct。"""
     completed = df[df['status'] == 'completed'].copy() if 'status' in df.columns else pd.DataFrame()
@@ -378,6 +463,7 @@ def print_results(result, cfg):
         benchmarks=benchmarks,
         max_cap_util=getattr(r, 'max_capital_utilization', None),
     )
+    _print_entry_quality_stats(summary_df if not summary_df.empty else pd.DataFrame())
 
     time_return = pd.Series(r.analyzers._TimeReturn.get_analysis())
     equity = (1 + time_return).cumprod()
