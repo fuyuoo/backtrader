@@ -35,6 +35,10 @@ class MyStrategy(bt.Strategy):
         ('take_profit_1_pct', 0.05),
         ('take_profit_2_pct', 0.10),
         ('dea_lookback_days', 5),
+        ('atr_period', 20),
+        ('atr_multiplier', 1.5),
+        ('take_profit_min_pct', 0.03),
+        ('take_profit_max_pct', 0.12),
     )
 
     def __init__(self):
@@ -62,7 +66,14 @@ class MyStrategy(bt.Strategy):
         self.position_count_log = []
 
     def _current_position_count(self):
-        return sum(1 for d in self.datas if self.getposition(d).size > 0)
+        count = 0
+        for d in self.datas:
+            if self.getposition(d).size > 0:
+                count += 1
+            elif d in self.orders and self.orders[d] is not None and self.orders[d].alive():
+                # 空仓但已有 pending buy，算作即将持仓
+                count += 1
+        return count
 
     def _reset_state(self, d):
         self.stock_state[d] = {

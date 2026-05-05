@@ -91,6 +91,10 @@ def setup_cerebro(cfg, feeds):
         take_profit_1_pct=cfg['take_profit_1_pct'],
         take_profit_2_pct=cfg['take_profit_2_pct'],
         dea_lookback_days=cfg['dea_lookback_days'],
+        atr_period=cfg.get('atr_period', 20),
+        atr_multiplier=cfg.get('atr_multiplier', 1.5),
+        take_profit_min_pct=cfg.get('take_profit_min_pct', 0.03),
+        take_profit_max_pct=cfg.get('take_profit_max_pct', 0.12),
     )
 
     cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name='_AnnualReturn')
@@ -308,6 +312,10 @@ def run_index_strategy(cfg, index_code):
         take_profit_1_pct=cfg['take_profit_1_pct'],
         take_profit_2_pct=cfg['take_profit_2_pct'],
         dea_lookback_days=cfg['dea_lookback_days'],
+        atr_period=cfg.get('atr_period', 20),
+        atr_multiplier=cfg.get('atr_multiplier', 1.5),
+        take_profit_min_pct=cfg.get('take_profit_min_pct', 0.03),
+        take_profit_max_pct=cfg.get('take_profit_max_pct', 0.12),
     )
     cerebro.addanalyzer(bt.analyzers.Returns, _name='_Returns', tann=252)
     cerebro.addanalyzer(bt.analyzers.TimeReturn, _name='_TimeReturn')

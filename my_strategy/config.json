@@ -1,11 +1,11 @@
 {
   "tushare_token": "6c07eb83d0933edda3ee061585600d3940ff1bfef9beb0a0ab8bd7e3",
-  "start_date": "20180101",
-  "end_date": "20241231",
+  "start_date": "20000101",
+  "end_date": "20260101",
   "backTest_Start_data": "20190101",
-  "backTest_end_data": "20241231",
+  "backTest_end_data": "20240101",
   "initial_cash": 100000000,
-  "max_positions": 3,
+  "max_positions": 200,
   "commission_rate": 0.0003,
   "stamp_duty": 0.001,
   "stock_list_path": "stock_list.csv",
@@ -13,5 +13,10 @@
   "results_dir": "results/",
   "dea_lookback_days": 5,
   "take_profit_1_pct": 0.05,
-  "take_profit_2_pct": 0.10
+  "take_profit_2_pct": 0.10,
+  "atr_period": 20,
+  "atr_multiplier": 1.5,
+  "take_profit_min_pct": 0.03,
+  "take_profit_max_pct": 0.12,
+  "benchmark_codes": ["000300.SH", "000905.SH", "000001.SH"]
 }
