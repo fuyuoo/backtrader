@@ -97,3 +97,10 @@ def test_tp_pcts_set_after_initial_buy():
     st = result[0]
     buy_orders = [o for o in st.order_log if o['reason'] == 'initial_buy']
     assert len(buy_orders) > 0, "合成数据应触发至少一次买入"
+    # 如果仍有持仓，验证 tp1_pct 已被设置
+    for d in st.datas:
+        state = st.stock_state[d]
+        pos = st.getposition(d)
+        if pos.size > 0:
+            assert state['tp1_pct'] is not None, "持仓中的 stock_state 应有 tp1_pct"
+            assert state['tp2_pct'] == state['tp1_pct'] * 2
