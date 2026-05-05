@@ -71,7 +71,24 @@ def download_stock(ts_code, start_date, end_date, data_dir):
     df = df.drop_duplicates(subset='trade_date').sort_values('trade_date').reset_index(drop=True)
 
     df = _apply_qfq(df, pro, ts_code, start_date)
-    df = df[['trade_date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg']]
+    basic_chunks = []
+    for seg_start, seg_end in _year_chunks(start_date, end_date):
+        seg = pro.daily_basic(
+            ts_code=ts_code,
+            start_date=seg_start,
+            end_date=seg_end,
+            fields='trade_date,circ_mv',
+        )
+        if seg is not None and not seg.empty:
+            basic_chunks.append(seg)
+        time.sleep(0.2)
+    if basic_chunks:
+        basic_df = pd.concat(basic_chunks, ignore_index=True)
+        basic_df['trade_date'] = pd.to_datetime(basic_df['trade_date'])
+        df = df.merge(basic_df, on='trade_date', how='left')
+    else:
+        df['circ_mv'] = None
+    df = df[['trade_date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'circ_mv']]
     df.to_csv(csv_path, index=False)
 
 
@@ -94,15 +111,21 @@ def download_index(ts_code, start_date, end_date, data_dir):
     df[['trade_date', 'open', 'high', 'low', 'close', 'volume']].to_csv(csv_path, index=False)
 
 
-def download_sector_info(data_dir):
-    """从 Tushare 下载股票行业分类，存为 stock_sector.csv。"""
+def download_sector_info(data_dir, force=False):
+    """从 Tushare 下载股票行业分类，存为 stock_sector.csv。
+    行业分类基本不变，文件已存在时默认跳过；传 force=True 强制刷新。
+    """
+    csv_path = Path(data_dir) / 'stock_sector.csv'
+    if csv_path.exists() and not force:
+        print(f"行业分类已存在，跳过下载（如需刷新请传 force=True）")
+        return
     pro = ts.pro_api()
     df = pro.stock_basic(fields='ts_code,industry')
     if df is None or df.empty:
         print("警告：未获取到行业分类数据")
         return
-    df.to_csv(Path(data_dir) / 'stock_sector.csv', index=False)
-    print(f"行业分类已保存：{len(df)} 条 → {Path(data_dir) / 'stock_sector.csv'}")
+    df.to_csv(csv_path, index=False)
+    print(f"行业分类已保存：{len(df)} 条 → {csv_path}")
 
 
 def main():
