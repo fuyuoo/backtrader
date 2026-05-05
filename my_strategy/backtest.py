@@ -383,6 +383,61 @@ def _print_entry_quality_stats(df):
                   f"{row['胜率']:>7.1f}%{row['平均收益']:>+9.2f}%")
         completed = completed.drop(columns=['_kdj_bucket'])
 
+    # 市值分桶
+    if 'entry_circ_mv' in completed.columns and completed['entry_circ_mv'].notna().any():
+        print("\n--- 市值分桶（流通市值，亿元）---")
+        bins = [0, 50, 100, 300, 500, 1000, float('inf')]
+        labels = ['<50亿', '50-100亿', '100-300亿', '300-500亿', '500-1000亿', '>1000亿']
+        completed['_mv_bucket'] = pd.cut(completed['entry_circ_mv'], bins=bins, labels=labels)
+        total_n = len(completed)
+        grp = completed.groupby('_mv_bucket', observed=True).agg(
+            笔数=('return_pct', 'count'),
+            胜率=('return_pct', lambda x: (x > 0).mean() * 100),
+            平均收益=('return_pct', 'mean'),
+        ).reset_index()
+        print(f"{'市值档位':<14}{'笔数':>6}{'占比':>7}{'胜率':>8}{'平均收益':>10}")
+        print("-" * 47)
+        for _, row in grp.iterrows():
+            n = int(row['笔数'])
+            pct = n / total_n * 100
+            print(f"{str(row['_mv_bucket']):<14}{n:>6}{pct:>6.1f}%"
+                  f"{row['胜率']:>7.1f}%{row['平均收益']:>+9.2f}%")
+        completed = completed.drop(columns=['_mv_bucket'])
+
+    # 周 KDJ_J 分桶
+    if 'entry_week_kdj_j' in completed.columns and completed['entry_week_kdj_j'].notna().any():
+        print("\n--- 周 KDJ_J 分桶 ---")
+        bins = [-float('inf'), 20, 50, 80, float('inf')]
+        labels = ['<20', '20-50', '50-80', '>80']
+        completed['_wkdj_bucket'] = pd.cut(completed['entry_week_kdj_j'], bins=bins, labels=labels)
+        grp = _group_stats('_wkdj_bucket')
+        print(f"{'周KDJ_J区间':<12}{'笔数':>6}{'胜率':>8}{'平均收益':>10}")
+        print("-" * 38)
+        for _, row in grp.iterrows():
+            print(f"{str(row['_wkdj_bucket']):<12}{int(row['笔数']):>6}"
+                  f"{row['胜率']:>7.1f}%{row['平均收益']:>+9.2f}%")
+        completed = completed.drop(columns=['_wkdj_bucket'])
+
+    # 周 MACD 区间
+    if 'entry_week_macd_zone' in completed.columns and completed['entry_week_macd_zone'].notna().any():
+        print("\n--- 周 MACD 区间 ---")
+        grp = _group_stats('entry_week_macd_zone')
+        print(f"{'周MACD区间':<10}{'笔数':>6}{'胜率':>8}{'平均收益':>10}")
+        print("-" * 36)
+        for _, row in grp.sort_values('entry_week_macd_zone').iterrows():
+            print(f"{str(row['entry_week_macd_zone']):<10}{int(row['笔数']):>6}"
+                  f"{row['胜率']:>7.1f}%{row['平均收益']:>+9.2f}%")
+
+    # 月 MACD 区间
+    if 'entry_month_macd_zone' in completed.columns and completed['entry_month_macd_zone'].notna().any():
+        print("\n--- 月 MACD 区间 ---")
+        grp = _group_stats('entry_month_macd_zone')
+        print(f"{'月MACD区间':<10}{'笔数':>6}{'胜率':>8}{'平均收益':>10}")
+        print("-" * 36)
+        for _, row in grp.sort_values('entry_month_macd_zone').iterrows():
+            print(f"{str(row['entry_month_macd_zone']):<10}{int(row['笔数']):>6}"
+                  f"{row['胜率']:>7.1f}%{row['平均收益']:>+9.2f}%")
+
     # MA60 距离分桶
     if 'entry_ma60_dist_pct' in completed.columns and completed['entry_ma60_dist_pct'].notna().any():
         print("\n--- 进场距 MA60 距离 ---")
