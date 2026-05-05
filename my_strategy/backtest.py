@@ -388,8 +388,8 @@ def _print_entry_quality_stats(df):
         print("\n--- 市值分桶（流通市值，亿元）---")
         bins = [0, 50, 100, 300, 500, 1000, float('inf')]
         labels = ['<50亿', '50-100亿', '100-300亿', '300-500亿', '500-1000亿', '>1000亿']
-        completed['_mv_bucket'] = pd.cut(completed['entry_circ_mv'], bins=bins, labels=labels)
-        total_n = len(completed)
+        completed['_mv_bucket'] = pd.cut(completed['entry_circ_mv'], bins=bins, labels=labels, include_lowest=True)
+        total_n = completed['_mv_bucket'].notna().sum()
         grp = completed.groupby('_mv_bucket', observed=True).agg(
             笔数=('return_pct', 'count'),
             胜率=('return_pct', lambda x: (x > 0).mean() * 100),
