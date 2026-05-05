@@ -98,6 +98,7 @@ class MyStrategy(bt.Strategy):
         return o is not None and o.alive()
 
     def _finalize_episode(self, d, status='completed'):
+        state = self.stock_state[d]
         ep = self.episode_state[d]
         buys, sells = ep['buys'], ep['sells']
         if not buys:
@@ -141,6 +142,8 @@ class MyStrategy(bt.Strategy):
             'take_profit_count': take_profit_count,
             'exit_reason': exit_reason,
             'status': status,
+            'tp1_pct': round(state['tp1_pct'], 4) if state['tp1_pct'] is not None else None,
+            'tp2_pct': round(state['tp2_pct'], 4) if state['tp2_pct'] is not None else None,
         })
         ep['buys'] = []
         ep['sells'] = []

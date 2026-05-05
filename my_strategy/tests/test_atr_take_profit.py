@@ -132,3 +132,26 @@ def test_tp_sell_size_uses_initial_size():
     remaining = initial_size - expected_sell  # 600
     wrong_sell = int(remaining / 3 / 100) * 100  # = 200
     assert wrong_sell != expected_sell  # 确认旧逻辑确实不同
+
+
+def test_trade_log_contains_tp_pcts():
+    """trade_log 中每条记录应包含 tp1_pct 和 tp2_pct 字段。"""
+    np.random.seed(0)
+    cerebro = bt.Cerebro()
+    cerebro.adddata(_make_feed_with_buy_signal(n=200), name='TEST')
+    cerebro.broker.set_cash(1_000_000)
+    cerebro.addstrategy(
+        MyStrategy,
+        initial_cash=1_000_000,
+        max_positions=1,
+        atr_period=20,
+        atr_multiplier=1.5,
+        take_profit_min_pct=0.03,
+        take_profit_max_pct=0.12,
+    )
+    result = cerebro.run()
+    st = result[0]
+    if st.trade_log:
+        for row in st.trade_log:
+            assert 'tp1_pct' in row, f"trade_log 缺少 tp1_pct: {row}"
+            assert 'tp2_pct' in row, f"trade_log 缺少 tp2_pct: {row}"
