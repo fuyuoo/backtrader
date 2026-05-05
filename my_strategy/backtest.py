@@ -21,7 +21,11 @@ def load_feeds(cfg):
     2. 回测开始前已有数据（上市时间早于回测开始，MA60 有足够预热数据）
     3. 回测窗口内 K 线数 >= min_bars（过滤中途退市的股票）
     """
-    stocks = pd.read_csv(cfg['stock_list_path'])['ts_code'].tolist()
+    benchmark_codes = set(cfg.get('benchmark_codes') or [])
+    if cfg.get('benchmark_code'):
+        benchmark_codes.add(cfg['benchmark_code'])
+    stocks = [ts for ts in pd.read_csv(cfg['stock_list_path'])['ts_code'].tolist()
+              if ts not in benchmark_codes]
     data_dir = Path(cfg['data_dir'])
     start = datetime.datetime.strptime(cfg['backTest_Start_data'], '%Y%m%d')
     end = datetime.datetime.strptime(cfg['backTest_end_data'], '%Y%m%d')
@@ -163,6 +167,10 @@ def _enrich_trade_summary(summary_df, cfg):
                 row['industry'] = sector_map.get(ts_code)
                 row['ma_alignment'] = None
                 row['macd_zone'] = None
+                row['entry_circ_mv'] = None
+                row['entry_week_kdj_j'] = None
+                row['entry_week_macd_zone'] = None
+                row['entry_month_macd_zone'] = None
                 enriched_rows.append(row)
             continue
 
@@ -192,11 +200,35 @@ def _enrich_trade_summary(summary_df, cfg):
                 )
                 row['ma_alignment'] = _classify_ma_alignment(r)
                 row['macd_zone'] = _classify_macd_zone(r)
+                row['entry_circ_mv'] = (
+                    round(float(r['circ_mv']), 2)
+                    if 'circ_mv' in ind_df.columns and pd.notna(r.get('circ_mv'))
+                    else None
+                )
+                row['entry_week_kdj_j'] = (
+                    round(float(r['week_kdj_j']), 2)
+                    if 'week_kdj_j' in ind_df.columns and pd.notna(r.get('week_kdj_j'))
+                    else None
+                )
+                row['entry_week_macd_zone'] = (
+                    r.get('week_macd_zone')
+                    if 'week_macd_zone' in ind_df.columns and pd.notna(r.get('week_macd_zone'))
+                    else None
+                )
+                row['entry_month_macd_zone'] = (
+                    r.get('month_macd_zone')
+                    if 'month_macd_zone' in ind_df.columns and pd.notna(r.get('month_macd_zone'))
+                    else None
+                )
             else:
                 row['entry_kdj_j'] = None
                 row['entry_ma60_dist_pct'] = None
                 row['ma_alignment'] = None
                 row['macd_zone'] = None
+                row['entry_circ_mv'] = None
+                row['entry_week_kdj_j'] = None
+                row['entry_week_macd_zone'] = None
+                row['entry_month_macd_zone'] = None
 
             enriched_rows.append(row)
 
@@ -252,6 +284,7 @@ def run_index_strategy(cfg, index_code):
     df = pd.read_csv(path, parse_dates=['trade_date'])
     df = df.sort_values('trade_date').reset_index(drop=True)
     df = compute_indicators(df)
+    df.index = df['trade_date']
 
     start = datetime.datetime.strptime(cfg['backTest_Start_data'], '%Y%m%d')
     end = datetime.datetime.strptime(cfg['backTest_end_data'], '%Y%m%d')
@@ -472,7 +505,7 @@ def _print_trade_stats(df, annual_returns=None, benchmarks=None,
     print(f"每月平均交易频次：{freq:.1f} 笔")
 
     print(f"\n--- 策略信号分析 ---")
-    for reason in ['MA60止损', 'MA25清仓', '止盈1', '止盈2']:
+    for reason in ['MA60止损', 'MA25清仓']:
         subset = completed[completed['exit_reason'] == reason]
         if subset.empty:
             continue
@@ -483,8 +516,8 @@ def _print_trade_stats(df, annual_returns=None, benchmarks=None,
     if 'take_profit_count' in completed.columns:
         tp1 = (completed['take_profit_count'] >= 1).sum()
         tp2 = (completed['take_profit_count'] >= 2).sum()
-        print(f"触发止盈1：{tp1} 笔（{tp1 / len(completed) * 100:.1f}%）")
-        print(f"触发止盈2：{tp2} 笔（{tp2 / len(completed) * 100:.1f}%）")
+        print(f"至少触发止盈1次：{tp1} 笔（{tp1 / len(completed) * 100:.1f}%）")
+        print(f"至少触发止盈2次：{tp2} 笔（{tp2 / len(completed) * 100:.1f}%）")
 
     print(f"\n--- 按股票汇总（总盈亏 Top 10）---")
     grp = completed.groupby('ts_code').agg(
@@ -556,7 +589,7 @@ def print_results(result, cfg):
     if not benchmark_codes and cfg.get('benchmark_code'):
         benchmark_codes = [cfg['benchmark_code']]
     if benchmark_codes:
-        print("\n========== 指数策略回测 ==========")
+        print("\n========== 指数策略回测（策略逻辑应用于指数，非买入持有）==========")
         print(f"{'指数':<14}{'年化收益':>10}{'总收益':>10}{'胜率':>8}{'笔数':>6}")
         print("-" * 50)
         for code in benchmark_codes:
