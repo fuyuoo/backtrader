@@ -162,6 +162,18 @@ class MyStrategy(bt.Strategy):
                     state = self.stock_state[order.data]
                     if state['entry_price'] is None:
                         state['entry_price'] = order.executed.price
+                    if reason == 'initial_buy':
+                        state['initial_size'] = order.executed.size
+                        atr_val = self.atr[order.data][0]
+                        if atr_val == atr_val:  # not NaN
+                            atr_pct = atr_val / order.executed.price
+                            tp1 = max(self.p.take_profit_min_pct,
+                                      min(self.p.take_profit_max_pct,
+                                          self.p.atr_multiplier * atr_pct))
+                        else:
+                            tp1 = self.p.take_profit_1_pct
+                        state['tp1_pct'] = tp1
+                        state['tp2_pct'] = tp1 * 2
                     ep['buys'].append({
                         'date': bt.num2date(order.executed.dt).date(),
                         'size': order.executed.size,
