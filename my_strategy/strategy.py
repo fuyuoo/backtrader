@@ -257,9 +257,9 @@ class MyStrategy(bt.Strategy):
                         state['in_ma25_obs'] = True
 
                 # 止盈（阈值用 ATR 动态值，卖出量用原始建仓量的1/3）
-                tp1 = state['tp1_pct'] or self.p.take_profit_1_pct
-                tp2 = state['tp2_pct'] or self.p.take_profit_2_pct
-                tp_sell_size = int((state['initial_size'] or pos.size) / 3 / 100) * 100
+                tp1 = state['tp1_pct'] if state['tp1_pct'] is not None else self.p.take_profit_1_pct
+                tp2 = state['tp2_pct'] if state['tp2_pct'] is not None else self.p.take_profit_2_pct
+                tp_sell_size = int((state['initial_size'] if state['initial_size'] is not None else pos.size) / 3 / 100) * 100
                 if state['take_profit_count'] == 0 and pnl_pct >= tp1:
                     if tp_sell_size > 0:
                         o = self.sell(data=d, size=tp_sell_size, exectype=bt.Order.Market)
