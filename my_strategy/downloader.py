@@ -85,9 +85,10 @@ def download_stock(ts_code, start_date, end_date, data_dir):
     if basic_chunks:
         basic_df = pd.concat(basic_chunks, ignore_index=True)
         basic_df['trade_date'] = pd.to_datetime(basic_df['trade_date'])
+        basic_df = basic_df.drop_duplicates(subset='trade_date')
         df = df.merge(basic_df, on='trade_date', how='left')
     else:
-        df['circ_mv'] = None
+        df['circ_mv'] = float('nan')
     df = df[['trade_date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg', 'circ_mv']]
     df.to_csv(csv_path, index=False)
 
