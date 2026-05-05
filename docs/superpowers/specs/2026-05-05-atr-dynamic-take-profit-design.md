@@ -39,18 +39,44 @@ tp2_pct   = tp1_pct × 2
 |------|------|------|
 | `tp1_pct` | float | 本 episode 的止盈1阈值（入场时计算） |
 | `tp2_pct` | float | 本 episode 的止盈2阈值（= tp1_pct × 2） |
+| `initial_size` | int | 首次建仓成交股数，用于固定两次止盈的卖出量 |
 
-`_reset_state` 中将这两个字段初始化为 `None`，在 `initial_buy` 成交后赋值。
+`_reset_state` 中将这三个字段初始化为 `None`，在 `initial_buy` 成交后赋值。
+
+### 止盈卖出数量
+
+两次止盈都卖出**原始建仓量的1/3**（取整到100股），而非当时持仓的1/3：
+
+```python
+tp_sell_size = int(state['initial_size'] / 3 / 100) * 100
+```
+
+这样 tp1 和 tp2 卖出的绝对股数相同，合计约卖出原始建仓量的2/3。
+
+### 止盈成本价基准
+
+tp1 和 tp2 的盈亏比均以**原始建仓价（`state['entry_price']`）**为基准，不受加仓均价影响：
+
+```python
+pnl_pct = (close - state['entry_price']) / state['entry_price']
+```
+
+这与现有代码行为一致，无需修改此计算逻辑。
 
 ### next() 中的使用
 
 ```python
-# 原来：
-if pnl_pct >= self.p.take_profit_1_pct:
-# 改为：
-tp1 = state['tp1_pct'] or self.p.take_profit_1_pct  # fallback 兼容
-if pnl_pct >= tp1:
+# 止盈阈值：用动态值，fallback 到配置固定值
+tp1 = state['tp1_pct'] or self.p.take_profit_1_pct
+tp2 = state['tp2_pct'] or self.p.take_profit_2_pct
+
+# 卖出数量：用原始建仓量的1/3
+tp_sell_size = int((state['initial_size'] or pos.size) / 3 / 100) * 100
 ```
+
+### 大阳线逻辑说明（现有行为，不变）
+
+`big_candle_seen`（持仓期间出现 >1% 阳线）**只禁止加仓**，不影响初始建仓，也不影响清仓后的重新入场。`_reset_state` 在清仓时重置该标记。此行为保持不变。
 
 ### 新增配置参数
 
@@ -69,7 +95,7 @@ if pnl_pct >= tp1:
 
 | 文件 | 改动内容 |
 |------|----------|
-| `my_strategy/strategy.py` | 新增ATR指标初始化；`stock_state` 新增 `tp1_pct`/`tp2_pct`；`notify_order` 中计算并写入；`next()` 中替换固定阈值 |
+| `my_strategy/strategy.py` | 新增ATR指标初始化；`stock_state` 新增 `tp1_pct`/`tp2_pct`/`initial_size`；`notify_order` 中计算并写入；`next()` 中替换固定阈值和卖出数量 |
 | `my_strategy/config.json` | 新增4个参数 |
 
 ## 边界情况
