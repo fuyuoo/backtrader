@@ -256,6 +256,10 @@ def main():
                 f"可能是 token/网络/限频问题，请检查日志后重跑"
             )
 
+    print("\n========== 计算指标 ==========")
+    from src.calc_indicators import main as calc_main
+    calc_main()
+
 
 if __name__ == '__main__':
     main()
