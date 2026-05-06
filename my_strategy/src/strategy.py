@@ -46,7 +46,7 @@ class MyStrategy(bt.Strategy):
         ('atr_multiplier', 1.5),
         ('take_profit_min_pct', 0.03),
         ('take_profit_max_pct', 0.12),
-        ('factor_lookup', None),  # dict: {ts_code: {date: {factor_name: value}}}
+        ('factor_lookup', None),  # deprecated — retained for backwards compat, ignored
         ('sector_map', None),     # dict: {ts_code: sw_index_code}
     )
 
@@ -161,33 +161,24 @@ class MyStrategy(bt.Strategy):
         ep['sells'] = []
         ep['episode_num'] += 1
 
-    def _record_signal(self, d, trade_date, close, ma60, dea,
+    def _record_signal(self, d, trade_date, close, ma25, ma60, dea,
                        was_bought, skip_reason):
-        ts_code = d._name
-        factor_lookup = self.p.factor_lookup or {}
         sector_map = self.p.sector_map or {}
-        factors = factor_lookup.get(ts_code, {}).get(trade_date, {})
         rec = {
             'date': trade_date,
-            'ts_code': ts_code,
-            'sector': sector_map.get(ts_code, ''),
+            'ts_code': d._name,
+            'sector': sector_map.get(d._name, ''),
             'close': close,
+            'ma25': ma25,
             'ma60': ma60,
             'dea': dea,
             'atr': float(self.atr[d][0]),
             'was_bought': was_bought,
             'skip_reason': skip_reason,
+            'forward_return_5d': None,
+            'forward_return_20d': None,
+            'forward_return_60d': None,
         }
-        for k in ('factor_momentum_60d', 'factor_ma60_dist', 'factor_macd_strength',
-                  'factor_roe', 'factor_pe_ttm', 'factor_netprofit_yoy',
-                  'factor_sector_momentum_60d',
-                  'pct_momentum_60d', 'pct_ma60_dist', 'pct_macd_strength',
-                  'pct_roe', 'pct_pe', 'pct_netprofit_yoy',
-                  'pct_sector_momentum_60d'):
-            rec[k] = factors.get(k)
-        rec['forward_return_5d'] = None
-        rec['forward_return_20d'] = None
-        rec['forward_return_60d'] = None
         self.signals_log.append(rec)
 
     def stop(self):
@@ -377,7 +368,7 @@ class MyStrategy(bt.Strategy):
                 if not skip_reason and buy_size <= 0:
                     skip_reason = 'no_capacity'
 
-                self._record_signal(d, trade_date, close, ma60, dea,
+                self._record_signal(d, trade_date, close, ma25, ma60, dea,
                                      was_bought=(skip_reason == ''),
                                      skip_reason=skip_reason)
 

@@ -3,6 +3,13 @@ import numpy as np
 from pathlib import Path
 
 
+def _spearman_r(x, y):
+    """Spearman rank correlation using numpy (no scipy dependency)."""
+    rx = pd.Series(x).rank()
+    ry = pd.Series(y).rank()
+    return float(np.corrcoef(rx, ry)[0, 1])
+
+
 def _bucket(return_pct):
     if return_pct > 10: return '大盈'
     if return_pct > 0: return '小盈'
@@ -22,7 +29,7 @@ def _join_trades_with_signals(trades, signals):
 
 
 def compute_trade_profile(trades, signals):
-    """按收益分桶统计因子均值/中位数。"""
+    """按收益分桶统计因子均值/中位数/25%/75%分位数。"""
     j = _join_trades_with_signals(trades, signals)
     j['bucket'] = j['return_pct'].apply(_bucket)
     factor_cols = [c for c in j.columns
@@ -34,8 +41,17 @@ def compute_trade_profile(trades, signals):
                'avg_holding_days': round(sub['holding_days'].mean(), 1)
                if 'holding_days' in sub.columns else None}
         for c in factor_cols:
-            row[f'mean_{c}'] = round(sub[c].mean(), 6) if not sub[c].dropna().empty else None
-            row[f'median_{c}'] = round(sub[c].median(), 6) if not sub[c].dropna().empty else None
+            valid = sub[c].dropna()
+            if valid.empty:
+                row[f'mean_{c}'] = None
+                row[f'median_{c}'] = None
+                row[f'q25_{c}'] = None
+                row[f'q75_{c}'] = None
+            else:
+                row[f'mean_{c}'] = round(valid.mean(), 6)
+                row[f'median_{c}'] = round(valid.median(), 6)
+                row[f'q25_{c}'] = round(valid.quantile(0.25), 6)
+                row[f'q75_{c}'] = round(valid.quantile(0.75), 6)
         rows.append(row)
     return pd.DataFrame(rows).sort_values('bucket')
 
@@ -61,9 +77,12 @@ def compute_sector_winrate(trades, signals):
 
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
-    """对每个因子，按当日截面排序取 Top-N，计算事后 forward_return 平均收益。
+    """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
 
-    与"全部信号平均"基准对比，超额部分即该因子的 alpha 贡献。
+    - top_n_alpha: 当日截面 Top-N 均值 - 全体均值
+    - top_bottom_spread: Top-quintile 均值 - Bottom-quintile 均值
+    - ic_mean: 每日 Spearman(因子值, 远期收益) 序列的均值
+    - ic_ir: ic_mean / ic_std（信息比率）
     """
     s = signals.copy()
     if factors is None:
@@ -76,17 +95,50 @@ def compute_factor_alpha(signals, top_n=3, factors=None,
     for factor in factors:
         if factor not in s.columns:
             continue
-        sub = s.dropna(subset=[factor])
+        sub = s.dropna(subset=[factor, horizon])
+        if sub.empty:
+            continue
+
+        # Top-N alpha
         top = (sub.sort_values(['date', factor], ascending=[True, False])
                   .groupby('date').head(top_n))
-        if top.empty:
-            continue
-        top_avg = top[horizon].mean()
+        top_avg = top[horizon].mean() if not top.empty else float('nan')
+
+        # Top-Bottom quintile spread
+        def _quintile_spread(grp):
+            n = len(grp)
+            if n < 5:
+                return None
+            sorted_grp = grp.sort_values(factor)
+            q_size = max(1, n // 5)
+            bottom_ret = sorted_grp.head(q_size)[horizon].mean()
+            top_ret = sorted_grp.tail(q_size)[horizon].mean()
+            return top_ret - bottom_ret
+
+        spreads = sub.groupby('date').apply(_quintile_spread).dropna()
+        top_bottom_spread = spreads.mean() if not spreads.empty else float('nan')
+
+        # Spearman IC per day
+        def _spearman_ic(grp):
+            if len(grp) < 4:
+                return None
+            r = _spearman_r(grp[factor], grp[horizon])
+            return r if not np.isnan(r) else None
+
+        ics = sub.groupby('date').apply(_spearman_ic).dropna()
+        ic_mean = ics.mean() if not ics.empty else float('nan')
+        ic_std = ics.std() if len(ics) > 1 else float('nan')
+        ic_ir = ic_mean / ic_std if ic_std and ic_std != 0 else float('nan')
+
+        alpha = round(top_avg - baseline_avg, 6)
         rows.append({
             'factor': factor,
             'top_n_avg': round(top_avg, 6),
             'baseline_avg': round(baseline_avg, 6),
-            'alpha': round(top_avg - baseline_avg, 6),
+            'alpha': alpha,
+            'top_bottom_spread': round(top_bottom_spread, 6) if not np.isnan(top_bottom_spread) else None,
+            'ic_mean': round(ic_mean, 6) if not np.isnan(ic_mean) else None,
+            'ic_ir': round(ic_ir, 4) if not np.isnan(ic_ir) else None,
             'sample_size': len(top),
         })
     return pd.DataFrame(rows).sort_values('alpha', ascending=False)
@@ -99,6 +151,14 @@ def main():
     sig_path = project_root / cfg['signals_log_path']
     trade_path = project_root / 'results' / 'trade_log.csv'
     out_dir = project_root / cfg['attribution_report_dir']
+
+    if not sig_path.exists():
+        raise FileNotFoundError(
+            f"signals_log not found at {sig_path}. Run backtest.py first.")
+    if not trade_path.exists():
+        raise FileNotFoundError(
+            f"trade_log not found at {trade_path}. Run backtest.py first.")
+
     out_dir.mkdir(parents=True, exist_ok=True)
 
     signals = pd.read_csv(sig_path, parse_dates=['date'])

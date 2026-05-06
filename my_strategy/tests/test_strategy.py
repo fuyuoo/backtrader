@@ -145,33 +145,10 @@ def test_strategy_writes_signals_log():
     import backtrader as bt
     import pandas as pd
     df = _make_signal_data()
-    factor_lookup = {
-        'TEST.SZ': {
-            d.date(): {
-                'factor_momentum_60d': 0.05,
-                'factor_ma60_dist': 0.05,
-                'factor_macd_strength': 0.1,
-                'factor_roe': 12.0,
-                'factor_pe_ttm': 15.0,
-                'factor_netprofit_yoy': 10.0,
-                'factor_sector_momentum_60d': 0.02,
-                'pct_momentum_60d': 0.5,
-                'pct_ma60_dist': 0.5,
-                'pct_macd_strength': 0.5,
-                'pct_roe': 0.5,
-                'pct_pe': 0.5,
-                'pct_netprofit_yoy': 0.5,
-                'pct_sector_momentum_60d': 0.5,
-            }
-            for d in df.index
-        }
-    }
     sector_map = {'TEST.SZ': '801010.SI'}
 
     cerebro = bt.Cerebro()
-    cerebro.addstrategy(MyStrategy,
-                        factor_lookup=factor_lookup,
-                        sector_map=sector_map)
+    cerebro.addstrategy(MyStrategy, sector_map=sector_map)
     data = StockData(dataname=df, name='TEST.SZ')
     cerebro.adddata(data)
     cerebro.broker.setcash(1_000_000)
@@ -183,5 +160,5 @@ def test_strategy_writes_signals_log():
     rec = strat.signals_log[0]
     assert rec['ts_code'] == 'TEST.SZ'
     assert rec['sector'] == '801010.SI'
-    assert 'pct_momentum_60d' in rec
+    assert 'ma25' in rec
     assert 'was_bought' in rec

@@ -67,7 +67,7 @@ def load_feeds(cfg):
     return feeds
 
 
-def setup_cerebro(cfg, feeds, factor_lookup=None, sector_map=None):
+def setup_cerebro(cfg, feeds, sector_map=None):
     cerebro = bt.Cerebro()
 
     for name, feed in feeds:
@@ -95,7 +95,6 @@ def setup_cerebro(cfg, feeds, factor_lookup=None, sector_map=None):
         atr_multiplier=cfg.get('atr_multiplier', 1.5),
         take_profit_min_pct=cfg.get('take_profit_min_pct', 0.03),
         take_profit_max_pct=cfg.get('take_profit_max_pct', 0.12),
-        factor_lookup=factor_lookup,
         sector_map=sector_map,
     )
 
@@ -702,6 +701,43 @@ def backfill_forward_returns(signals, indicators_by_code, horizons=(5, 20, 60)):
                 (future_close - base_close) / base_close, 6)
 
 
+_FACTOR_RENAME = {'roe': 'factor_roe', 'pe_ttm': 'factor_pe_ttm',
+                  'netprofit_yoy': 'factor_netprofit_yoy'}
+_FACTOR_COLS = [
+    'factor_momentum_60d', 'factor_ma60_dist', 'factor_macd_strength',
+    'factor_roe', 'factor_pe_ttm', 'factor_netprofit_yoy',
+    'factor_sector_momentum_60d',
+    'pct_momentum_60d', 'pct_ma60_dist', 'pct_macd_strength',
+    'pct_roe', 'pct_pe', 'pct_netprofit_yoy', 'pct_sector_momentum_60d',
+]
+
+
+def _merge_factors(sig_df, indicators_by_code):
+    """将 indicators_by_code 中的因子列向量化合并到 signals DataFrame。
+
+    避免逐行构建 factor_lookup 嵌套字典（300只股 × 3000天 × 14因子会产生大量 Python 对象）。
+    """
+    pieces = []
+    for ts_code, df_ind in indicators_by_code.items():
+        sub = df_ind.copy()
+        for old, new in _FACTOR_RENAME.items():
+            if old in sub.columns and new not in sub.columns:
+                sub[new] = sub[old]
+        keep = ['trade_date'] + [c for c in _FACTOR_COLS if c in sub.columns]
+        sub = sub[keep].copy()
+        sub['ts_code'] = ts_code
+        pieces.append(sub)
+    if not pieces:
+        return sig_df
+    factor_df = pd.concat(pieces, ignore_index=True)
+    factor_df['trade_date'] = pd.to_datetime(factor_df['trade_date']).dt.date
+    merged = sig_df.copy()
+    merged['_date_key'] = pd.to_datetime(merged['date']).dt.date
+    merged = merged.merge(factor_df, left_on=['ts_code', '_date_key'],
+                          right_on=['ts_code', 'trade_date'], how='left')
+    return merged.drop(columns=['_date_key', 'trade_date'], errors='ignore')
+
+
 def main():
     cfg = load_config()
     feeds = load_feeds(cfg)
@@ -720,34 +756,15 @@ def main():
         if 'sw_index_code' in sec_df.columns:
             sector_map = dict(zip(sec_df['ts_code'], sec_df['sw_index_code']))
 
-    # Build factor_lookup and indicators_by_code from indicators CSVs
-    factor_cols = [
-        'factor_momentum_60d', 'factor_ma60_dist', 'factor_macd_strength',
-        'factor_roe', 'factor_pe_ttm', 'factor_netprofit_yoy',
-        'factor_sector_momentum_60d',
-        'pct_momentum_60d', 'pct_ma60_dist', 'pct_macd_strength',
-        'pct_roe', 'pct_pe', 'pct_netprofit_yoy', 'pct_sector_momentum_60d',
-    ]
-    rename_map = {'roe': 'factor_roe', 'pe_ttm': 'factor_pe_ttm',
-                  'netprofit_yoy': 'factor_netprofit_yoy'}
-    factor_lookup = {}
+    # Build indicators_by_code (factor merge happens post-run, not in strategy hot path)
     indicators_by_code = {}
     for ts_code in stocks:
         ind_path = data_dir / 'indicators' / f"{ts_code}.csv"
         if not ind_path.exists():
             continue
-        df_ind = pd.read_csv(ind_path, parse_dates=['trade_date'])
-        indicators_by_code[ts_code] = df_ind
-        for old, new in rename_map.items():
-            if old in df_ind.columns and new not in df_ind.columns:
-                df_ind[new] = df_ind[old]
-        present = [c for c in factor_cols if c in df_ind.columns]
-        date_dict = {}
-        for _, row in df_ind.iterrows():
-            date_dict[row['trade_date'].date()] = {c: row[c] for c in present}
-        factor_lookup[ts_code] = date_dict
+        indicators_by_code[ts_code] = pd.read_csv(ind_path, parse_dates=['trade_date'])
 
-    cerebro = setup_cerebro(cfg, feeds, factor_lookup=factor_lookup, sector_map=sector_map)
+    cerebro = setup_cerebro(cfg, feeds, sector_map=sector_map)
     print(f"初始资金：{cfg['initial_cash']:,.0f}")
     print(f"加载股票数：{len(feeds)}")
     print("开始回测...")
@@ -755,10 +772,11 @@ def main():
     result = cerebro.run()
     strat = result[0]
 
-    # Backfill forward returns and write signals_log.csv
+    # Backfill forward returns, merge factor columns, write signals_log.csv
     backfill_forward_returns(strat.signals_log, indicators_by_code)
     if strat.signals_log:
         sig_df = pd.DataFrame(strat.signals_log)
+        sig_df = _merge_factors(sig_df, indicators_by_code)
         sig_path = Path(cfg.get('signals_log_path', str(data_dir / 'signals_log.csv')))
         sig_path.parent.mkdir(parents=True, exist_ok=True)
         sig_df.to_csv(sig_path, index=False)
