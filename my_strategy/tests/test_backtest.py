@@ -1,6 +1,6 @@
 import pandas as pd
 from datetime import date
-from backtest import _print_trade_stats
+from backtest import _print_trade_stats, backfill_forward_returns
 
 
 def _make_summary_df():
@@ -49,3 +49,38 @@ def test_print_trade_stats_empty(capsys):
     _print_trade_stats(pd.DataFrame())
     out = capsys.readouterr().out
     assert '无已完成交易' in out
+
+
+def test_backfill_forward_returns_5_20_60():
+    indicators_by_code = {
+        'A.SZ': pd.DataFrame({
+            'trade_date': pd.date_range('2024-01-01', periods=80, freq='B'),
+            'close': list(range(100, 180)),
+        })
+    }
+    signals = [
+        {'ts_code': 'A.SZ', 'date': pd.Timestamp('2024-01-01').date(),
+         'forward_return_5d': None, 'forward_return_20d': None, 'forward_return_60d': None},
+    ]
+    backfill_forward_returns(signals, indicators_by_code)
+    assert abs(signals[0]['forward_return_5d'] - (105 - 100) / 100) < 1e-6
+    assert abs(signals[0]['forward_return_20d'] - (120 - 100) / 100) < 1e-6
+    assert abs(signals[0]['forward_return_60d'] - (160 - 100) / 100) < 1e-6
+
+
+def test_backfill_forward_returns_handles_missing_horizon():
+    """信号触发后剩余交易日不足时，对应字段保持 None。"""
+    indicators_by_code = {
+        'A.SZ': pd.DataFrame({
+            'trade_date': pd.date_range('2024-01-01', periods=10, freq='B'),
+            'close': [100.0] * 10,
+        })
+    }
+    signals = [
+        {'ts_code': 'A.SZ', 'date': pd.Timestamp('2024-01-08').date(),
+         'forward_return_5d': None, 'forward_return_20d': None, 'forward_return_60d': None},
+    ]
+    backfill_forward_returns(signals, indicators_by_code)
+    assert signals[0]['forward_return_5d'] is None
+    assert signals[0]['forward_return_20d'] is None
+    assert signals[0]['forward_return_60d'] is None

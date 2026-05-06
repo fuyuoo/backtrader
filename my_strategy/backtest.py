@@ -67,7 +67,7 @@ def load_feeds(cfg):
     return feeds
 
 
-def setup_cerebro(cfg, feeds):
+def setup_cerebro(cfg, feeds, factor_lookup=None, sector_map=None):
     cerebro = bt.Cerebro()
 
     for name, feed in feeds:
@@ -95,6 +95,8 @@ def setup_cerebro(cfg, feeds):
         atr_multiplier=cfg.get('atr_multiplier', 1.5),
         take_profit_min_pct=cfg.get('take_profit_min_pct', 0.03),
         take_profit_max_pct=cfg.get('take_profit_max_pct', 0.12),
+        factor_lookup=factor_lookup,
+        sector_map=sector_map,
     )
 
     cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name='_AnnualReturn')
@@ -667,6 +669,39 @@ def print_results(result, cfg):
         print("==================================\n")
 
 
+def backfill_forward_returns(signals, indicators_by_code, horizons=(5, 20, 60)):
+    """对 signals_log 列表（list of dict）原地回填 forward_return_{N}d 字段。
+
+    indicators_by_code: dict[ts_code -> DataFrame with trade_date/close cols]
+    """
+    code_index = {}
+    for code, df in indicators_by_code.items():
+        d = df.sort_values('trade_date').reset_index(drop=True)
+        date_to_pos = {pd.Timestamp(t).date(): i for i, t in enumerate(d['trade_date'])}
+        code_index[code] = (d, date_to_pos)
+
+    for sig in signals:
+        code = sig['ts_code']
+        if code not in code_index:
+            continue
+        d, idx = code_index[code]
+        pos = idx.get(sig['date'])
+        if pos is None:
+            continue
+        base_close = d['close'].iloc[pos]
+        if base_close is None or base_close == 0 or pd.isna(base_close):
+            continue
+        for h in horizons:
+            target = pos + h
+            if target >= len(d):
+                continue
+            future_close = d['close'].iloc[target]
+            if pd.isna(future_close):
+                continue
+            sig[f'forward_return_{h}d'] = round(
+                (future_close - base_close) / base_close, 6)
+
+
 def main():
     cfg = load_config()
     feeds = load_feeds(cfg)
@@ -674,12 +709,64 @@ def main():
         print("没有可用的数据文件，请先运行 downloader.py 和 calc_indicators.py")
         return
 
-    cerebro = setup_cerebro(cfg, feeds)
+    data_dir = Path(cfg['data_dir'])
+    stocks = [name for name, _ in feeds]
+
+    # Build sector_map from stock_sector.csv
+    sector_map = {}
+    sector_csv = data_dir / 'stock_sector.csv'
+    if sector_csv.exists():
+        sec_df = pd.read_csv(sector_csv)
+        if 'sw_index_code' in sec_df.columns:
+            sector_map = dict(zip(sec_df['ts_code'], sec_df['sw_index_code']))
+
+    # Build factor_lookup from indicators CSVs
+    factor_cols = [
+        'factor_momentum_60d', 'factor_ma60_dist', 'factor_macd_strength',
+        'factor_roe', 'factor_pe_ttm', 'factor_netprofit_yoy',
+        'factor_sector_momentum_60d',
+        'pct_momentum_60d', 'pct_ma60_dist', 'pct_macd_strength',
+        'pct_roe', 'pct_pe', 'pct_netprofit_yoy', 'pct_sector_momentum_60d',
+    ]
+    rename_map = {'roe': 'factor_roe', 'pe_ttm': 'factor_pe_ttm',
+                  'netprofit_yoy': 'factor_netprofit_yoy'}
+    factor_lookup = {}
+    for ts_code in stocks:
+        ind_path = data_dir / 'indicators' / f"{ts_code}.csv"
+        if not ind_path.exists():
+            continue
+        df_ind = pd.read_csv(ind_path, parse_dates=['trade_date'])
+        for old, new in rename_map.items():
+            if old in df_ind.columns and new not in df_ind.columns:
+                df_ind[new] = df_ind[old]
+        present = [c for c in factor_cols if c in df_ind.columns]
+        date_dict = {}
+        for _, row in df_ind.iterrows():
+            date_dict[row['trade_date'].date()] = {c: row[c] for c in present}
+        factor_lookup[ts_code] = date_dict
+
+    cerebro = setup_cerebro(cfg, feeds, factor_lookup=factor_lookup, sector_map=sector_map)
     print(f"初始资金：{cfg['initial_cash']:,.0f}")
     print(f"加载股票数：{len(feeds)}")
     print("开始回测...")
 
     result = cerebro.run()
+    strat = result[0]
+
+    # Backfill forward returns and write signals_log.csv
+    indicators_by_code = {}
+    for ts_code in stocks:
+        path = data_dir / 'indicators' / f"{ts_code}.csv"
+        if path.exists():
+            indicators_by_code[ts_code] = pd.read_csv(path, parse_dates=['trade_date'])
+    backfill_forward_returns(strat.signals_log, indicators_by_code)
+    if strat.signals_log:
+        sig_df = pd.DataFrame(strat.signals_log)
+        sig_path = Path(cfg.get('signals_log_path', 'data/signals_log.csv'))
+        sig_path.parent.mkdir(parents=True, exist_ok=True)
+        sig_df.to_csv(sig_path, index=False)
+        print(f"signals_log: {len(sig_df)} rows written to {sig_path}")
+
     print_results(result, cfg)
 
 
