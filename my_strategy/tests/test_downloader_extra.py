@@ -77,3 +77,30 @@ def test_download_fina_indicator_keeps_ann_date(tmp_path):
     assert 'end_date' in df.columns
     assert 'roe' in df.columns
     assert len(df) == 2
+
+
+def test_download_sw_index_writes_ohlcv(tmp_path):
+    pro = MagicMock()
+    fake_df = pd.DataFrame({
+        'ts_code': ['801010.SI'] * 2,
+        'trade_date': ['20240101', '20240102'],
+        'open': [3000.0, 3010.0],
+        'high': [3050.0, 3060.0],
+        'low': [2990.0, 3000.0],
+        'close': [3020.0, 3030.0],
+        'vol': [1e8, 1.1e8],
+    })
+    pro.sw_daily.return_value = fake_df
+
+    downloader_extra.download_sw_index(
+        index_code='801010.SI',
+        start_date='20240101',
+        end_date='20240102',
+        out_dir=tmp_path,
+        pro=pro,
+        sleep_sec=0,
+    )
+
+    df = pd.read_csv(tmp_path / '801010.SI.csv')
+    assert 'close' in df.columns
+    assert len(df) == 2
