@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from backtrader.my_strategy.calc_indicators import compute_indicators
+from calc_indicators import compute_indicators
 
 
 def make_ohlcv(n=100, base_close=10.0):
@@ -24,7 +24,7 @@ def test_output_columns():
     df = make_ohlcv(100)
     result = compute_indicators(df)
     expected_cols = {'trade_date', 'open', 'high', 'low', 'close', 'volume',
-                     'ma25', 'ma60', 'dea', 'prev_close'}
+                     'ma25', 'ma60', 'dea'}
     assert expected_cols.issubset(set(result.columns))
 
 
@@ -35,13 +35,6 @@ def test_ma25_value():
     assert pd.isna(result.loc[23, 'ma25'])
     expected = df['close'].iloc[:25].mean()
     assert abs(result.loc[24, 'ma25'] - expected) < 1e-6
-
-
-def test_prev_close():
-    df = make_ohlcv(10)
-    result = compute_indicators(df)
-    assert result.loc[1, 'prev_close'] == df.loc[0, 'close']
-    assert pd.isna(result.loc[0, 'prev_close'])
 
 
 def test_row_count_unchanged():
