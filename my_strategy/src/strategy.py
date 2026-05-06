@@ -46,6 +46,8 @@ class MyStrategy(bt.Strategy):
         ('atr_multiplier', 1.5),
         ('take_profit_min_pct', 0.03),
         ('take_profit_max_pct', 0.12),
+        ('factor_lookup', None),  # dict: {ts_code: {date: {factor_name: value}}}
+        ('sector_map', None),     # dict: {ts_code: sw_index_code}
     )
 
     def __init__(self):
@@ -77,6 +79,7 @@ class MyStrategy(bt.Strategy):
         }
         self.trade_log = []
         self.position_count_log = []
+        self.signals_log = []
 
     def _current_position_count(self):
         count = 0
@@ -157,6 +160,35 @@ class MyStrategy(bt.Strategy):
         ep['buys'] = []
         ep['sells'] = []
         ep['episode_num'] += 1
+
+    def _record_signal(self, d, trade_date, close, ma60, dea,
+                       was_bought, skip_reason):
+        ts_code = d._name
+        factor_lookup = self.p.factor_lookup or {}
+        sector_map = self.p.sector_map or {}
+        factors = factor_lookup.get(ts_code, {}).get(trade_date, {})
+        rec = {
+            'date': trade_date,
+            'ts_code': ts_code,
+            'sector': sector_map.get(ts_code, ''),
+            'close': close,
+            'ma60': ma60,
+            'dea': dea,
+            'atr': float(self.atr[d][0]),
+            'was_bought': was_bought,
+            'skip_reason': skip_reason,
+        }
+        for k in ('factor_momentum_60d', 'factor_ma60_dist', 'factor_macd_strength',
+                  'factor_roe', 'factor_pe_ttm', 'factor_netprofit_yoy',
+                  'factor_sector_momentum_60d',
+                  'pct_momentum_60d', 'pct_ma60_dist', 'pct_macd_strength',
+                  'pct_roe', 'pct_pe', 'pct_netprofit_yoy',
+                  'pct_sector_momentum_60d'):
+            rec[k] = factors.get(k)
+        rec['forward_return_5d'] = None
+        rec['forward_return_20d'] = None
+        rec['forward_return_60d'] = None
+        self.signals_log.append(rec)
 
     def stop(self):
         for d in self.datas:
@@ -331,18 +363,29 @@ class MyStrategy(bt.Strategy):
                 if not any(v < 0 for v in past_deas if v == v):
                     continue
 
+                # ============ 5 条必要条件全部通过，记录信号 ============
+                trade_date = bt.num2date(d.datetime[0]).date()
+                skip_reason = ''
                 if self._current_position_count() >= self.p.max_positions:
-                    continue
+                    skip_reason = 'no_capacity'
 
-                # 价格接近 MA60（距离 ≤ 1%）→ 直接满仓
                 if (close - ma60) / ma60 <= 0.01:
                     buy_size = int(self.position_limit / close / 100) * 100
-                    state['add_count'] = 2
                 else:
                     buy_size = int(self.position_limit / 3 / close / 100) * 100
 
-                if buy_size <= 0:
+                if not skip_reason and buy_size <= 0:
+                    skip_reason = 'no_capacity'
+
+                self._record_signal(d, trade_date, close, ma60, dea,
+                                     was_bought=(skip_reason == ''),
+                                     skip_reason=skip_reason)
+
+                if skip_reason:
                     continue
+
+                if (close - ma60) / ma60 <= 0.01:
+                    state['add_count'] = 2
 
                 state['pending_atr'] = float(self.atr[d][0])
                 o = self.buy(data=d, size=buy_size)

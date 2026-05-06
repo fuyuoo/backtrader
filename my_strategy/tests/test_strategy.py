@@ -105,3 +105,83 @@ def test_trade_log_has_required_keys():
     for entry in strat.trade_log:
         missing = required_keys - set(entry.keys())
         assert not missing, f"trade_log 条目缺少字段: {missing}"
+
+
+def _make_signal_data():
+    """构造一只能在某日触发 5 条必要条件的合成股票。
+
+    触发条件设计（bar 70，index=70）：
+      - close=10.8 < prev_close=11.0 → 阴线 ✓
+      - close=10.8 > ma60=10.0 → ✓
+      - dea[70]=0.05 > 0 → ✓
+      - past_deas[1..5] = dea[69..65] 含 -0.1 → ✓
+    """
+    import pandas as pd
+    n = 80
+    dates = pd.date_range('2023-01-01', periods=n, freq='B')
+    # bar 0-68: 稳定 10.0；bar 69: 涨到 11.0；bar 70: 回落到 10.8（阴线触发信号）
+    close = [10.0] * 69 + [11.0, 10.8] + [11.2] * (n - 71)
+    ma60 = [None] * 59 + [10.0] * (n - 59)
+    ma25 = [None] * 24 + [10.0] * (n - 24)
+    # dea: 前 69 根为负，bar 70 起转正；past_deas 回看 5 天 (bar65-69) 全为负
+    dea = [-0.1] * 69 + [0.05] + [0.1] * (n - 70)
+    df = pd.DataFrame({
+        'datetime': dates,
+        'open': close,
+        'high': [c + 0.1 for c in close],
+        'low': [c - 0.1 for c in close],
+        'close': close,
+        'volume': [1000] * n,
+        'ma25': ma25,
+        'ma60': ma60,
+        'dea': dea,
+    })
+    df = df.set_index('datetime')
+    return df
+
+
+def test_strategy_writes_signals_log():
+    """run cerebro on synthetic data and verify signals_log is populated."""
+    import backtrader as bt
+    import pandas as pd
+    df = _make_signal_data()
+    factor_lookup = {
+        'TEST.SZ': {
+            d.date(): {
+                'factor_momentum_60d': 0.05,
+                'factor_ma60_dist': 0.05,
+                'factor_macd_strength': 0.1,
+                'factor_roe': 12.0,
+                'factor_pe_ttm': 15.0,
+                'factor_netprofit_yoy': 10.0,
+                'factor_sector_momentum_60d': 0.02,
+                'pct_momentum_60d': 0.5,
+                'pct_ma60_dist': 0.5,
+                'pct_macd_strength': 0.5,
+                'pct_roe': 0.5,
+                'pct_pe': 0.5,
+                'pct_netprofit_yoy': 0.5,
+                'pct_sector_momentum_60d': 0.5,
+            }
+            for d in df.index
+        }
+    }
+    sector_map = {'TEST.SZ': '801010.SI'}
+
+    cerebro = bt.Cerebro()
+    cerebro.addstrategy(MyStrategy,
+                        factor_lookup=factor_lookup,
+                        sector_map=sector_map)
+    data = StockData(dataname=df, name='TEST.SZ')
+    cerebro.adddata(data)
+    cerebro.broker.setcash(1_000_000)
+    strats = cerebro.run()
+
+    strat = strats[0]
+    assert hasattr(strat, 'signals_log')
+    assert len(strat.signals_log) >= 1
+    rec = strat.signals_log[0]
+    assert rec['ts_code'] == 'TEST.SZ'
+    assert rec['sector'] == '801010.SI'
+    assert 'pct_momentum_60d' in rec
+    assert 'was_bought' in rec
