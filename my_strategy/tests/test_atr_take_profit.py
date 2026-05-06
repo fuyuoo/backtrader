@@ -97,13 +97,12 @@ def test_tp_pcts_set_after_initial_buy():
     st = result[0]
     buy_orders = [o for o in st.order_log if o['reason'] == 'initial_buy']
     assert len(buy_orders) > 0, "合成数据应触发至少一次买入"
-    # 如果仍有持仓，验证 tp1_pct 已被设置
-    for d in st.datas:
-        state = st.stock_state[d]
-        pos = st.getposition(d)
-        if pos.size > 0:
-            assert state['tp1_pct'] is not None, "持仓中的 stock_state 应有 tp1_pct"
-            assert state['tp2_pct'] == state['tp1_pct'] * 2
+    # 验证 tp1_pct/tp2_pct 已被记入 trade_log（stock_state 在 stop() 中会被 reset）
+    assert len(st.trade_log) > 0, "应有 episode 写入 trade_log"
+    for entry in st.trade_log:
+        assert entry['tp1_pct'] is not None, "trade_log 应包含 tp1_pct"
+        # trade_log 中 tp1/tp2 各自 round(4) 后可能有 1e-4 量级误差
+        assert abs(entry['tp2_pct'] - entry['tp1_pct'] * 2) < 1e-3
 
 
 def test_tp_threshold_formula():

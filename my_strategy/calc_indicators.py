@@ -1,4 +1,5 @@
 import json
+import numpy as np
 import pandas as pd
 from pathlib import Path
 
@@ -23,7 +24,9 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     low9 = df['low'].rolling(window=9, min_periods=9).min()
     high9 = df['high'].rolling(window=9, min_periods=9).max()
-    rsv = ((df['close'] - low9) / (high9 - low9).replace(0, 1) * 100).clip(0, 100)
+    # 9 日内 high==low（停牌或一字板）→ 分母 NaN 自然产生 NaN，避免假信号
+    denom = (high9 - low9).where(high9 != low9, np.nan)
+    rsv = ((df['close'] - low9) / denom * 100).clip(0, 100)
     k = rsv.ewm(com=2, adjust=False).mean()
     d = k.ewm(com=2, adjust=False).mean()
     df['kdj_j'] = (3 * k - 2 * d).round(2)
@@ -42,7 +45,8 @@ def compute_weekly_monthly_indicators(ts_code, df_daily, data_dir):
     def _kdj_j(ohlc):
         low9 = ohlc['low'].rolling(9, min_periods=9).min()
         high9 = ohlc['high'].rolling(9, min_periods=9).max()
-        rsv = ((ohlc['close'] - low9) / (high9 - low9).replace(0, 1) * 100).clip(0, 100)
+        denom = (high9 - low9).where(high9 != low9, np.nan)
+        rsv = ((ohlc['close'] - low9) / denom * 100).clip(0, 100)
         k = rsv.ewm(com=2, adjust=False).mean()
         d = k.ewm(com=2, adjust=False).mean()
         return (3 * k - 2 * d).round(2)

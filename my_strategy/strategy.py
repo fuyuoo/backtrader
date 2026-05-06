@@ -1,4 +1,10 @@
+import math
 import backtrader as bt
+
+
+def _isnan(x):
+    """显式 NaN 判断；非 float 输入会立即抛 TypeError，便于发现数据异常。"""
+    return math.isnan(x)
 
 
 class StockData(bt.feeds.PandasData):
@@ -17,6 +23,7 @@ class StockCommission(bt.CommInfoBase):
         ('stocklike', True),
         ('commtype', bt.CommInfoBase.COMM_PERC),
         ('percabs', True),
+        ('commission', 0.0003),
         ('stamp_duty', 0.001),
     )
 
@@ -58,11 +65,12 @@ class MyStrategy(bt.Strategy):
                 'tp1_pct': None,
                 'tp2_pct': None,
                 'initial_size': None,
+                'pending_atr': float('nan'),
             }
 
         self.order_log = []
         self.orders = {}
-        self.order_reasons = {}  # Maps Order id() to reason string
+        self.order_reasons = {}  # Maps order.ref (int) to reason string
         self.episode_state = {
             d: {'buys': [], 'sells': [], 'episode_num': 1}
             for d in self.datas
@@ -73,10 +81,10 @@ class MyStrategy(bt.Strategy):
     def _current_position_count(self):
         count = 0
         for d in self.datas:
-            if self.getposition(d).size > 0:
-                count += 1
-            elif d in self.orders and self.orders[d] is not None and self.orders[d].alive():
-                # 空仓但已有 pending buy，算作即将持仓
+            pos_size = self.getposition(d).size
+            o = self.orders.get(d)
+            has_pending_buy = o is not None and o.alive() and o.isbuy()
+            if pos_size > 0 or has_pending_buy:
                 count += 1
         return count
 
@@ -91,6 +99,7 @@ class MyStrategy(bt.Strategy):
             'tp1_pct': None,
             'tp2_pct': None,
             'initial_size': None,
+            'pending_atr': float('nan'),
         }
 
     def _has_pending_order(self, d):
@@ -112,7 +121,7 @@ class MyStrategy(bt.Strategy):
             avg_exit_price = sum(s['size'] * s['price'] for s in sells) / total_sold
             exit_date = sells[-1]['date']
             holding_days = (exit_date - entry_date).days
-            gross_pnl = (avg_exit_price - avg_cost) * total_shares
+            gross_pnl = (avg_exit_price - avg_cost) * total_sold
             return_pct = (avg_exit_price - avg_cost) / avg_cost * 100
             take_profit_count = sum(
                 1 for s in sells if s['reason'] in ('take_profit_1', 'take_profit_2')
@@ -153,12 +162,13 @@ class MyStrategy(bt.Strategy):
         for d in self.datas:
             if self.episode_state[d]['buys']:
                 self._finalize_episode(d, status='incomplete')
+                self._reset_state(d)
 
     def notify_order(self, order):
         if order.status in (order.Completed, order.Canceled, order.Rejected):
             reason = self.order_reasons.pop(order.ref, 'unknown')
             ep = self.episode_state[order.data]
-            episode_num = ep['episode_num']  # capture before possible finalize
+            episode_num = ep['episode_num']
 
             if order.status == order.Completed:
                 if order.isbuy():
@@ -167,7 +177,7 @@ class MyStrategy(bt.Strategy):
                         state['entry_price'] = order.executed.price
                     if reason == 'initial_buy':
                         state['initial_size'] = order.executed.size
-                        atr_val = self.atr[order.data][0]
+                        atr_val = state.pop('pending_atr', float('nan'))  # [C1] 使用下单时缓存的 ATR
                         if atr_val == atr_val:  # not NaN
                             atr_pct = atr_val / order.executed.price
                             tp1 = max(self.p.take_profit_min_pct,
@@ -190,20 +200,26 @@ class MyStrategy(bt.Strategy):
                         'price': order.executed.price,
                         'reason': reason,
                     })
-                    total_bought = sum(b['size'] for b in ep['buys'])
-                    total_sold = sum(s['size'] for s in ep['sells'])
-                    if total_sold >= total_bought > 0:
+                    state = self.stock_state[order.data]
+                    if reason == 'take_profit_1':
+                        state['take_profit_count'] = 1
+                    elif reason == 'take_profit_2':
+                        state['take_profit_count'] = 2
+                    # [I4] 用持仓归零判断，比累计数量比较更可靠
+                    if self.getposition(order.data).size == 0 and ep['buys']:
                         self._finalize_episode(order.data)
+                        self._reset_state(order.data)  # [C2][C5] 统一在此重置
 
-            self.order_log.append({
-                'date': bt.num2date(order.executed.dt).date(),
-                'ts_code': order.data._name,
-                'side': 'buy' if order.isbuy() else 'sell',
-                'size': order.executed.size,
-                'price': order.executed.price,
-                'reason': reason,
-                'episode': episode_num,
-            })
+                # [C4] 仅 Completed 订单写入 order_log
+                self.order_log.append({
+                    'date': bt.num2date(order.executed.dt).date(),
+                    'ts_code': order.data._name,
+                    'side': 'buy' if order.isbuy() else 'sell',
+                    'size': order.executed.size,
+                    'price': order.executed.price,
+                    'reason': reason,
+                    'episode': episode_num,
+                })
             for d, o in list(self.orders.items()):
                 if o is order:
                     self.orders.pop(d, None)
@@ -217,14 +233,14 @@ class MyStrategy(bt.Strategy):
             ma25 = d.ma25[0]
             ma60 = d.ma60[0]
 
-            if ma60 != ma60:
+            if _isnan(ma60):
                 continue
 
             if self._has_pending_order(d):
                 continue
 
             if pos.size > 0:
-                entry_price = state['entry_price'] or pos.price
+                entry_price = state['entry_price'] if state['entry_price'] is not None else pos.price
                 pnl_pct = (close - entry_price) / entry_price
 
                 # 记录阳线（持仓期间出现 >1% 阳线则禁止加仓）
@@ -238,7 +254,6 @@ class MyStrategy(bt.Strategy):
                         o = self.close(data=d, exectype=bt.Order.Market)
                         self.order_reasons[o.ref] = 'MA60_stop'
                         self.orders[d] = o
-                        self._reset_state(d)
                         continue
                     else:
                         state['in_ma60_obs'] = False
@@ -252,7 +267,6 @@ class MyStrategy(bt.Strategy):
                             o = self.close(data=d, exectype=bt.Order.Market)
                             self.order_reasons[o.ref] = 'MA25_stop'
                             self.orders[d] = o
-                            self._reset_state(d)
                             continue
                         else:
                             state['in_ma25_obs'] = False
@@ -262,20 +276,19 @@ class MyStrategy(bt.Strategy):
                 # 止盈（阈值用 ATR 动态值，卖出量用原始建仓量的1/3）
                 tp1 = state['tp1_pct'] if state['tp1_pct'] is not None else self.p.take_profit_1_pct
                 tp2 = state['tp2_pct'] if state['tp2_pct'] is not None else self.p.take_profit_2_pct
-                tp_sell_size = int((state['initial_size'] if state['initial_size'] is not None else pos.size) / 3 / 100) * 100
+                base_size = state['initial_size'] if state['initial_size'] is not None else pos.size
+                tp_sell_size = min(int(base_size / 3 / 100) * 100, pos.size)
                 if state['take_profit_count'] == 0 and pnl_pct >= tp1:
                     if tp_sell_size > 0:
                         o = self.sell(data=d, size=tp_sell_size, exectype=bt.Order.Market)
                         self.order_reasons[o.ref] = 'take_profit_1'
                         self.orders[d] = o
-                        state['take_profit_count'] = 1
                         continue
                 elif state['take_profit_count'] == 1 and pnl_pct >= tp2:
                     if tp_sell_size > 0:
                         o = self.sell(data=d, size=tp_sell_size, exectype=bt.Order.Market)
                         self.order_reasons[o.ref] = 'take_profit_2'
                         self.orders[d] = o
-                        state['take_profit_count'] = 2
                         continue
 
                 # 加仓（最多2次，满足与买入相同条件，且未出现大阳线）
@@ -283,13 +296,13 @@ class MyStrategy(bt.Strategy):
                     prev_close = d.close[-1]
                     dea = d.dea[0]
                     if (
-                        prev_close == prev_close
+                        not _isnan(prev_close)
                         and close < prev_close
                         and close > ma60
                         and dea > 0
                     ):
                         past_deas = [d.dea[-i] for i in range(1, self.p.dea_lookback_days + 1)]
-                        if any(v < 0 for v in past_deas if v == v):
+                        if any(v < 0 for v in past_deas if not _isnan(v)):
                             add_size = int(self.position_limit / 3 / close / 100) * 100
                             if add_size > 0:
                                 o = self.buy(data=d, size=add_size)
@@ -301,7 +314,7 @@ class MyStrategy(bt.Strategy):
                 prev_close = d.close[-1]
                 dea = d.dea[0]
 
-                if prev_close != prev_close:
+                if _isnan(prev_close):
                     continue
 
                 if close >= prev_close:
@@ -330,6 +343,7 @@ class MyStrategy(bt.Strategy):
                 if buy_size <= 0:
                     continue
 
+                state['pending_atr'] = float(self.atr[d][0])
                 o = self.buy(data=d, size=buy_size)
                 self.order_reasons[o.ref] = 'initial_buy'
                 self.orders[d] = o
