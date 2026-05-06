@@ -161,3 +161,24 @@ except ImportError:
 - `cerebro.signal_concurrent(True)` — not `signal_concurrency` (wrong name raises `AttributeError`)
 - `pyfolio` is not installed; any code path requiring it must either install it or raise a clear error
 - Lessons 4, 5, 6, and parts of 7 contain reference/pseudo-code wrapped in `if False:` — this is intentional to keep educational content without causing runtime errors
+
+## 文档维护规则（强制）
+
+每次完成新需求 / 功能改动后，**必须同时更新以下两份文件**，否则任务视为未完成：
+
+1. **`docs/FEATURES.md`** — 功能总览（当前快照）
+   - 若改动影响某模块的输入/输出/配置/行为，更新对应章节
+   - 若新增模块，增加新章节并更新目录结构与命令速查
+   - 若仅是内部重构、不改变外部行为，可在对应章节末尾用一行注明（或不更新）
+
+2. **`docs/CHANGELOG.md`** — 更新记录（追加式）
+   - 在文件**顶部**追加一条记录，格式：
+     ```
+     ## YYYY-MM-DD — 一句话标题
+     - 需求：用户原始需求摘要
+     - 改动：新增/修改/删除的文件与要点
+     - 影响：对其他模块的影响（可选）
+     ```
+   - 日期使用绝对日期；同一天多条改动各占一条
+
+适用范围：仅限 `my_strategy/` 下的功能演进。修改 `learn_backtrader/` 教程或 `backtrader/` 框架源码不在此规则内。
