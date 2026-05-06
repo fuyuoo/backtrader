@@ -120,3 +120,50 @@ def test_missing_weekly_monthly_files():
     assert out['week_kdj_j'].isna().all()
     assert out['week_macd_zone'].isna().all()
     assert out['month_macd_zone'].isna().all()
+
+
+from my_strategy.src.calc_indicators import merge_fundamentals
+
+
+def test_merge_fundamentals_aligns_by_ann_date():
+    daily = pd.DataFrame({
+        'trade_date': pd.to_datetime(['2024-04-29', '2024-04-30', '2024-05-06']),
+        'close': [10.0, 10.1, 10.2],
+    })
+    daily_basic = pd.DataFrame({
+        'trade_date': pd.to_datetime(['2024-04-29', '2024-04-30', '2024-05-06']),
+        'pe_ttm': [12.0, 12.1, 12.2],
+        'pb': [1.5, 1.51, 1.52],
+        'total_mv': [1e5, 1.01e5, 1.02e5],
+    })
+    # ann_date = 20240430，2024-04-29 之前不可见，从 2024-04-30 起可见
+    fina = pd.DataFrame({
+        'ann_date': pd.to_datetime(['2024-04-30']),
+        'end_date': pd.to_datetime(['2024-03-31']),
+        'roe': [12.5],
+        'netprofit_yoy': [15.0],
+    })
+
+    out = merge_fundamentals(daily, daily_basic, fina)
+
+    assert out.loc[out['trade_date'] == pd.Timestamp('2024-04-29'), 'roe'].isna().all()
+    assert out.loc[out['trade_date'] == pd.Timestamp('2024-04-30'), 'roe'].iloc[0] == 12.5
+    assert out.loc[out['trade_date'] == pd.Timestamp('2024-05-06'), 'roe'].iloc[0] == 12.5
+    # daily_basic 字段直接合并
+    assert out.loc[out['trade_date'] == pd.Timestamp('2024-04-30'), 'pe_ttm'].iloc[0] == 12.1
+
+
+def test_merge_fundamentals_no_fina_data():
+    daily = pd.DataFrame({
+        'trade_date': pd.to_datetime(['2024-04-30']),
+        'close': [10.0],
+    })
+    daily_basic = pd.DataFrame({
+        'trade_date': pd.to_datetime(['2024-04-30']),
+        'pe_ttm': [12.1], 'pb': [1.51], 'total_mv': [1e5],
+    })
+    fina_empty = pd.DataFrame(columns=['ann_date', 'end_date', 'roe', 'netprofit_yoy'])
+
+    out = merge_fundamentals(daily, daily_basic, fina_empty)
+    assert out['roe'].isna().all()
+    assert out['pe_ttm'].iloc[0] == 12.1

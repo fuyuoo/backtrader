@@ -120,5 +120,38 @@ def main():
         print(f"[{i+1}/{len(stocks)}] {ts_code} OK")
 
 
+def merge_fundamentals(daily_df: pd.DataFrame,
+                       daily_basic_df: pd.DataFrame,
+                       fina_df: pd.DataFrame) -> pd.DataFrame:
+    """按 ann_date 对齐合并财务数据，按 trade_date 对齐合并日频估值数据。
+
+    daily_df: 至少含 trade_date 列，已按 trade_date 升序
+    daily_basic_df: pe_ttm/pb/total_mv 等日频估值
+    fina_df: 季度财务指标，必须含 ann_date 列
+    """
+    out = daily_df.copy()
+    if not daily_basic_df.empty:
+        db = daily_basic_df.sort_values('trade_date')
+        out = out.merge(db, on='trade_date', how='left')
+    else:
+        for col in ['pe_ttm', 'pb', 'total_mv']:
+            out[col] = pd.NA
+
+    if fina_df is not None and not fina_df.empty:
+        f = fina_df.sort_values('ann_date').rename(columns={'ann_date': 'trade_date'})
+        f = f[['trade_date', 'roe', 'netprofit_yoy']]
+        out = pd.merge_asof(
+            out.sort_values('trade_date'),
+            f,
+            on='trade_date',
+            direction='backward',
+        )
+    else:
+        out['roe'] = pd.NA
+        out['netprofit_yoy'] = pd.NA
+
+    return out
+
+
 if __name__ == '__main__':
     main()
