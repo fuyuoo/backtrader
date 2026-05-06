@@ -42,15 +42,18 @@ def get_last_date(csv_path):
     return df['trade_date'].max()
 
 
-def _year_chunks(start_date: str, end_date: str):
-    """按年切分日期区间，避免单次拉取超过 API 行数限制。"""
+def _year_chunks(start_date: str, end_date: str, years: int = 10):
+    """按 N 年切分日期区间。
+    Tushare pro_bar 单次返回约 6000 行（≈24 年日线），按 10 年/段提供安全余量；
+    单元测试可显式传 years=1 沿用旧行为。
+    """
     start = pd.Timestamp(start_date)
     end = pd.Timestamp(end_date)
     cur = start
     while cur <= end:
-        year_end = min(pd.Timestamp(f"{cur.year}1231"), end)
-        yield cur.strftime('%Y%m%d'), year_end.strftime('%Y%m%d')
-        cur = pd.Timestamp(f"{cur.year + 1}0101")
+        seg_end = min(pd.Timestamp(f"{cur.year + years - 1}1231"), end)
+        yield cur.strftime('%Y%m%d'), seg_end.strftime('%Y%m%d')
+        cur = pd.Timestamp(f"{cur.year + years}0101")
 
 
 def download_stock(ts_code, start_date, end_date, data_dir, pro,

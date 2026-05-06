@@ -21,7 +21,7 @@ def _make_df(trade_dates):
 
 def test_year_chunks_three_years():
     from src.downloader import _year_chunks
-    result = list(_year_chunks('20200101', '20221231'))
+    result = list(_year_chunks('20200101', '20221231', years=1))
     assert result == [
         ('20200101', '20201231'),
         ('20210101', '20211231'),
@@ -31,10 +31,21 @@ def test_year_chunks_three_years():
 
 def test_year_chunks_mid_year_end():
     from src.downloader import _year_chunks
-    result = list(_year_chunks('20200601', '20210315'))
+    result = list(_year_chunks('20200601', '20210315', years=1))
     assert result == [
         ('20200601', '20201231'),
         ('20210101', '20210315'),
+    ]
+
+
+def test_year_chunks_default_ten_years():
+    """默认 10 年/段：27 年 → 3 段。"""
+    from src.downloader import _year_chunks
+    result = list(_year_chunks('20000101', '20261231'))
+    assert result == [
+        ('20000101', '20091231'),
+        ('20100101', '20191231'),
+        ('20200101', '20261231'),
     ]
 
 
