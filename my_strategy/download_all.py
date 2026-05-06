@@ -21,6 +21,20 @@ def main():
 
     print(f'共获取 {len(df)} 条数据，已保存到 {out_path}')
 
+    from src import downloader, downloader_extra, calc_indicators, build_cross_section_pct
+
+    print("\n========== 下载 OHLCV ==========")
+    downloader.main()
+
+    print("\n========== 下载基本面数据 ==========")
+    downloader_extra.main()
+
+    print("\n========== 计算指标 ==========")
+    calc_indicators.main()
+
+    print("\n========== 横截面分位数 ==========")
+    build_cross_section_pct.main()
+
 
 if __name__ == '__main__':
     main()
