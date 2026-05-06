@@ -720,7 +720,7 @@ def main():
         if 'sw_index_code' in sec_df.columns:
             sector_map = dict(zip(sec_df['ts_code'], sec_df['sw_index_code']))
 
-    # Build factor_lookup from indicators CSVs
+    # Build factor_lookup and indicators_by_code from indicators CSVs
     factor_cols = [
         'factor_momentum_60d', 'factor_ma60_dist', 'factor_macd_strength',
         'factor_roe', 'factor_pe_ttm', 'factor_netprofit_yoy',
@@ -731,11 +731,13 @@ def main():
     rename_map = {'roe': 'factor_roe', 'pe_ttm': 'factor_pe_ttm',
                   'netprofit_yoy': 'factor_netprofit_yoy'}
     factor_lookup = {}
+    indicators_by_code = {}
     for ts_code in stocks:
         ind_path = data_dir / 'indicators' / f"{ts_code}.csv"
         if not ind_path.exists():
             continue
         df_ind = pd.read_csv(ind_path, parse_dates=['trade_date'])
+        indicators_by_code[ts_code] = df_ind
         for old, new in rename_map.items():
             if old in df_ind.columns and new not in df_ind.columns:
                 df_ind[new] = df_ind[old]
@@ -754,15 +756,10 @@ def main():
     strat = result[0]
 
     # Backfill forward returns and write signals_log.csv
-    indicators_by_code = {}
-    for ts_code in stocks:
-        path = data_dir / 'indicators' / f"{ts_code}.csv"
-        if path.exists():
-            indicators_by_code[ts_code] = pd.read_csv(path, parse_dates=['trade_date'])
     backfill_forward_returns(strat.signals_log, indicators_by_code)
     if strat.signals_log:
         sig_df = pd.DataFrame(strat.signals_log)
-        sig_path = Path(cfg.get('signals_log_path', 'data/signals_log.csv'))
+        sig_path = Path(cfg.get('signals_log_path', str(data_dir / 'signals_log.csv')))
         sig_path.parent.mkdir(parents=True, exist_ok=True)
         sig_df.to_csv(sig_path, index=False)
         print(f"signals_log: {len(sig_df)} rows written to {sig_path}")
