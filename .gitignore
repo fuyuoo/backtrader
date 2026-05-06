@@ -69,3 +69,7 @@ samples2/
 datas/*.py
 
 .idea/
+/my_strategy/data
+/my_strategy/config.json
+/my_strategy/download_errors.log
+/my_strategy/results/

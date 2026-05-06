@@ -1,5 +1,5 @@
 {
-  "tushare_token": "6c07eb83d0933edda3ee061585600d3940ff1bfef9beb0a0ab8bd7e3",
+  "tushare_token": "YOUR_TUSHARE_TOKEN_HERE",
   "start_date": "20000101",
   "end_date": "20260101",
   "backTest_Start_data": "20190101",
@@ -18,5 +18,6 @@
   "atr_multiplier": 1.5,
   "take_profit_min_pct": 0.03,
   "take_profit_max_pct": 0.12,
-  "benchmark_codes": ["000300.SH", "000905.SH", "000001.SH"]
+  "benchmark_codes": ["000300.SH", "000905.SH", "000001.SH"],
+  "api_rate_per_min": 500
 }
