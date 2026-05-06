@@ -99,10 +99,46 @@ def compute_weekly_monthly_indicators(ts_code, df_daily, data_dir):
     return df
 
 
+def add_single_stock_factors(df: pd.DataFrame) -> pd.DataFrame:
+    """添加单股票内可计算的打分因子。"""
+    out = df.copy()
+    out['factor_momentum_60d'] = out['close'].pct_change(60).round(6)
+    out['factor_ma60_dist'] = ((out['close'] - out['ma60']) / out['ma60']).round(6)
+    out['factor_macd_strength'] = out['dea'].round(6)
+    return out
+
+
+def merge_sector_momentum(daily_df: pd.DataFrame,
+                          sector_index_df: pd.DataFrame) -> pd.DataFrame:
+    """合并所属行业指数过去 60 日动量。"""
+    out = daily_df.copy()
+    if sector_index_df is None or sector_index_df.empty:
+        out['factor_sector_momentum_60d'] = pd.NA
+        return out
+    s = sector_index_df.sort_values('trade_date').copy()
+    s['factor_sector_momentum_60d'] = s['close'].pct_change(60).round(6)
+    s = s[['trade_date', 'factor_sector_momentum_60d']]
+    return out.merge(s, on='trade_date', how='left')
+
+
 def main():
     cfg = load_config()
-    data_dir = Path(cfg['data_dir'])
-    stocks = pd.read_csv(cfg['stock_list_path'])['ts_code'].tolist()
+    project_root = Path(__file__).resolve().parent.parent
+    data_dir = project_root / cfg['data_dir']
+    stocks_df = pd.read_csv(project_root / cfg['stock_list_path'])
+    stocks = stocks_df['ts_code'].tolist()
+
+    paths = cfg.get('data_paths', {})
+    db_dir = data_dir / Path(paths.get('daily_basic_dir', 'daily_basic')).name
+    fi_dir = data_dir / Path(paths.get('fina_indicator_dir', 'fina')).name
+    sw_dir = data_dir / Path(paths.get('sw_index_dir', 'sw_index')).name
+    sector_csv = project_root / paths.get('stock_sector_csv', 'data/stock_sector.csv')
+
+    sector_map = {}
+    if sector_csv.exists():
+        sec_df = pd.read_csv(sector_csv)
+        if 'sw_index_code' in sec_df.columns and 'ts_code' in sec_df.columns:
+            sector_map = dict(zip(sec_df['ts_code'], sec_df['sw_index_code']))
 
     indicators_dir = data_dir / 'indicators'
     indicators_dir.mkdir(parents=True, exist_ok=True)
@@ -114,10 +150,34 @@ def main():
             continue
         df = pd.read_csv(src, parse_dates=['trade_date'])
         df = df.sort_values('trade_date').reset_index(drop=True)
-        result = compute_indicators(df)
-        result = compute_weekly_monthly_indicators(ts_code, result, data_dir)
-        result.to_csv(dst, index=False)
-        print(f"[{i+1}/{len(stocks)}] {ts_code} OK")
+        df = compute_indicators(df)
+        df = compute_weekly_monthly_indicators(ts_code, df, data_dir)
+
+        db_path = db_dir / f"{ts_code}.csv"
+        db = pd.read_csv(db_path, parse_dates=['trade_date']) if db_path.exists() else pd.DataFrame()
+        fi_path = fi_dir / f"{ts_code}.csv"
+        if fi_path.exists():
+            fi = pd.read_csv(fi_path, parse_dates=['ann_date', 'end_date'])
+        else:
+            fi = pd.DataFrame()
+        df = merge_fundamentals(df, db, fi)
+
+        df = add_single_stock_factors(df)
+
+        sw_code = sector_map.get(ts_code)
+        if sw_code:
+            sw_path = sw_dir / f"{sw_code}.csv"
+            if sw_path.exists():
+                sw_df = pd.read_csv(sw_path, parse_dates=['trade_date'])
+                df = merge_sector_momentum(df, sw_df)
+            else:
+                df['factor_sector_momentum_60d'] = pd.NA
+        else:
+            df['factor_sector_momentum_60d'] = pd.NA
+
+        df.to_csv(dst, index=False)
+        if (i + 1) % 100 == 0:
+            print(f"[{i+1}/{len(stocks)}] {ts_code} OK")
 
 
 def merge_fundamentals(daily_df: pd.DataFrame,

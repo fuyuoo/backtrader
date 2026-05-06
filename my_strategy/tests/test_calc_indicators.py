@@ -122,7 +122,11 @@ def test_missing_weekly_monthly_files():
     assert out['month_macd_zone'].isna().all()
 
 
-from my_strategy.src.calc_indicators import merge_fundamentals
+from my_strategy.src.calc_indicators import (
+    merge_fundamentals,
+    add_single_stock_factors,
+    merge_sector_momentum,
+)
 
 
 def test_merge_fundamentals_aligns_by_ann_date():
@@ -167,3 +171,40 @@ def test_merge_fundamentals_no_fina_data():
     out = merge_fundamentals(daily, daily_basic, fina_empty)
     assert out['roe'].isna().all()
     assert out['pe_ttm'].iloc[0] == 12.1
+
+
+def test_add_single_stock_factors_computes_momentum_and_dist():
+    import pandas as pd
+    df = pd.DataFrame({
+        'trade_date': pd.date_range('2024-01-01', periods=70),
+        'close': list(range(100, 170)),
+        'ma60': [None] * 60 + [130.0] * 10,
+        'dea': [0.5] * 70,
+    })
+    out = add_single_stock_factors(df)
+    assert 'factor_momentum_60d' in out.columns
+    assert 'factor_ma60_dist' in out.columns
+    assert 'factor_macd_strength' in out.columns
+    # 最后一行：close[-1]=169, close[-61]=109 → (169-109)/109
+    assert abs(out['factor_momentum_60d'].iloc[-1] - (169 - 109) / 109) < 1e-6
+    # ma60_dist 最后一行：(169 - 130) / 130
+    assert abs(out['factor_ma60_dist'].iloc[-1] - (169 - 130) / 130) < 1e-6
+    assert out['factor_macd_strength'].iloc[-1] == 0.5
+
+
+def test_merge_sector_momentum_aligns_by_date():
+    import pandas as pd
+    sector_dates = pd.date_range('2023-09-01', periods=70)
+    # daily 日期落在 sector_idx 有动量值的范围内（第 61 行起，即 2023-10-31 之后）
+    daily = pd.DataFrame({
+        'trade_date': pd.to_datetime([sector_dates[61], sector_dates[62]]),
+        'close': [10.0, 10.1],
+    })
+    sector_idx = pd.DataFrame({
+        'trade_date': sector_dates,
+        'close': list(range(1000, 1070)),
+    })
+
+    out = merge_sector_momentum(daily, sector_idx)
+    assert 'factor_sector_momentum_60d' in out.columns
+    assert not out['factor_sector_momentum_60d'].isna().all()
