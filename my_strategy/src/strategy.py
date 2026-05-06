@@ -175,6 +175,8 @@ class MyStrategy(bt.Strategy):
                     state = self.stock_state[order.data]
                     if state['entry_price'] is None:
                         state['entry_price'] = order.executed.price
+                    if reason == 'add_on':
+                        state['add_count'] += 1
                     if reason == 'initial_buy':
                         state['initial_size'] = order.executed.size
                         atr_val = state.pop('pending_atr', float('nan'))  # [C1] 使用下单时缓存的 ATR
@@ -308,7 +310,6 @@ class MyStrategy(bt.Strategy):
                                 o = self.buy(data=d, size=add_size)
                                 self.order_reasons[o.ref] = 'add_on'
                                 self.orders[d] = o
-                                state['add_count'] += 1
 
             else:
                 prev_close = d.close[-1]
