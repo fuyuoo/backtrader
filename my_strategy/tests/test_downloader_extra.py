@@ -48,3 +48,32 @@ def test_download_daily_basic_skips_existing(tmp_path):
     )
     pro.daily_basic.assert_not_called()
     assert csv.read_text() == 'existing'
+
+
+def test_download_fina_indicator_keeps_ann_date(tmp_path):
+    pro = MagicMock()
+    fake_df = pd.DataFrame({
+        'ts_code': ['000001.SZ'] * 2,
+        'ann_date': ['20240430', '20240828'],
+        'end_date': ['20240331', '20240630'],
+        'roe': [12.5, 13.0],
+        'roe_yearly': [50.0, 52.0],
+        'netprofit_yoy': [15.0, 18.0],
+        'grossprofit_margin': [40.0, 41.0],
+    })
+    pro.fina_indicator.return_value = fake_df
+
+    downloader_extra.download_fina_indicator(
+        ts_code='000001.SZ',
+        start_date='20240101',
+        end_date='20241231',
+        out_dir=tmp_path,
+        pro=pro,
+        sleep_sec=0,
+    )
+
+    df = pd.read_csv(tmp_path / '000001.SZ.csv')
+    assert 'ann_date' in df.columns
+    assert 'end_date' in df.columns
+    assert 'roe' in df.columns
+    assert len(df) == 2
