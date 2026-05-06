@@ -174,8 +174,7 @@ self.position_count_log.append(self._current_position_count())
 全区间  +XX.XX%  +XX.XX%  +X.XX%  +XX.XX%  +X.XX%
 ```
 
-策略全区间收益用 `bt.analyzers.Returns` 的 `rnorm100`（年化），不单独计算总收益率。  
-如需总收益，额外从 `_TimeReturn` 的累积乘积读取。
+策略全区间年化收益用 `bt.analyzers.Returns` 的 `rnorm100`；总收益从 `_TimeReturn` 累积乘积读取（`(1+time_return).cumprod().iloc[-1] - 1`）。年度收益表"全区间"行展示年化收益率（与各基准 `annualized` 字段对齐）。
 
 ### 8.5 指数策略模拟
 
