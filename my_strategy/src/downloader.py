@@ -18,13 +18,17 @@ def _call_with_timeout(fn, *args, timeout=30, **kwargs):
     finally:
         executor.shutdown(wait=False)
 
-logging.basicConfig(filename='download_errors.log', level=logging.WARNING,
-                    format='%(asctime)s %(message)s')
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOG_DIR = _PROJECT_ROOT / 'logs'
+_LOG_DIR.mkdir(exist_ok=True)
+
+logging.basicConfig(filename=str(_LOG_DIR / 'download_errors.log'),
+                    level=logging.WARNING, format='%(asctime)s %(message)s')
 
 
 def load_config(config_path=None):
     if config_path is None:
-        config_path = Path(__file__).parent / 'config.json'
+        config_path = _PROJECT_ROOT / 'config.json'
     with open(config_path, 'r') as f:
         return json.load(f)
 
@@ -52,7 +56,8 @@ def _year_chunks(start_date: str, end_date: str):
 def download_stock(ts_code, start_date, end_date, data_dir, pro,
                    sleep_sec=0.3, force=False):
     """下载单只股票前复权日线数据，全量重新下载以保证复权基准一致。"""
-    csv_path = Path(data_dir) / f"{ts_code}.csv"
+    csv_path = Path(data_dir) / 'daily' / f"{ts_code}.csv"
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
     if csv_path.exists() and not force:
         return
 
@@ -115,8 +120,9 @@ def download_bars(ts_code, start_date, end_date, data_dir, freq='W',
     """下载周线(freq='W')或月线(freq='M') OHLCV。
     数据量小（月线 ≈300 条，周线 ≈1300 条），一次拉取无需按年切分。
     """
-    suffix = {'W': 'weekly', 'M': 'monthly'}[freq]
-    csv_path = Path(data_dir) / f"{ts_code}_{suffix}.csv"
+    subdir = {'W': 'weekly', 'M': 'monthly'}[freq]
+    csv_path = Path(data_dir) / subdir / f"{ts_code}.csv"
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
     if csv_path.exists() and not force:
         return
 
@@ -134,8 +140,9 @@ def download_bars(ts_code, start_date, end_date, data_dir, freq='W',
 
 def download_index(ts_code, start_date, end_date, data_dir, pro,
                    sleep_sec=0.3, force=False):
-    """下载指数日线数据（无复权，直接存为 {ts_code}.csv）。"""
-    csv_path = Path(data_dir) / f"{ts_code}.csv"
+    """下载指数日线数据（无复权），与个股日线一起放到 daily/ 子目录。"""
+    csv_path = Path(data_dir) / 'daily' / f"{ts_code}.csv"
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
     if csv_path.exists() and not force:
         return
 

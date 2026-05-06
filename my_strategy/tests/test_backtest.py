@@ -1,7 +1,3 @@
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-
 import pandas as pd
 from datetime import date
 from backtest import _print_trade_stats

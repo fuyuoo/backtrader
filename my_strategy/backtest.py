@@ -4,8 +4,8 @@ import statistics
 import pandas as pd
 import backtrader as bt
 from pathlib import Path
-from strategy import StockData, StockCommission, MyStrategy
-from calc_indicators import compute_indicators
+from src.strategy import StockData, StockCommission, MyStrategy
+from src.calc_indicators import compute_indicators
 
 
 def load_config(config_path='config.json'):
@@ -36,7 +36,7 @@ def load_feeds(cfg):
     skip_no_file, skip_late_listed, skip_insufficient = [], [], []
     feeds = []
     for ts_code in stocks:
-        path = data_dir / f"{ts_code}_indicators.csv"
+        path = data_dir / 'indicators' / f"{ts_code}.csv"
         if not path.exists():
             skip_no_file.append(ts_code)
             continue
@@ -162,7 +162,7 @@ def _enrich_trade_summary(summary_df, cfg):
     # 按股票分组，批量 join 指标
     enriched_rows = []
     for ts_code, group in summary_df.groupby('ts_code'):
-        ind_path = data_dir / f"{ts_code}_indicators.csv"
+        ind_path = data_dir / 'indicators' / f"{ts_code}.csv"
         if not ind_path.exists():
             for _, row in group.iterrows():
                 row = row.copy()
@@ -256,8 +256,8 @@ def _compute_benchmarks_returns(cfg):
     end = datetime.datetime.strptime(cfg['backTest_end_data'], '%Y%m%d')
     results = []
     for code in codes:
-        # 指数只需要收盘价，直接读原始日线文件，不依赖 _indicators.csv
-        path = Path(cfg['data_dir']) / f"{code}.csv"
+        # 指数只需要收盘价，直接读原始日线文件，不依赖 indicators/
+        path = Path(cfg['data_dir']) / 'daily' / f"{code}.csv"
         if not path.exists():
             continue
         df = pd.read_csv(path, parse_dates=['trade_date'])
@@ -281,7 +281,7 @@ def run_index_strategy(cfg, index_code):
     """对单个指数独立运行策略（max_positions=1，不与股票池竞争）。
     返回 dict: code / annual_return(年化%) / total_return(总%) / win_rate(%) / n_trades。
     """
-    path = Path(cfg['data_dir']) / f"{index_code}.csv"
+    path = Path(cfg['data_dir']) / 'daily' / f"{index_code}.csv"
     if not path.exists():
         return None
 

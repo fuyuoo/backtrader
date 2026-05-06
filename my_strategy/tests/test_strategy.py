@@ -1,14 +1,10 @@
 """
 使用合成价格数据验证策略的关键信号触发。
 """
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-
 import backtrader as bt
 import pandas as pd
 import numpy as np
-from strategy import StockData, MyStrategy
+from src.strategy import StockData, MyStrategy
 
 
 def make_feed(n=150, start='2020-01-01'):

@@ -4,7 +4,9 @@ import pandas as pd
 from pathlib import Path
 
 
-def load_config(config_path='config.json'):
+def load_config(config_path=None):
+    if config_path is None:
+        config_path = Path(__file__).resolve().parent.parent / 'config.json'
     with open(config_path, 'r') as f:
         return json.load(f)
 
@@ -72,7 +74,7 @@ def compute_weekly_monthly_indicators(ts_code, df_daily, data_dir):
 
     daily_dates = df[['trade_date']].sort_values('trade_date')
 
-    weekly_path = data_dir / f"{ts_code}_weekly.csv"
+    weekly_path = data_dir / 'weekly' / f"{ts_code}.csv"
     if weekly_path.exists():
         wdf = pd.read_csv(weekly_path, parse_dates=['trade_date']).sort_values('trade_date')
         wdf['week_kdj_j'] = _kdj_j(wdf)
@@ -84,7 +86,7 @@ def compute_weekly_monthly_indicators(ts_code, df_daily, data_dir):
         df['week_kdj_j'] = None
         df['week_macd_zone'] = None
 
-    monthly_path = data_dir / f"{ts_code}_monthly.csv"
+    monthly_path = data_dir / 'monthly' / f"{ts_code}.csv"
     if monthly_path.exists():
         mdf = pd.read_csv(monthly_path, parse_dates=['trade_date']).sort_values('trade_date')
         mdf['month_macd_zone'] = _macd_zone(mdf)
@@ -102,9 +104,11 @@ def main():
     data_dir = Path(cfg['data_dir'])
     stocks = pd.read_csv(cfg['stock_list_path'])['ts_code'].tolist()
 
+    indicators_dir = data_dir / 'indicators'
+    indicators_dir.mkdir(parents=True, exist_ok=True)
     for i, ts_code in enumerate(stocks):
-        src = data_dir / f"{ts_code}.csv"
-        dst = data_dir / f"{ts_code}_indicators.csv"
+        src = data_dir / 'daily' / f"{ts_code}.csv"
+        dst = indicators_dir / f"{ts_code}.csv"
         if not src.exists():
             print(f"[{i+1}/{len(stocks)}] {ts_code} SKIP (no raw data)")
             continue

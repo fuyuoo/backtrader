@@ -1,11 +1,15 @@
 import json
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import backtrader as bt
+import pandas as pd
+import numpy as np
+from src.strategy import MyStrategy, StockData
+
 
 def test_config_has_atr_params():
-    cfg = json.loads((Path(__file__).parent.parent / 'config.json').read_text())
+    """以 config.example.json 为模板验证 ATR 相关参数齐全。"""
+    cfg = json.loads((Path(__file__).parent.parent / 'config.example.json').read_text())
     assert 'atr_period' in cfg
     assert 'atr_multiplier' in cfg
     assert 'take_profit_min_pct' in cfg
@@ -14,12 +18,6 @@ def test_config_has_atr_params():
     assert cfg['atr_multiplier'] == 1.5
     assert cfg['take_profit_min_pct'] == 0.03
     assert cfg['take_profit_max_pct'] == 0.12
-
-
-import backtrader as bt
-import pandas as pd
-import numpy as np
-from strategy import MyStrategy, StockData
 
 
 def _make_feed(n=100, start='2020-01-01'):
