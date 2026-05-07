@@ -516,6 +516,45 @@ def compute_stock_above_ma25_stats(trades):
     return _compute_bool_flag_stats(trades, 'entry_stock_above_ma25')
 
 
+_REGIME_COMBO_LABELS = [
+    ('大盘水上+个股多头', True, True),
+    ('大盘水上+个股非多头', True, False),
+    ('大盘水下+个股多头', False, True),
+    ('大盘水下+个股非多头', False, False),
+]
+
+
+def compute_regime_combo_stats(trades):
+    """大盘 DIF 水上水下 × 个股多头排列 2x2 共振分析。
+
+    缺 entry_hs300_dif_above_zero 或 entry_stock_bull_align 的行被 dropna 跳过。
+    输出固定 4 行（按 _REGIME_COMBO_LABELS 顺序），空桶跳过。
+    """
+    cols = ['combo', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
+    required = ['entry_hs300_dif_above_zero', 'entry_stock_bull_align']
+    if trades.empty or any(c not in trades.columns for c in required):
+        return pd.DataFrame(columns=cols)
+    sub = trades.dropna(subset=required).copy()
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for label, dif_v, bull_v in _REGIME_COMBO_LABELS:
+        chunk = sub[(sub['entry_hs300_dif_above_zero'] == dif_v) &
+                    (sub['entry_stock_bull_align'] == bull_v)]
+        if chunk.empty:
+            continue
+        ret = chunk['return_pct'].dropna() if 'return_pct' in chunk.columns else pd.Series(dtype=float)
+        hold = chunk['holding_days'].dropna() if 'holding_days' in chunk.columns else pd.Series(dtype=float)
+        rows.append({
+            'combo': label,
+            'count': len(chunk),
+            'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+        })
+    return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
+
+
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
     """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
@@ -667,6 +706,9 @@ def run(project_root, cfg):
 
     stock_above = compute_stock_above_ma25_stats(trades)
     stock_above.to_csv(out_dir / 'stock_above_ma25_stats.csv', index=False)
+
+    regime_combo = compute_regime_combo_stats(trades)
+    regime_combo.to_csv(out_dir / 'regime_combo_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)

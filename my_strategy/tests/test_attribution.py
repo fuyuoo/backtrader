@@ -583,3 +583,35 @@ def test_compute_hs300_dif_stats_empty_input():
     out = compute_hs300_dif_stats(pd.DataFrame())
     assert out.empty
     assert list(out.columns) == ['flag_value', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
+
+
+def test_compute_regime_combo_stats_2x2():
+    from tools.attribution import compute_regime_combo_stats
+    trades = pd.DataFrame([
+        {'entry_hs300_dif_above_zero': True,  'entry_stock_bull_align': True,
+         'return_pct': 5.0, 'holding_days': 10, 'status': 'completed'},
+        {'entry_hs300_dif_above_zero': False, 'entry_stock_bull_align': False,
+         'return_pct': -3.0, 'holding_days': 8, 'status': 'completed'},
+        {'entry_hs300_dif_above_zero': True,  'entry_stock_bull_align': False,
+         'return_pct': 1.0, 'holding_days': 6, 'status': 'completed'},
+        {'entry_hs300_dif_above_zero': False, 'entry_stock_bull_align': True,
+         'return_pct': 2.0, 'holding_days': 7, 'status': 'completed'},
+        {'entry_hs300_dif_above_zero': None,  'entry_stock_bull_align': True,
+         'return_pct': 0.0, 'holding_days': 5, 'status': 'completed'},
+    ])
+    out = compute_regime_combo_stats(trades)
+    assert len(out) == 4
+    assert set(out['combo']) == {
+        '大盘水上+个股多头', '大盘水上+个股非多头',
+        '大盘水下+个股多头', '大盘水下+个股非多头',
+    }
+    sunny = out[out['combo'] == '大盘水上+个股多头'].iloc[0]
+    assert sunny['count'] == 1
+    assert sunny['win_rate'] == 1.0
+
+
+def test_compute_regime_combo_stats_empty():
+    from tools.attribution import compute_regime_combo_stats
+    out = compute_regime_combo_stats(pd.DataFrame())
+    assert out.empty
+    assert list(out.columns) == ['combo', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
