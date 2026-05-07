@@ -15,6 +15,48 @@
 
 ---
 
+## 2026-05-07 — 新增 entry_condition_stats 入场条件统计报告
+
+- 需求：对 7 个入场快照字段（KDJ-J、MA60 偏离度、MA 排列、MACD 区间等）分别分组，输出长表统计。
+- 改动：
+  - `my_strategy/tools/attribution.py`：新增 `compute_entry_condition_stats`，支持数值字段分桶（KDJ-J 4 档、MA60 偏离度 5 档）和类别字段 groupby；接入 `run()` 输出 `entry_condition_stats.csv`。
+  - `my_strategy/tests/test_attribution.py`：追加 4 个测试用例，全部 passed（13/13）。
+- 影响：`reports/entry_condition_stats.csv` 新增产出；其他模块无影响。
+
+## 2026-05-07 — 修复 factor_alpha 因子默认源 + 端到端归因测试脚本
+
+- 需求：归因接着报 `KeyError: 'alpha'`；用户要求用现有 trade_summary.csv 直接测试。
+- 改动：
+  - `tools/attribution.py` `compute_factor_alpha` 默认因子从 `pct_*` 改为 `factor_*`（pct_ 已废弃）；空 rows 时返回带正确表头的空 DataFrame。
+  - 新增 `tests/test_attribution_run.py`：用现有产物端到端跑一次归因并校验 5 份报告全部产出，可直接 `python my_strategy/tests/test_attribution_run.py` 运行。
+- 影响：测试通过，5 份报告全部产出（factor_alpha 当前空，因 signals_log 是旧产物无 factor_ 列；下次重跑回测会自动填充）。
+
+## 2026-05-07 — 修复 sector_map 列名错配导致归因 sector_winrate 崩溃
+
+- 需求：归因自动跑起来后报 `KeyError: 'avg_return'`，需修正。
+- 改动：
+  - `my_strategy/backtest.py` `main()` 构建 `sector_map` 时把 `'sw_index_code'` 改成 `'industry'`（实际 CSV 的列名），让 `signals_log.sector` 不再全空。
+  - `my_strategy/tools/attribution.py` `compute_sector_winrate` 增加空值防御：sector 列缺失或全空时返回带正确表头的空 DataFrame，避免 `sort_values` 报 KeyError。
+- 影响：回测后 `signals_log.csv` 的 sector 列将正确填充行业名（如"银行"、"全国地产"），`reports/sector_winrate.csv` 也能正常产出。
+
+## 2026-05-07 — 回测末尾自动触发归因分析
+
+- 需求：归因功能此前未挂入主流程，每次得手动跑；改为 `backtest.py` 跑完直接产出归因报告。
+- 改动：
+  - `tools/attribution.py` 抽出 `run(project_root, cfg)` 公共入口；`main()` 仅做配置加载并转调；修正 `trade_log.csv` → `trade_summary.csv` 的文件名错配。
+  - `my_strategy/backtest.py` `main()` 末尾新增 `attribution.run(...)` 调用。
+- 影响：单跑 `python my_strategy/tools/attribution.py` 现在能正确读到 `trade_summary.csv`（之前找的是不存在的 `trade_log.csv`）。
+
+## 2026-05-07 — 移除横截面分位（pct_*）功能
+
+- 需求：横截面分位排名暂未开发到选股流程，先删除避免维护负担。
+- 改动：
+  - 删除 `my_strategy/src/build_cross_section_pct.py`
+  - 删除 `my_strategy/tests/test_build_cross_section_pct.py`
+  - `my_strategy/backtest.py` 的 `_FACTOR_COLS` 移除 7 个 `pct_*` 列名
+  - `docs/FEATURES.md` 移除「横截面分位」章节，章节序号顺延
+- 影响：`tools/attribution.py` 用 `startswith('pct_')` 过滤因子，列不存在时返回空，不报错；`factor_alpha` 默认 factors 退化为空列表，需要时改用 `factor_*` 列。
+
 ## 2026-05-06 — 建立功能文档与更新记录维护流程
 
 - 需求：把当前功能整理成文档放在 `docs/`，再加一份更新记录文档，并在 `CLAUDE.md` 写入"每次需求都需更新这两个文件"的强制规则。

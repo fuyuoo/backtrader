@@ -5,6 +5,7 @@ from my_strategy.tools.attribution import (
     compute_sector_winrate,
     compute_exit_reason_stats,
     compute_add_count_stats,
+    compute_entry_condition_stats,
 )
 
 
@@ -159,4 +160,76 @@ def test_compute_add_count_stats_empty_input():
     assert list(out.columns) == ['add_count', 'count', 'win_rate',
                                   'avg_return', 'avg_holding_days',
                                   'pct_completed']
+    assert len(out) == 0
+
+
+def test_compute_entry_condition_stats_kdj_buckets():
+    trades = pd.DataFrame({
+        'entry_kdj_j': [25.0, 50.0, 75.0, 90.0, 110.0],
+        'entry_ma60_dist_pct': [0.5, 3.0, 8.0, 15.0, 25.0],
+        'ma_alignment': ['全多头'] * 5,
+        'macd_zone': ['区间1'] * 5,
+        'entry_week_kdj_j': [30.0, 55.0, 70.0, 85.0, 105.0],
+        'entry_week_macd_zone': ['区间0'] * 5,
+        'entry_month_macd_zone': ['区间0'] * 5,
+        'return_pct': [5.0, 3.0, 1.0, -2.0, -8.0],
+        'gross_pnl': [500, 300, 100, -200, -800],
+        'holding_days': [30, 25, 20, 15, 10],
+    })
+    out = compute_entry_condition_stats(trades)
+    assert set(out['condition_field']) == {
+        'entry_kdj_j', 'entry_ma60_dist_pct', 'ma_alignment',
+        'macd_zone', 'entry_week_kdj_j', 'entry_week_macd_zone',
+        'entry_month_macd_zone'}
+    kdj = out[out['condition_field'] == 'entry_kdj_j']
+    assert set(kdj['bucket']) == {'[0,40)', '[40,80)', '[80,100)', '[100+)'}
+    bucket_4080 = kdj[kdj['bucket'] == '[40,80)'].iloc[0]
+    assert bucket_4080['count'] == 2
+
+
+def test_compute_entry_condition_stats_ma60_dist_buckets():
+    trades = pd.DataFrame({
+        'entry_kdj_j': [50.0] * 6,
+        'entry_ma60_dist_pct': [-1.0, 0.5, 7.5, 15.0, 25.0, 35.0],
+        'ma_alignment': ['全多头'] * 6,
+        'macd_zone': ['区间1'] * 6,
+        'entry_week_kdj_j': [50.0] * 6,
+        'entry_week_macd_zone': ['区间0'] * 6,
+        'entry_month_macd_zone': ['区间0'] * 6,
+        'return_pct': [1.0] * 6,
+        'gross_pnl': [100] * 6,
+        'holding_days': [10] * 6,
+    })
+    out = compute_entry_condition_stats(trades)
+    ma60 = out[out['condition_field'] == 'entry_ma60_dist_pct']
+    assert set(ma60['bucket']) == {
+        '[<0%)', '[0%,5%)', '[5%,10%)', '[10%,20%)', '[20%+)'}
+    assert ma60[ma60['bucket'] == '[<0%)'].iloc[0]['count'] == 1
+    assert ma60[ma60['bucket'] == '[20%+)'].iloc[0]['count'] == 2
+
+
+def test_compute_entry_condition_stats_categorical():
+    trades = pd.DataFrame({
+        'entry_kdj_j': [50.0] * 4,
+        'entry_ma60_dist_pct': [3.0] * 4,
+        'ma_alignment': ['全多头', '全多头', '局部空头', '全空头'],
+        'macd_zone': ['区间1'] * 4,
+        'entry_week_kdj_j': [50.0] * 4,
+        'entry_week_macd_zone': ['区间0'] * 4,
+        'entry_month_macd_zone': ['区间0'] * 4,
+        'return_pct': [5.0, 3.0, -2.0, -10.0],
+        'gross_pnl': [500, 300, -200, -1000],
+        'holding_days': [20, 15, 10, 8],
+    })
+    out = compute_entry_condition_stats(trades)
+    align = out[out['condition_field'] == 'ma_alignment']
+    full_long = align[align['bucket'] == '全多头'].iloc[0]
+    assert full_long['count'] == 2
+    assert full_long['avg_return'] == 4.0
+
+
+def test_compute_entry_condition_stats_empty_input():
+    out = compute_entry_condition_stats(pd.DataFrame())
+    assert list(out.columns) == ['condition_field', 'bucket', 'count',
+                                  'win_rate', 'avg_return', 'avg_holding_days']
     assert len(out) == 0

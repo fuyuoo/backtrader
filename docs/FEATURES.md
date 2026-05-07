@@ -7,7 +7,7 @@
 ## 1. 项目目标
 
 基于 backtrader 框架，构建一套面向 A 股的端到端量化回测流水线：
-**数据下载 → 因子/指标计算 → 横截面分位 → 策略回测 → 归因分析 → 交易合规验证**。
+**数据下载 → 因子/指标计算 → 策略回测 → 归因分析 → 交易合规验证**。
 
 ## 2. 目录结构
 
@@ -21,7 +21,6 @@ my_strategy/
 │   ├── downloader.py                   # 日线/周线/月线下载（pro_bar 前复权）
 │   ├── downloader_extra.py             # daily_basic / fina_indicator / 申万行业指数
 │   ├── calc_indicators.py              # MA/MACD/KDJ + 多周期合并 + 因子合成
-│   ├── build_cross_section_pct.py      # 每日横截面分位排名
 │   └── strategy.py                     # MyStrategy + StockData feed + 佣金模型
 ├── tools/
 │   ├── attribution.py                  # 多角度归因报告
@@ -44,6 +43,8 @@ my_strategy/
 ## 3. 数据下载（download_all.py + src/downloader*.py）
 
 **职责**：从 Tushare 拉取所有需要的数据并按股票切分到本地 CSV。
+
+> 注：横截面分位排名功能（`pct_*` 因子）目前未启用，相关脚本已移除，待后续开发。
 
 - **入口**：`python my_strategy/download_all.py`
 - **股票池**：根据 `config.json.index_codes`（默认 沪深300 + 中证500）调用
@@ -76,20 +77,11 @@ my_strategy/
   写入 `factor_sector_momentum_60d`。
 - **产物**：`data/indicators/<ts_code>.csv`，列含 OHLCV + 全部指标 + 全部因子。
 
-## 5. 横截面分位（src/build_cross_section_pct.py）
-
-**职责**：对所有股票每日的因子值做横截面 rank，输出 0~1 分位列。
-
-- **PCT_FACTORS** 表声明哪些原始列要算分位、是否反向（如低 PE 高分位）。
-- 使用 `groupby('trade_date').rank(pct=True)` 一次性向量化处理全长表，性能良好。
-- 写回每只股票 CSV，新增列以 `pct_` 前缀（`pct_momentum_60d`、`pct_pe`、`pct_roe` 等）。
-- **入口**：在 `download_all.py` 末尾自动调用，也可单独 `process_indicators_dir(...)`。
-
-## 6. 策略与回测（src/strategy.py + backtest.py）
+## 5. 策略与回测（src/strategy.py + backtest.py）
 
 **入口**：`python my_strategy/backtest.py`
 
-### 6.1 MyStrategy 入场条件（5 条同时成立）
+### 5.1 MyStrategy 入场条件（5 条同时成立）
 
 1. `close < prev_close`（收阴）
 2. `close > MA60`（趋势之上）
@@ -97,7 +89,7 @@ my_strategy/
 4. 过去 `dea_lookback_days` 内出现过 `DEA < 0`（刚刚翻多）
 5. 当前未持仓或满足加仓条件
 
-### 6.2 仓位与卖出
+### 5.2 仓位与卖出
 
 - 仓位规模按 `initial_cash / max_positions` 等额分配；
 - 止盈分级：`take_profit_1_pct`、`take_profit_2_pct` 两档；
@@ -106,14 +98,14 @@ my_strategy/
 - MA25 跌破止损（仅在已经触发过 take_profit_1 之后生效）；
 - `cerebro.broker.set_coc(True)`：市价单当日收盘成交，**信号日 == 执行日**。
 
-### 6.3 回测组件
+### 5.3 回测组件
 
 - `StockData`（PandasData 子类）暴露 `ma25/ma60/dea` 三条预计算线；
 - `StockCommission`：买入只收佣金，卖出佣金 + 印花税；
 - 自定义 `BacktestProgressAnalyzer`：按 bar 进度打印百分比；
 - 数据预过滤：剔除上市过晚 / 中途退市 / 指标文件缺失的股票，跳过原因汇总打印。
 
-### 6.4 产物
+### 5.4 产物
 
 - `results/trade_list.csv`：逐笔（每次买卖）明细；
 - `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；
@@ -121,32 +113,34 @@ my_strategy/
 - `data/signals_log.csv`：每次入场信号当时的因子快照（供归因使用）；
 - 终端打印：总收益、Sharpe、最大回撤、胜率等。
 
-## 7. 归因分析（tools/attribution.py）
+## 6. 归因分析（tools/attribution.py）
 
 **职责**：把交易明细 + 信号日志 join 起来，从五个角度评估策略。
 
-输入两份：`results/trade_summary.csv`（被改名为 `trade_log` 在内部使用）+ `data/signals_log.csv`。
+输入两份：`results/trade_summary.csv` + `data/signals_log.csv`。
+**触发方式**：`backtest.py` 跑完后自动调用 `attribution.run(project_root, cfg)`，无需单独执行；也可手动 `python my_strategy/tools/attribution.py`。
 输出到 `reports/`：
 
 1. **trade_profile**：按收益分桶（大盈/小盈/持平/小亏/大亏）统计因子均值、分位；
 2. **sector_winrate**：按申万一级行业统计交易数、胜率、平均收益；
 3. **factor_alpha**：每个因子的 IC（Spearman）与多空分组超额；
 4. **E-B / E-C profile**：进场信号 vs 卖出信号、进场 vs 平仓的属性对比；
-5. **summary 表**：Top-N 关键发现摘要。
+5. **entry_condition_stats**：对 7 个入场快照字段分别分组，输出长表（condition_field / bucket / count / win_rate / avg_return / avg_holding_days）；数值字段（KDJ-J、周 KDJ-J 各 4 档，MA60 偏离度 5 档）用 `pd.cut` 分桶，类别字段（ma_alignment / macd_zone / entry_week_macd_zone / entry_month_macd_zone）按值 groupby；
+6. **summary 表**：Top-N 关键发现摘要。
 
 输出目录由 `config.attribution_report_dir` 控制。
 
-## 8. 交易验证（tools/verify_trades.py）
+## 7. 交易验证（tools/verify_trades.py）
 
 **职责**：独立工具，不依赖回测产物以外的状态，逐 episode 校验：
 
 - **L1 一致性**：买入笔数 == add_count + 1；shares 累计相等；avg_cost / return_pct
   与原始明细一致；take_profit_1 必须早于 take_profit_2；MA25 止损前提是已触发过 TP1。
 - **L1 信号合规**：每笔 initial_buy / add_on 在执行日（即信号日，因 set_coc=True）
-  必须满足上文 6.1 的 5 条入场条件；卖出端同理校验。
+  必须满足上文 5.1 的 5 条入场条件；卖出端同理校验。
 - **当前状态**：196 个 episode 全部通过买入/卖出双向合规校验。
 
-## 9. 配置文件（config.json）核心字段
+## 8. 配置文件（config.json）核心字段
 
 | 字段 | 说明 |
 |---|---|
@@ -166,10 +160,10 @@ my_strategy/
 | `signals_log_path` | 入场信号日志输出路径 |
 | `attribution_report_dir` | 归因报告输出目录 |
 
-## 10. 运行命令速查
+## 9. 运行命令速查
 
 ```bash
-# 1. 一键拉取股票池 + 全部数据 + 计算指标 + 横截面分位
+# 1. 一键拉取股票池 + 全部数据 + 计算指标
 python my_strategy/download_all.py
 
 # 2. 跑回测（产生 trade_list / trade_summary / signals_log / equity_curve）

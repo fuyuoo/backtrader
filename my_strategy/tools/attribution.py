@@ -135,6 +135,81 @@ def compute_add_count_stats(trades):
     return df.sort_values('_ord').drop(columns='_ord').reset_index(drop=True)
 
 
+_KDJ_BINS = [-np.inf, 40, 80, 100, np.inf]
+_KDJ_LABELS = ['[0,40)', '[40,80)', '[80,100)', '[100+)']
+_MA60_BINS = [-np.inf, 0, 5, 10, 20, np.inf]
+_MA60_LABELS = ['[<0%)', '[0%,5%)', '[5%,10%)', '[10%,20%)', '[20%+)']
+
+_NUMERIC_BUCKETS = {
+    'entry_kdj_j':         (_KDJ_BINS,  _KDJ_LABELS),
+    'entry_week_kdj_j':    (_KDJ_BINS,  _KDJ_LABELS),
+    'entry_ma60_dist_pct': (_MA60_BINS, _MA60_LABELS),
+}
+_CATEGORICAL_FIELDS = [
+    'ma_alignment',
+    'macd_zone',
+    'entry_week_macd_zone',
+    'entry_month_macd_zone',
+]
+
+
+def _bucket_aggregate(field, sub):
+    """对一个 (condition_field, bucket) 子集计算 count/win_rate/avg_return/avg_holding_days。"""
+    ret = sub['return_pct'].dropna() if 'return_pct' in sub.columns else pd.Series(dtype=float)
+    hold = sub['holding_days'].dropna() if 'holding_days' in sub.columns else pd.Series(dtype=float)
+    return {
+        'count': len(sub),
+        'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+        'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+        'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+    }
+
+
+def compute_entry_condition_stats(trades):
+    """对 7 个入场快照字段分别 group，输出长表（每条件多行）。"""
+    cols = ['condition_field', 'bucket', 'count', 'win_rate',
+            'avg_return', 'avg_holding_days']
+    if trades.empty:
+        return pd.DataFrame(columns=cols)
+
+    rows = []
+
+    # 数值字段
+    for field, (bins, labels) in _NUMERIC_BUCKETS.items():
+        if field not in trades.columns:
+            continue
+        sub = trades.dropna(subset=[field]).copy()
+        if sub.empty:
+            continue
+        sub['_bucket'] = pd.cut(sub[field], bins=bins, labels=labels,
+                                 right=False, include_lowest=False)
+        for bucket in labels:
+            chunk = sub[sub['_bucket'] == bucket]
+            if chunk.empty:
+                continue
+            row = {'condition_field': field, 'bucket': bucket}
+            row.update(_bucket_aggregate(field, chunk))
+            rows.append(row)
+
+    # 类别字段
+    for field in _CATEGORICAL_FIELDS:
+        if field not in trades.columns:
+            continue
+        sub = trades.dropna(subset=[field])
+        if sub.empty:
+            continue
+        for bucket, chunk in sub.groupby(field):
+            row = {'condition_field': field, 'bucket': str(bucket)}
+            row.update(_bucket_aggregate(field, chunk))
+            rows.append(row)
+
+    if not rows:
+        return pd.DataFrame(columns=cols)
+
+    df = pd.DataFrame(rows, columns=cols)
+    return df.sort_values(['condition_field', 'bucket']).reset_index(drop=True)
+
+
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
     """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
@@ -242,6 +317,9 @@ def run(project_root, cfg):
 
     add_count = compute_add_count_stats(trades)
     add_count.to_csv(out_dir / 'add_count_stats.csv', index=False)
+
+    entry_cond = compute_entry_condition_stats(trades)
+    entry_cond.to_csv(out_dir / 'entry_condition_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)
