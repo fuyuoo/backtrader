@@ -6,6 +6,7 @@ from my_strategy.tools.attribution import (
     compute_exit_reason_stats,
     compute_add_count_stats,
     compute_entry_condition_stats,
+    compute_yearly_stats,
 )
 
 
@@ -232,4 +233,26 @@ def test_compute_entry_condition_stats_empty_input():
     out = compute_entry_condition_stats(pd.DataFrame())
     assert list(out.columns) == ['condition_field', 'bucket', 'count',
                                   'win_rate', 'avg_return', 'avg_holding_days']
+    assert len(out) == 0
+
+
+def test_compute_yearly_stats_groups_by_year():
+    trades = _make_trade_summary_extended()
+    out = compute_yearly_stats(trades)
+    assert list(out['year']) == [2022, 2023, 2024]
+    y2022 = out[out['year'] == 2022].iloc[0]
+    assert y2022['count'] == 2
+    assert y2022['total_pnl_yuan'] == 12000.0
+    assert y2022['win_rate'] == 0.5
+    y2024 = out[out['year'] == 2024].iloc[0]
+    assert y2024['count'] == 2
+    assert y2024['win_rate'] == 1.0
+    assert y2024['median_return'] == 2.0
+
+
+def test_compute_yearly_stats_empty_input():
+    out = compute_yearly_stats(pd.DataFrame())
+    assert list(out.columns) == ['year', 'count', 'win_rate',
+                                  'avg_return', 'median_return',
+                                  'total_pnl_yuan', 'avg_holding_days']
     assert len(out) == 0

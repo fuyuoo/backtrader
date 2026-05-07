@@ -210,6 +210,40 @@ def compute_entry_condition_stats(trades):
     return df.sort_values(['condition_field', 'bucket']).reset_index(drop=True)
 
 
+def compute_yearly_stats(trades):
+    """按 entry_date.year 分组：count / win_rate / avg_return / median_return /
+    total_pnl_yuan / avg_holding_days。total_pnl_yuan 单位为元。
+
+    跨年可比性：策略不复利（position_limit = initial_cash / max_positions
+    在 strategy.__init__ 中只算一次），单仓位金额常数。
+    """
+    cols = ['year', 'count', 'win_rate', 'avg_return', 'median_return',
+            'total_pnl_yuan', 'avg_holding_days']
+    if trades.empty or 'entry_date' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    t = trades.copy()
+    t['entry_date'] = pd.to_datetime(t['entry_date'], errors='coerce')
+    t = t.dropna(subset=['entry_date'])
+    if t.empty:
+        return pd.DataFrame(columns=cols)
+    t['year'] = t['entry_date'].dt.year
+    rows = []
+    for year, sub in t.groupby('year'):
+        ret = sub['return_pct'].dropna() if 'return_pct' in sub.columns else pd.Series(dtype=float)
+        pnl = sub['gross_pnl'].dropna() if 'gross_pnl' in sub.columns else pd.Series(dtype=float)
+        hold = sub['holding_days'].dropna() if 'holding_days' in sub.columns else pd.Series(dtype=float)
+        rows.append({
+            'year': int(year),
+            'count': len(sub),
+            'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'median_return': round(ret.median(), 4) if len(ret) else float('nan'),
+            'total_pnl_yuan': round(pnl.sum(), 2) if len(pnl) else 0.0,
+            'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+        })
+    return pd.DataFrame(rows, columns=cols).sort_values('year').reset_index(drop=True)
+
+
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
     """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
@@ -320,6 +354,9 @@ def run(project_root, cfg):
 
     entry_cond = compute_entry_condition_stats(trades)
     entry_cond.to_csv(out_dir / 'entry_condition_stats.csv', index=False)
+
+    yearly = compute_yearly_stats(trades)
+    yearly.to_csv(out_dir / 'yearly_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)
