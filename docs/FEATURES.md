@@ -108,7 +108,7 @@ my_strategy/
 ### 5.4 产物
 
 - `results/trade_list.csv`：逐笔（每次买卖）明细；
-- `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；新增列 `mfe_pct` / `mae_pct`（持仓期相对首买入价的最高浮盈 / 最深浮亏，单位百分点）、`dea_neg_distance_days`（首买时距上次 DEA<0 的 bar 数）；这些字段为只读观测，不参与买卖判定；
+- `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；新增列 `mfe_pct` / `mae_pct`（持仓期相对首买入价的最高浮盈 / 最深浮亏，单位百分点）、`dea_neg_distance_days`（首买时距上次 DEA<0 的 bar 数）；这些字段为只读观测，不参与买卖判定；新增 4 个入场环境布尔快照列 `entry_hs300_dif_above_zero` / `entry_hs300_bull_align` / `entry_stock_bull_align` / `entry_stock_above_ma25`，分别表示进场当日 HS300 MACD DIF 是否水上、HS300 是否完整多头排列（ma25>ma60>ma144>ma180）、个股是否完整多头排列、个股是否站上 MA25；
 - `results/equity_curve.png`：净值曲线；
 - `data/signals_log.csv`：每次入场信号当时的因子快照（供归因使用）；
 - 终端打印：总收益、Sharpe、最大回撤、胜率等。
@@ -134,7 +134,12 @@ my_strategy/
 11. **mfe_mae_by_exit**：按出场原因聚合 MFE（持仓期最高浮盈）/ MAE（最深浮亏）画像，列含 avg_return / avg_mfe / avg_mae / avg_pullback (mfe-return) / avg_underwater (-mae)；
 12. **mfe_distribution**：按 mfe_pct 6 桶分布，看曾浮盈过 X% 的笔最终落地胜率/avg_return；
 13. **dea_lookback_stats**：按 `dea_neg_distance_days`（距上次 DEA<0 的 bar 数，由 strategy.py 入场时记录）11 桶扫描，评估 `dea_lookback_days`（默认 5）阈值的合理性；
-14. **monthly_stats**：按 `entry_date` 年月分组，列与 yearly_stats 同口径（count / win_rate / avg_return / median_return / total_pnl_yuan / avg_holding_days）。
+14. **monthly_stats**：按 `entry_date` 年月分组，列与 yearly_stats 同口径（count / win_rate / avg_return / median_return / total_pnl_yuan / avg_holding_days）；
+15. **hs300_dif_stats**：按 HS300 MACD DIF 水上/水下二桶统计胜率与收益（flag_value × count / win_rate / avg_return / avg_holding_days）；
+16. **hs300_bull_align_stats**：按 HS300 多头排列（ma25>ma60>ma144>ma180）True/False 二桶统计；
+17. **stock_bull_align_stats**：按个股多头排列 True/False 二桶统计；
+18. **stock_above_ma25_stats**：按个股是否站上 MA25 二桶统计；
+19. **regime_combo_stats**：HS300 DIF × 个股多头排列 2x2 共振表（4 个 combo：大盘水上+个股多头 / 大盘水上+个股非多头 / 大盘水下+个股多头 / 大盘水下+个股非多头）。
 
 输出目录由 `config.attribution_report_dir` 控制。
 

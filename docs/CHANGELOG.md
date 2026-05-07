@@ -15,6 +15,17 @@
 
 ---
 
+## 2026-05-07 — 入场环境快照与归因（第一阶段）
+
+- 需求：在 trade_summary 写入入场时刻 4 个环境布尔标志（HS300 DIF 水上水下、HS300 多头排列、个股多头排列、个股站上 MA25），attribution 加 5 张新报告分析环境对胜率的影响。
+- 改动：
+  - `my_strategy/backtest.py` 新增 `_compute_regime_flags`；`_enrich_trade_summary` 加载 HS300 indicators 并写入 4 个新列（缺文件 raise FileNotFoundError，不静默降级）。
+  - `my_strategy/tools/attribution.py` 新增 `_compute_bool_flag_stats` helper + 5 个 compute 函数 + run() dtype 转换 + 5 个 to_csv。
+  - `my_strategy/tests/test_backtest.py` 新建/扩展，覆盖 `_compute_regime_flags` 与 `_enrich_trade_summary` 集成（13 个用例）。
+  - `my_strategy/tests/test_attribution.py` 新增 7 个测试。
+  - `my_strategy/tests/test_attribution_run.py` `EXPECTED_FILES` 15→20。
+- 影响：trade_summary.csv 新增 4 列；reports/ 目录新增 5 个 CSV；strategy.py 未改，回测笔数与收益不变（5,911 笔，与上一版一致）。
+
 ## 2026-05-07 — 归因报告新增 4 张表（持仓画像/参数扫描/月度细化）+ strategy 采集 mfe/mae/dea 距离
 
 - 需求：标准量化诊断缺失——持仓期 MFE/MAE 未跟踪、dea_lookback_days 这个魔数未做扫描归因、yearly_stats 5 行样本太薄。
