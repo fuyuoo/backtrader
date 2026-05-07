@@ -15,6 +15,23 @@
 
 ---
 
+## 2026-05-08 — 行业多空环境快照与归因（第二阶段）完成
+
+- 需求：在入场时刻快照行业指数的多空状态（多头排列、站上MA25、DIF水上水下、周/月线MACD zone、60日动量），并生成 8 张新归因报告分析行业环境对交易胜率/收益的影响。
+- 改动：
+  - `my_strategy/src/downloader_extra.py`：新增 `download_sw_bars`（申万行业指数周/月线，asset='I'）；`main()` 新增 SW 周线/月线下载循环。
+  - `my_strategy/src/build_sector_mapping.py`（新建）：`fetch_mapping(stock_list, sector_csv)` + `merge_to_csv`，从 tushare `stock_basic` 接口构建 ts_code → sw_index_code 映射，写出 `stock_sector.csv`。
+  - `my_strategy/tools/attribution.py`：
+    - 新增 6 个计算函数：`compute_sector_bull_align_stats` / `compute_sector_above_ma25_stats` / `compute_sector_dif_stats` / `compute_sector_week_macd_stats` / `compute_sector_month_macd_stats` / `compute_sector_momentum_60d_stats`；
+    - 新增辅助函数 `_compute_zone_stats`（按字符串 zone 分桶）；
+    - 新增 `compute_sector_industry_stats`（按 SW 行业代码分桶）；
+    - 新增 `_SECTOR_STOCK_COMBO_LABELS` + `compute_sector_stock_combo_stats`（行业×个股多头排列 2×2 交叉）；
+    - `run()` tri-state 还原列从 4 个扩展至 7 个；载入 `sector_map_industry` 并写出 8 张新报告（20→28 张）。
+  - `my_strategy/tests/test_attribution.py`：新增 13 个测试（54 个总计）。
+  - `my_strategy/tests/test_attribution_run.py`：`EXPECTED_FILES` 从 20 扩展至 28（新增 8 个 sector 文件名）。
+  - `docs/FEATURES.md`：第 6 节报告列表补全至 27 条（items 20-27）。
+- 影响：归因报告从 19 张增至 28 张；所有行业数据均软失败（stock_sector.csv 缺失或 sw_index_code 列缺失时返回空表，不影响其余报告）；Tasks 5-6（实际下载 SW 数据）仍待线上执行。
+
 ## 2026-05-08 — feat(attribution): sector_industry_stats — 按 SW 一级行业分桶聚合
 
 - 需求：在 attribution.py 中新增 compute_sector_industry_stats，按 ts_code → sw_index_code 映射后对 SW 31 个一级行业分桶统计交易胜率/收益/持仓天数，并在 run() 中写出 sector_industry_stats.csv。

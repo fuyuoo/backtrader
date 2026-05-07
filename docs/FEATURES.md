@@ -181,6 +181,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 24. **sector_month_macd_stats**：按行业月线 MACD zone 分桶统计；
 25. **sector_momentum_60d_stats**：按行业 60 日动量五分桶（Q1～Q5）统计；
 26. **sector_industry_stats**：按 ts_code → sw_index_code 映射后，按 SW 一级行业分桶聚合（count / win_rate / avg_return / avg_holding_days），按交易笔数降序排列；未映射股票自动跳过。
+27. **sector_stock_combo_stats**：行业多头排列 × 个股多头排列 2×2 共振表（≤4 行，空桶跳过）；列含 combo / count / win_rate / avg_return / avg_holding_days。
 
 输出目录由 `config.attribution_report_dir` 控制。
 
