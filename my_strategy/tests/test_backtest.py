@@ -1,6 +1,11 @@
+import sys
+from pathlib import Path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
 import pandas as pd
 from datetime import date
-from backtest import _print_trade_stats, backfill_forward_returns
+from backtest import _print_trade_stats, backfill_forward_returns, _compute_regime_flags
 
 
 def _make_summary_df():
@@ -84,3 +89,58 @@ def test_backfill_forward_returns_handles_missing_horizon():
     assert signals[0]['forward_return_5d'] is None
     assert signals[0]['forward_return_20d'] is None
     assert signals[0]['forward_return_60d'] is None
+
+
+def _stock_row(close=10.0, ma25=9.0, ma60=8.0, ma144=7.0, ma180=6.0):
+    return pd.Series({'close': close, 'ma25': ma25, 'ma60': ma60,
+                      'ma144': ma144, 'ma180': ma180})
+
+
+def _hs300_row(dif=0.5, ma25=4000, ma60=3900, ma144=3800, ma180=3700):
+    return pd.Series({'dif': dif, 'ma25': ma25, 'ma60': ma60,
+                      'ma144': ma144, 'ma180': ma180})
+
+
+def test_regime_flags_all_bullish():
+    flags = _compute_regime_flags(_stock_row(), _hs300_row())
+    assert flags == {
+        'entry_hs300_dif_above_zero': True,
+        'entry_hs300_bull_align': True,
+        'entry_stock_bull_align': True,
+        'entry_stock_above_ma25': True,
+    }
+
+
+def test_regime_flags_all_bearish():
+    stock = _stock_row(close=5.0, ma25=6.0, ma60=7.0, ma144=8.0, ma180=9.0)
+    hs300 = _hs300_row(dif=-0.5, ma25=3700, ma60=3800, ma144=3900, ma180=4000)
+    flags = _compute_regime_flags(stock, hs300)
+    assert flags == {
+        'entry_hs300_dif_above_zero': False,
+        'entry_hs300_bull_align': False,
+        'entry_stock_bull_align': False,
+        'entry_stock_above_ma25': False,
+    }
+
+
+def test_regime_flags_dif_zero_is_false():
+    flags = _compute_regime_flags(_stock_row(), _hs300_row(dif=0.0))
+    assert flags['entry_hs300_dif_above_zero'] is False
+
+
+def test_regime_flags_missing_long_ma_returns_none():
+    stock = _stock_row(ma144=float('nan'))
+    hs300 = _hs300_row(ma180=float('nan'))
+    flags = _compute_regime_flags(stock, hs300)
+    assert flags['entry_stock_bull_align'] is None
+    assert flags['entry_hs300_bull_align'] is None
+    assert flags['entry_stock_above_ma25'] is True
+    assert flags['entry_hs300_dif_above_zero'] is True
+
+
+def test_regime_flags_hs300_row_is_none():
+    flags = _compute_regime_flags(_stock_row(), None)
+    assert flags['entry_hs300_dif_above_zero'] is None
+    assert flags['entry_hs300_bull_align'] is None
+    assert flags['entry_stock_bull_align'] is True
+    assert flags['entry_stock_above_ma25'] is True

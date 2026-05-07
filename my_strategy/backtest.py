@@ -129,6 +129,45 @@ def setup_cerebro(cfg, feeds, sector_map=None):
     return cerebro
 
 
+def _compute_regime_flags(stock_row, hs300_row):
+    """计算入场时刻 4 个环境布尔标志。
+
+    Args:
+        stock_row: pd.Series，含 close/ma25/ma60/ma144/ma180（来自个股 indicators）
+        hs300_row: pd.Series 或 None，含 dif/ma25/ma60/ma144/ma180（来自 HS300 indicators）
+
+    Returns:
+        dict 含 4 个键，值为 Optional[bool]：缺数据返回 None。
+    """
+    def _bull_align(row):
+        if row is None:
+            return None
+        m25, m60, m144, m180 = row.get('ma25'), row.get('ma60'), row.get('ma144'), row.get('ma180')
+        if pd.isna(m25) or pd.isna(m60) or pd.isna(m144) or pd.isna(m180):
+            return None
+        return bool(m25 > m60 > m144 > m180)
+
+    s_close = stock_row.get('close')
+    s_ma25 = stock_row.get('ma25')
+    if pd.isna(s_close) or pd.isna(s_ma25):
+        stock_above_ma25 = None
+    else:
+        stock_above_ma25 = bool(s_close > s_ma25)
+
+    if hs300_row is None:
+        hs300_dif_above = None
+    else:
+        dif = hs300_row.get('dif')
+        hs300_dif_above = None if pd.isna(dif) else bool(dif > 0)
+
+    return {
+        'entry_hs300_dif_above_zero': hs300_dif_above,
+        'entry_hs300_bull_align': _bull_align(hs300_row),
+        'entry_stock_bull_align': _bull_align(stock_row),
+        'entry_stock_above_ma25': stock_above_ma25,
+    }
+
+
 def _classify_ma_alignment(row):
     """根据进场当日 MA25/MA60/MA144/MA180 判断排列状态。"""
     ma25 = row.get('ma25')
