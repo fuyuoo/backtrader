@@ -231,6 +231,40 @@ def _classify_macd_zone(row):
     return '区间2'
 
 
+def _load_sector_indicators(cfg, data_dir):
+    """加载 31 个 SW 一级行业 indicators，返回 dict[sw_code -> DataFrame]."""
+    sw_codes = cfg.get('sw_index_codes')
+    if not sw_codes:
+        return {}
+    sw_indicators_dir = data_dir / 'sw_indicators'
+    out = {}
+    for sw_code in sw_codes:
+        path = sw_indicators_dir / f"{sw_code}.csv"
+        if path.exists():
+            df = pd.read_csv(path, parse_dates=['trade_date'])
+            out[sw_code] = df.set_index('trade_date')
+        else:
+            print(f"  [warn] sector indicator 缺失：{path}")
+    return out
+
+
+def _load_sw_sector_map(cfg, data_dir):
+    """加载 ts_code -> sw_index_code 映射，缺文件返回空 dict（soft fail）。"""
+    data_paths = cfg.get('data_paths')
+    if not data_paths or 'stock_sector_csv' not in data_paths:
+        return {}
+    sec_csv = data_dir / Path(data_paths['stock_sector_csv']).name
+    if not sec_csv.exists():
+        print(f"  [warn] stock_sector.csv 缺失：{sec_csv}")
+        return {}
+    df = pd.read_csv(sec_csv)
+    if 'sw_index_code' not in df.columns:
+        print(f"  [warn] {sec_csv} 缺 sw_index_code 列")
+        return {}
+    df = df.dropna(subset=['sw_index_code'])
+    return dict(zip(df['ts_code'], df['sw_index_code']))
+
+
 def _enrich_trade_summary(summary_df, cfg):
     """回测后富化 trade_summary，按 (ts_code, entry_date) join 指标文件，
     新增 entry_kdj_j / entry_ma60_dist_pct / industry / ma_alignment / macd_zone 列。
@@ -249,6 +283,9 @@ def _enrich_trade_summary(summary_df, cfg):
             f"Run src/calc_indicators.py for 000300.SH first.")
     hs300_df = pd.read_csv(hs300_path, parse_dates=['trade_date'])
     hs300_df = hs300_df.set_index('trade_date')
+
+    sector_indicators = _load_sector_indicators(cfg, data_dir)
+    sw_sector_map = _load_sw_sector_map(cfg, data_dir)
 
     # 加载行业映射
     sector_path = data_dir / 'stock_sector.csv'
@@ -278,6 +315,12 @@ def _enrich_trade_summary(summary_df, cfg):
                 row['entry_hs300_bull_align'] = None
                 row['entry_stock_bull_align'] = None
                 row['entry_stock_above_ma25'] = None
+                row['entry_sector_bull_align'] = None
+                row['entry_sector_above_ma25'] = None
+                row['entry_sector_dif_above_zero'] = None
+                row['entry_sector_week_macd_zone'] = None
+                row['entry_sector_month_macd_zone'] = None
+                row['entry_sector_momentum_60d'] = float('nan')
                 enriched_rows.append(row)
             continue
 
@@ -330,11 +373,27 @@ def _enrich_trade_summary(summary_df, cfg):
                 hs300_row = hs300_df.loc[entry_date] if entry_date in hs300_df.index else None
                 if isinstance(hs300_row, pd.DataFrame):
                     hs300_row = hs300_row.iloc[0]
-                flags = _compute_regime_flags(r, hs300_row, None)
+                # Look up sector_row for this stock on entry_date
+                sw_code = sw_sector_map.get(ts_code)
+                sector_row = None
+                if sw_code and sw_code in sector_indicators:
+                    sec_df = sector_indicators[sw_code]
+                    if entry_date in sec_df.index:
+                        sector_row = sec_df.loc[entry_date]
+                        if isinstance(sector_row, pd.DataFrame):
+                            sector_row = sector_row.iloc[0]
+
+                flags = _compute_regime_flags(r, hs300_row, sector_row)
                 row['entry_hs300_dif_above_zero'] = flags['entry_hs300_dif_above_zero']
                 row['entry_hs300_bull_align'] = flags['entry_hs300_bull_align']
                 row['entry_stock_bull_align'] = flags['entry_stock_bull_align']
                 row['entry_stock_above_ma25'] = flags['entry_stock_above_ma25']
+                row['entry_sector_bull_align'] = flags['entry_sector_bull_align']
+                row['entry_sector_above_ma25'] = flags['entry_sector_above_ma25']
+                row['entry_sector_dif_above_zero'] = flags['entry_sector_dif_above_zero']
+                row['entry_sector_week_macd_zone'] = flags['entry_sector_week_macd_zone']
+                row['entry_sector_month_macd_zone'] = flags['entry_sector_month_macd_zone']
+                row['entry_sector_momentum_60d'] = flags['entry_sector_momentum_60d']
             else:
                 row['entry_kdj_j'] = None
                 row['entry_ma60_dist_pct'] = None
@@ -348,6 +407,12 @@ def _enrich_trade_summary(summary_df, cfg):
                 row['entry_hs300_bull_align'] = None
                 row['entry_stock_bull_align'] = None
                 row['entry_stock_above_ma25'] = None
+                row['entry_sector_bull_align'] = None
+                row['entry_sector_above_ma25'] = None
+                row['entry_sector_dif_above_zero'] = None
+                row['entry_sector_week_macd_zone'] = None
+                row['entry_sector_month_macd_zone'] = None
+                row['entry_sector_momentum_60d'] = float('nan')
 
             enriched_rows.append(row)
 
@@ -355,7 +420,10 @@ def _enrich_trade_summary(summary_df, cfg):
     # 仅这 4 列具有 True/False/None 三态语义，需要 object dtype 保留 Python bool/None；
     # 旧的含 None 列（如 entry_kdj_j）是数值/字符串 + NaN，不需要此处理。
     for col in ('entry_hs300_dif_above_zero', 'entry_hs300_bull_align',
-                'entry_stock_bull_align', 'entry_stock_above_ma25'):
+                'entry_stock_bull_align', 'entry_stock_above_ma25',
+                'entry_sector_bull_align', 'entry_sector_above_ma25',
+                'entry_sector_dif_above_zero',
+                'entry_sector_week_macd_zone', 'entry_sector_month_macd_zone'):
         if col in result.columns:
             result[col] = result[col].astype(object)
     return result
