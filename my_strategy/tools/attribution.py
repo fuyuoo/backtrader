@@ -332,6 +332,40 @@ def compute_add_block_stats(trades):
     return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
 
 
+def compute_mfe_mae_by_exit(trades):
+    """按 exit_reason 聚合 MFE/MAE 画像。
+
+    - mfe_pct / mae_pct 单位为百分点（与 return_pct 同口径）
+    - avg_pullback = avg(mfe_pct - return_pct) ，平均利润回吐
+    - avg_underwater = avg(-mae_pct)，平均浮亏深度
+    """
+    cols = ['exit_reason', 'count', 'avg_return',
+            'avg_mfe', 'avg_mae', 'avg_pullback', 'avg_underwater']
+    required = {'exit_reason', 'return_pct', 'mfe_pct', 'mae_pct'}
+    if trades.empty or not required.issubset(trades.columns):
+        return pd.DataFrame(columns=cols)
+    sub = trades.dropna(subset=['exit_reason', 'mfe_pct', 'mae_pct']).copy()
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for exit_reason, chunk in sub.groupby('exit_reason'):
+        ret = chunk['return_pct'].dropna()
+        mfe = chunk['mfe_pct']
+        mae = chunk['mae_pct']
+        pullback = (mfe - chunk['return_pct']).dropna()
+        rows.append({
+            'exit_reason': exit_reason,
+            'count': len(chunk),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'avg_mfe': round(mfe.mean(), 4) if len(mfe) else float('nan'),
+            'avg_mae': round(mae.mean(), 4) if len(mae) else float('nan'),
+            'avg_pullback': round(pullback.mean(), 4) if len(pullback) else float('nan'),
+            'avg_underwater': round((-mae).mean(), 4) if len(mae) else float('nan'),
+        })
+    df = pd.DataFrame(rows, columns=cols)
+    return df.sort_values('count', ascending=False).reset_index(drop=True)
+
+
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
     """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
@@ -451,6 +485,9 @@ def run(project_root, cfg):
 
     add_block = compute_add_block_stats(trades)
     add_block.to_csv(out_dir / 'add_block_stats.csv', index=False)
+
+    mfe_mae = compute_mfe_mae_by_exit(trades)
+    mfe_mae.to_csv(out_dir / 'mfe_mae_by_exit.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)

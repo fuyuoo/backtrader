@@ -9,6 +9,7 @@ from my_strategy.tools.attribution import (
     compute_yearly_stats,
     compute_first_buy_size_stats,
     compute_add_block_stats,
+    compute_mfe_mae_by_exit,
 )
 
 
@@ -360,5 +361,47 @@ def test_compute_add_block_stats_missing_column():
     assert list(out.columns) == [
         'bucket', 'count', 'win_rate', 'avg_return', 'median_return',
         'avg_holding_days', 'avg_add_count', 'pct_completed',
+    ]
+    assert len(out) == 0
+
+
+def test_compute_mfe_mae_by_exit_basic():
+    trades = pd.DataFrame({
+        'exit_reason': ['MA25清仓', 'MA25清仓', 'MA60止损', '止盈1'],
+        'return_pct':  [3.0,        5.0,        -8.0,        4.0],
+        'mfe_pct':     [8.0,        10.0,       2.0,         5.0],
+        'mae_pct':     [-1.0,       -0.5,       -10.0,       -0.2],
+    })
+    out = compute_mfe_mae_by_exit(trades)
+    assert list(out.columns) == [
+        'exit_reason', 'count', 'avg_return',
+        'avg_mfe', 'avg_mae', 'avg_pullback', 'avg_underwater',
+    ]
+    assert out.iloc[0]['exit_reason'] == 'MA25清仓'
+    assert out.iloc[0]['count'] == 2
+    assert out.iloc[0]['avg_return'] == 4.0
+    assert out.iloc[0]['avg_mfe'] == 9.0
+    assert out.iloc[0]['avg_mae'] == -0.75
+    assert out.iloc[0]['avg_pullback'] == 5.0
+    assert out.iloc[0]['avg_underwater'] == 0.75
+
+    ma60 = out[out['exit_reason'] == 'MA60止损'].iloc[0]
+    assert ma60['avg_underwater'] == 10.0
+
+
+def test_compute_mfe_mae_by_exit_empty_input():
+    out = compute_mfe_mae_by_exit(pd.DataFrame())
+    assert list(out.columns) == [
+        'exit_reason', 'count', 'avg_return',
+        'avg_mfe', 'avg_mae', 'avg_pullback', 'avg_underwater',
+    ]
+    assert len(out) == 0
+
+
+def test_compute_mfe_mae_by_exit_missing_column():
+    out = compute_mfe_mae_by_exit(pd.DataFrame({'exit_reason': ['x']}))
+    assert list(out.columns) == [
+        'exit_reason', 'count', 'avg_return',
+        'avg_mfe', 'avg_mae', 'avg_pullback', 'avg_underwater',
     ]
     assert len(out) == 0
