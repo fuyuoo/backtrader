@@ -516,6 +516,53 @@ def compute_stock_above_ma25_stats(trades):
     return _compute_bool_flag_stats(trades, 'entry_stock_above_ma25')
 
 
+def compute_sector_bull_align_stats(trades):
+    """按 entry_sector_bull_align 分桶（行业指数多头排列）。"""
+    return _compute_bool_flag_stats(trades, 'entry_sector_bull_align')
+
+
+def compute_sector_above_ma25_stats(trades):
+    """按 entry_sector_above_ma25 分桶（行业指数 close > ma25）。"""
+    return _compute_bool_flag_stats(trades, 'entry_sector_above_ma25')
+
+
+def compute_sector_dif_stats(trades):
+    """按 entry_sector_dif_above_zero 分桶（行业 MACD DIF > 0）。"""
+    return _compute_bool_flag_stats(trades, 'entry_sector_dif_above_zero')
+
+
+def _compute_zone_stats(trades, zone_col):
+    """对字符串桶（如 '多头'/'空头'/'震荡'）做聚合。"""
+    cols = ['zone', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
+    if trades.empty or zone_col not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    sub = trades.dropna(subset=[zone_col]).copy()
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for zone, chunk in sub.groupby(zone_col):
+        ret = chunk['return_pct'].dropna() if 'return_pct' in chunk.columns else pd.Series(dtype=float)
+        hold = chunk['holding_days'].dropna() if 'holding_days' in chunk.columns else pd.Series(dtype=float)
+        rows.append({
+            'zone': zone,
+            'count': len(chunk),
+            'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+        })
+    return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
+
+
+def compute_sector_week_macd_stats(trades):
+    """按 entry_sector_week_macd_zone 字符串桶聚合。"""
+    return _compute_zone_stats(trades, 'entry_sector_week_macd_zone')
+
+
+def compute_sector_month_macd_stats(trades):
+    """按 entry_sector_month_macd_zone 字符串桶聚合。"""
+    return _compute_zone_stats(trades, 'entry_sector_month_macd_zone')
+
+
 _REGIME_COMBO_LABELS = [
     ('大盘水上+个股多头', True, True),
     ('大盘水上+个股非多头', True, False),
@@ -649,7 +696,9 @@ def run(project_root, cfg):
 
     # 4 个 regime flag 列从 csv 读回是 "True"/"False"/空 字符串，转回 Optional[bool]
     for col in ['entry_hs300_dif_above_zero', 'entry_hs300_bull_align',
-                'entry_stock_bull_align', 'entry_stock_above_ma25']:
+                'entry_stock_bull_align', 'entry_stock_above_ma25',
+                'entry_sector_bull_align', 'entry_sector_above_ma25',
+                'entry_sector_dif_above_zero']:
         if col in trades.columns:
             trades[col] = trades[col].map(
                 {'True': True, 'False': False, True: True, False: False}
@@ -709,6 +758,12 @@ def run(project_root, cfg):
 
     regime_combo = compute_regime_combo_stats(trades)
     regime_combo.to_csv(out_dir / 'regime_combo_stats.csv', index=False)
+
+    compute_sector_bull_align_stats(trades).to_csv(out_dir / 'sector_bull_align_stats.csv', index=False)
+    compute_sector_above_ma25_stats(trades).to_csv(out_dir / 'sector_above_ma25_stats.csv', index=False)
+    compute_sector_dif_stats(trades).to_csv(out_dir / 'sector_dif_stats.csv', index=False)
+    compute_sector_week_macd_stats(trades).to_csv(out_dir / 'sector_week_macd_stats.csv', index=False)
+    compute_sector_month_macd_stats(trades).to_csv(out_dir / 'sector_month_macd_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)

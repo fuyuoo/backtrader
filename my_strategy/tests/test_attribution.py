@@ -615,3 +615,66 @@ def test_compute_regime_combo_stats_empty():
     out = compute_regime_combo_stats(pd.DataFrame())
     assert out.empty
     assert list(out.columns) == ['combo', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
+
+
+def test_sector_bull_align_stats_two_buckets():
+    import pandas as pd
+    from my_strategy.tools.attribution import compute_sector_bull_align_stats
+    trades = pd.DataFrame({
+        'entry_sector_bull_align': [True, True, False, False, None],
+        'return_pct': [0.05, -0.02, 0.01, -0.10, 0.00],
+        'holding_days': [10, 5, 7, 12, 3],
+    })
+    out = compute_sector_bull_align_stats(trades)
+    assert list(out['flag_value']) == ['True', 'False']
+    assert out.iloc[0]['count'] == 2 and out.iloc[1]['count'] == 2
+
+
+def test_sector_above_ma25_stats():
+    import pandas as pd
+    from my_strategy.tools.attribution import compute_sector_above_ma25_stats
+    trades = pd.DataFrame({
+        'entry_sector_above_ma25': [True, False],
+        'return_pct': [0.10, -0.05],
+        'holding_days': [10, 5],
+    })
+    out = compute_sector_above_ma25_stats(trades)
+    assert len(out) == 2
+
+
+def test_sector_dif_stats():
+    import pandas as pd
+    from my_strategy.tools.attribution import compute_sector_dif_stats
+    trades = pd.DataFrame({
+        'entry_sector_dif_above_zero': [True, False, True],
+        'return_pct': [0.05, -0.02, 0.03],
+        'holding_days': [10, 5, 7],
+    })
+    out = compute_sector_dif_stats(trades)
+    assert out.set_index('flag_value').loc['True', 'count'] == 2
+
+
+def test_sector_week_macd_stats_three_buckets():
+    """字符串桶：'多头'/'空头'/'震荡'。"""
+    import pandas as pd
+    from my_strategy.tools.attribution import compute_sector_week_macd_stats
+    trades = pd.DataFrame({
+        'entry_sector_week_macd_zone': ['多头', '多头', '空头', '震荡', None],
+        'return_pct': [0.05, 0.03, -0.02, 0.01, 0.00],
+        'holding_days': [10, 5, 7, 12, 3],
+    })
+    out = compute_sector_week_macd_stats(trades)
+    assert set(out['zone']) == {'多头', '空头', '震荡'}
+    assert out.set_index('zone').loc['多头', 'count'] == 2
+
+
+def test_sector_month_macd_stats_three_buckets():
+    import pandas as pd
+    from my_strategy.tools.attribution import compute_sector_month_macd_stats
+    trades = pd.DataFrame({
+        'entry_sector_month_macd_zone': ['多头', '空头', '空头'],
+        'return_pct': [0.05, -0.02, -0.05],
+        'holding_days': [10, 5, 7],
+    })
+    out = compute_sector_month_macd_stats(trades)
+    assert out.set_index('zone').loc['空头', 'count'] == 2
