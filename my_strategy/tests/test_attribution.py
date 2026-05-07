@@ -678,3 +678,41 @@ def test_sector_month_macd_stats_three_buckets():
     })
     out = compute_sector_month_macd_stats(trades)
     assert out.set_index('zone').loc['空头', 'count'] == 2
+
+
+def test_sector_momentum_60d_stats_quintile():
+    """五分桶 by quintile (Q1-Q5)，每桶约 20% 样本。"""
+    import pandas as pd
+    from my_strategy.tools.attribution import compute_sector_momentum_60d_stats
+
+    trades = pd.DataFrame({
+        'entry_sector_momentum_60d': [round(i * 0.01, 4) for i in range(100)],  # 0.00 ~ 0.99
+        'return_pct': [0.01 * (i % 5 - 2) for i in range(100)],
+        'holding_days': list(range(100)),
+    })
+    out = compute_sector_momentum_60d_stats(trades)
+    assert list(out['quintile']) == ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']
+    assert all(out['count'] == 20)
+
+
+def test_sector_momentum_60d_stats_handles_nan():
+    import pandas as pd
+    from my_strategy.tools.attribution import compute_sector_momentum_60d_stats
+    trades = pd.DataFrame({
+        'entry_sector_momentum_60d': [0.1, 0.2, float('nan'), 0.05, 0.15],
+        'return_pct': [0.01, 0.02, 0.03, 0.04, 0.05],
+        'holding_days': [10, 5, 7, 8, 9],
+    })
+    out = compute_sector_momentum_60d_stats(trades)
+    # NaN 行 dropna 跳过，剩 4 行分 5 桶时退化（每桶 0-1 个）
+    assert out['count'].sum() == 4
+
+
+def test_sector_momentum_60d_stats_empty_returns_empty_frame():
+    import pandas as pd
+    from my_strategy.tools.attribution import compute_sector_momentum_60d_stats
+    trades = pd.DataFrame()
+    out = compute_sector_momentum_60d_stats(trades)
+    assert out.empty
+    assert list(out.columns) == ['quintile', 'momentum_lo', 'momentum_hi',
+                                  'count', 'win_rate', 'avg_return', 'avg_holding_days']

@@ -563,6 +563,37 @@ def compute_sector_month_macd_stats(trades):
     return _compute_zone_stats(trades, 'entry_sector_month_macd_zone')
 
 
+def compute_sector_momentum_60d_stats(trades):
+    """按 entry_sector_momentum_60d 五分桶（Q1=最低, Q5=最高）聚合。"""
+    cols = ['quintile', 'momentum_lo', 'momentum_hi',
+            'count', 'win_rate', 'avg_return', 'avg_holding_days']
+    if trades.empty or 'entry_sector_momentum_60d' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    sub = trades.dropna(subset=['entry_sector_momentum_60d']).copy()
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    sub['_q'] = pd.qcut(sub['entry_sector_momentum_60d'],
+                       q=5, labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'],
+                       duplicates='drop')
+    rows = []
+    for q in ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']:
+        chunk = sub[sub['_q'] == q]
+        if chunk.empty:
+            continue
+        ret = chunk['return_pct'].dropna() if 'return_pct' in chunk.columns else pd.Series(dtype=float)
+        hold = chunk['holding_days'].dropna() if 'holding_days' in chunk.columns else pd.Series(dtype=float)
+        rows.append({
+            'quintile': q,
+            'momentum_lo': round(chunk['entry_sector_momentum_60d'].min(), 4),
+            'momentum_hi': round(chunk['entry_sector_momentum_60d'].max(), 4),
+            'count': len(chunk),
+            'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+        })
+    return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
+
+
 _REGIME_COMBO_LABELS = [
     ('大盘水上+个股多头', True, True),
     ('大盘水上+个股非多头', True, False),
@@ -694,7 +725,7 @@ def run(project_root, cfg):
     signals = pd.read_csv(sig_path, parse_dates=['date'])
     trades = pd.read_csv(trade_path, parse_dates=['entry_date'])
 
-    # 4 个 regime flag 列从 csv 读回是 "True"/"False"/空 字符串，转回 Optional[bool]
+    # 7 个 regime flag 列从 csv 读回是 "True"/"False"/空 字符串，转回 Optional[bool]
     for col in ['entry_hs300_dif_above_zero', 'entry_hs300_bull_align',
                 'entry_stock_bull_align', 'entry_stock_above_ma25',
                 'entry_sector_bull_align', 'entry_sector_above_ma25',
@@ -764,6 +795,7 @@ def run(project_root, cfg):
     compute_sector_dif_stats(trades).to_csv(out_dir / 'sector_dif_stats.csv', index=False)
     compute_sector_week_macd_stats(trades).to_csv(out_dir / 'sector_week_macd_stats.csv', index=False)
     compute_sector_month_macd_stats(trades).to_csv(out_dir / 'sector_month_macd_stats.csv', index=False)
+    compute_sector_momentum_60d_stats(trades).to_csv(out_dir / 'sector_momentum_60d_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)
