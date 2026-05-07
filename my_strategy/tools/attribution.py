@@ -572,9 +572,12 @@ def compute_sector_momentum_60d_stats(trades):
     sub = trades.dropna(subset=['entry_sector_momentum_60d']).copy()
     if sub.empty:
         return pd.DataFrame(columns=cols)
-    sub['_q'] = pd.qcut(sub['entry_sector_momentum_60d'],
-                       q=5, labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'],
-                       duplicates='drop')
+    try:
+        sub['_q'] = pd.qcut(sub['entry_sector_momentum_60d'],
+                           q=5, labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'],
+                           duplicates='drop')
+    except ValueError:
+        return pd.DataFrame(columns=cols)
     rows = []
     for q in ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']:
         chunk = sub[sub['_q'] == q]

@@ -716,3 +716,18 @@ def test_sector_momentum_60d_stats_empty_returns_empty_frame():
     assert out.empty
     assert list(out.columns) == ['quintile', 'momentum_lo', 'momentum_hi',
                                   'count', 'win_rate', 'avg_return', 'avg_holding_days']
+
+
+def test_sector_momentum_60d_stats_all_same_returns_empty():
+    """所有行动量相同时，qcut 无法分桶，应返回空 DataFrame 而非 crash。"""
+    import pandas as pd
+    from my_strategy.tools.attribution import compute_sector_momentum_60d_stats
+    trades = pd.DataFrame({
+        'entry_sector_momentum_60d': [0.05] * 20,
+        'return_pct': [0.01] * 20,
+        'holding_days': [10] * 20,
+    })
+    out = compute_sector_momentum_60d_stats(trades)
+    assert out.empty
+    assert list(out.columns) == ['quintile', 'momentum_lo', 'momentum_hi',
+                                  'count', 'win_rate', 'avg_return', 'avg_holding_days']
