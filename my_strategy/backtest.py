@@ -129,15 +129,10 @@ def setup_cerebro(cfg, feeds, sector_map=None):
     return cerebro
 
 
-def _compute_regime_flags(stock_row, hs300_row):
-    """计算入场时刻 4 个环境布尔标志。
+def _compute_regime_flags(stock_row, hs300_row, sector_row):
+    """计算入场时刻 4+6 = 10 个环境标志。
 
-    Args:
-        stock_row: pd.Series，含 close/ma25/ma60/ma144/ma180（来自个股 indicators）
-        hs300_row: pd.Series 或 None，含 dif/ma25/ma60/ma144/ma180（来自 HS300 indicators）
-
-    Returns:
-        dict 含 4 个键，值为 Optional[bool]：缺数据返回 None。
+    sector_row=None 时 6 个 entry_sector_* 为 None（数值列为 NaN）。
     """
     def _bull_align(row):
         if row is None:
@@ -147,6 +142,7 @@ def _compute_regime_flags(stock_row, hs300_row):
             return None
         return bool(m25 > m60 > m144 > m180)
 
+    # ===== Phase 1（保持不变）=====
     s_close = stock_row.get('close')
     s_ma25 = stock_row.get('ma25')
     if pd.isna(s_close) or pd.isna(s_ma25):
@@ -160,11 +156,43 @@ def _compute_regime_flags(stock_row, hs300_row):
         dif = hs300_row.get('dif')
         hs300_dif_above = None if pd.isna(dif) else bool(dif > 0)
 
+    # ===== Phase 2 新增 =====
+    if sector_row is None:
+        sector_above_ma25 = None
+        sector_dif_above = None
+        sector_week_zone = None
+        sector_month_zone = None
+        sector_momentum = float('nan')
+    else:
+        s2_close = sector_row.get('close')
+        s2_ma25 = sector_row.get('ma25')
+        if pd.isna(s2_close) or pd.isna(s2_ma25):
+            sector_above_ma25 = None
+        else:
+            sector_above_ma25 = bool(s2_close > s2_ma25)
+
+        s2_dif = sector_row.get('dif')
+        sector_dif_above = None if pd.isna(s2_dif) else bool(s2_dif > 0)
+
+        wz = sector_row.get('week_macd_zone')
+        sector_week_zone = None if (wz is None or (isinstance(wz, float) and pd.isna(wz))) else str(wz)
+        mz = sector_row.get('month_macd_zone')
+        sector_month_zone = None if (mz is None or (isinstance(mz, float) and pd.isna(mz))) else str(mz)
+
+        mom = sector_row.get('factor_momentum_60d')
+        sector_momentum = float(mom) if not pd.isna(mom) else float('nan')
+
     return {
         'entry_hs300_dif_above_zero': hs300_dif_above,
         'entry_hs300_bull_align': _bull_align(hs300_row),
         'entry_stock_bull_align': _bull_align(stock_row),
         'entry_stock_above_ma25': stock_above_ma25,
+        'entry_sector_bull_align': _bull_align(sector_row),
+        'entry_sector_above_ma25': sector_above_ma25,
+        'entry_sector_dif_above_zero': sector_dif_above,
+        'entry_sector_week_macd_zone': sector_week_zone,
+        'entry_sector_month_macd_zone': sector_month_zone,
+        'entry_sector_momentum_60d': sector_momentum,
     }
 
 
@@ -302,7 +330,7 @@ def _enrich_trade_summary(summary_df, cfg):
                 hs300_row = hs300_df.loc[entry_date] if entry_date in hs300_df.index else None
                 if isinstance(hs300_row, pd.DataFrame):
                     hs300_row = hs300_row.iloc[0]
-                flags = _compute_regime_flags(r, hs300_row)
+                flags = _compute_regime_flags(r, hs300_row, None)
                 row['entry_hs300_dif_above_zero'] = flags['entry_hs300_dif_above_zero']
                 row['entry_hs300_bull_align'] = flags['entry_hs300_bull_align']
                 row['entry_stock_bull_align'] = flags['entry_stock_bull_align']

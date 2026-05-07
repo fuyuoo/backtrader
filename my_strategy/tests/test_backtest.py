@@ -102,36 +102,32 @@ def _hs300_row(dif=0.5, ma25=4000, ma60=3900, ma144=3800, ma180=3700):
 
 
 def test_regime_flags_all_bullish():
-    flags = _compute_regime_flags(_stock_row(), _hs300_row())
-    assert flags == {
-        'entry_hs300_dif_above_zero': True,
-        'entry_hs300_bull_align': True,
-        'entry_stock_bull_align': True,
-        'entry_stock_above_ma25': True,
-    }
+    flags = _compute_regime_flags(_stock_row(), _hs300_row(), None)
+    assert flags['entry_hs300_dif_above_zero'] is True
+    assert flags['entry_hs300_bull_align'] is True
+    assert flags['entry_stock_bull_align'] is True
+    assert flags['entry_stock_above_ma25'] is True
 
 
 def test_regime_flags_all_bearish():
     stock = _stock_row(close=5.0, ma25=6.0, ma60=7.0, ma144=8.0, ma180=9.0)
     hs300 = _hs300_row(dif=-0.5, ma25=3700, ma60=3800, ma144=3900, ma180=4000)
-    flags = _compute_regime_flags(stock, hs300)
-    assert flags == {
-        'entry_hs300_dif_above_zero': False,
-        'entry_hs300_bull_align': False,
-        'entry_stock_bull_align': False,
-        'entry_stock_above_ma25': False,
-    }
+    flags = _compute_regime_flags(stock, hs300, None)
+    assert flags['entry_hs300_dif_above_zero'] is False
+    assert flags['entry_hs300_bull_align'] is False
+    assert flags['entry_stock_bull_align'] is False
+    assert flags['entry_stock_above_ma25'] is False
 
 
 def test_regime_flags_dif_zero_is_false():
-    flags = _compute_regime_flags(_stock_row(), _hs300_row(dif=0.0))
+    flags = _compute_regime_flags(_stock_row(), _hs300_row(dif=0.0), None)
     assert flags['entry_hs300_dif_above_zero'] is False
 
 
 def test_regime_flags_missing_long_ma_returns_none():
     stock = _stock_row(ma144=float('nan'))
     hs300 = _hs300_row(ma180=float('nan'))
-    flags = _compute_regime_flags(stock, hs300)
+    flags = _compute_regime_flags(stock, hs300, None)
     assert flags['entry_stock_bull_align'] is None
     assert flags['entry_hs300_bull_align'] is None
     assert flags['entry_stock_above_ma25'] is True
@@ -139,7 +135,7 @@ def test_regime_flags_missing_long_ma_returns_none():
 
 
 def test_regime_flags_hs300_row_is_none():
-    flags = _compute_regime_flags(_stock_row(), None)
+    flags = _compute_regime_flags(_stock_row(), None, None)
     assert flags['entry_hs300_dif_above_zero'] is None
     assert flags['entry_hs300_bull_align'] is None
     assert flags['entry_stock_bull_align'] is True
@@ -247,3 +243,87 @@ def test_enrich_trade_summary_hs300_missing_date(tmp_path):
     assert row['entry_hs300_bull_align'] is None
     assert row['entry_stock_bull_align'] is True
     assert row['entry_stock_above_ma25'] is True
+
+
+def test_regime_flags_sector_bull_align_true():
+    import pandas as pd
+    from backtest import _compute_regime_flags
+
+    stock_row = pd.Series({'close': 10, 'ma25': 9, 'ma60': 8, 'ma144': 7, 'ma180': 6})
+    hs300_row = pd.Series({'dif': 1.0, 'ma25': 4000, 'ma60': 3900, 'ma144': 3800, 'ma180': 3700})
+    sector_row = pd.Series({
+        'close': 100, 'ma25': 95, 'ma60': 90, 'ma144': 85, 'ma180': 80,
+        'dif': 0.5, 'week_macd_zone': '多头', 'month_macd_zone': '震荡',
+        'factor_momentum_60d': 0.12,
+    })
+    f = _compute_regime_flags(stock_row, hs300_row, sector_row)
+    assert f['entry_sector_bull_align'] is True
+    assert f['entry_sector_above_ma25'] is True
+    assert f['entry_sector_dif_above_zero'] is True
+    assert f['entry_sector_week_macd_zone'] == '多头'
+    assert f['entry_sector_month_macd_zone'] == '震荡'
+    assert f['entry_sector_momentum_60d'] == 0.12
+
+
+def test_regime_flags_sector_bull_align_false():
+    import pandas as pd
+    from backtest import _compute_regime_flags
+
+    stock_row = pd.Series({'close': 10, 'ma25': 9, 'ma60': 8, 'ma144': 7, 'ma180': 6})
+    hs300_row = pd.Series({'dif': 1.0, 'ma25': 4000, 'ma60': 3900, 'ma144': 3800, 'ma180': 3700})
+    sector_row = pd.Series({
+        'close': 100, 'ma25': 95, 'ma60': 96, 'ma144': 85, 'ma180': 80,  # ma25 < ma60 破坏多头
+        'dif': -0.1, 'week_macd_zone': '空头', 'month_macd_zone': '空头',
+        'factor_momentum_60d': -0.05,
+    })
+    f = _compute_regime_flags(stock_row, hs300_row, sector_row)
+    assert f['entry_sector_bull_align'] is False
+    assert f['entry_sector_dif_above_zero'] is False
+
+
+def test_regime_flags_sector_none_returns_six_none_values():
+    """sector_row=None 时 6 个 entry_sector_* 全为 None/NaN（缺数据三态语义）。"""
+    import pandas as pd, math
+    from backtest import _compute_regime_flags
+
+    stock_row = pd.Series({'close': 10, 'ma25': 9, 'ma60': 8, 'ma144': 7, 'ma180': 6})
+    hs300_row = pd.Series({'dif': 1.0, 'ma25': 4000, 'ma60': 3900, 'ma144': 3800, 'ma180': 3700})
+    f = _compute_regime_flags(stock_row, hs300_row, None)
+    assert f['entry_sector_bull_align'] is None
+    assert f['entry_sector_above_ma25'] is None
+    assert f['entry_sector_dif_above_zero'] is None
+    assert f['entry_sector_week_macd_zone'] is None
+    assert f['entry_sector_month_macd_zone'] is None
+    assert math.isnan(f['entry_sector_momentum_60d'])
+
+
+def test_regime_flags_sector_partial_nan():
+    """sector_row.ma180 缺失时 bull_align=None，但其他 flag 不受影响。"""
+    import pandas as pd
+    from backtest import _compute_regime_flags
+
+    stock_row = pd.Series({'close': 10, 'ma25': 9, 'ma60': 8, 'ma144': 7, 'ma180': 6})
+    hs300_row = pd.Series({'dif': 1.0, 'ma25': 4000, 'ma60': 3900, 'ma144': 3800, 'ma180': 3700})
+    sector_row = pd.Series({
+        'close': 100, 'ma25': 95, 'ma60': 90, 'ma144': 85, 'ma180': float('nan'),
+        'dif': 0.5, 'week_macd_zone': '多头', 'month_macd_zone': '震荡',
+        'factor_momentum_60d': 0.12,
+    })
+    f = _compute_regime_flags(stock_row, hs300_row, sector_row)
+    assert f['entry_sector_bull_align'] is None
+    assert f['entry_sector_above_ma25'] is True
+    assert f['entry_sector_dif_above_zero'] is True
+
+
+def test_regime_flags_existing_phase1_flags_unchanged():
+    """Phase 1 的 4 个 flag 在新签名下仍正常工作（回归）。"""
+    import pandas as pd
+    from backtest import _compute_regime_flags
+
+    stock_row = pd.Series({'close': 10, 'ma25': 9, 'ma60': 8, 'ma144': 7, 'ma180': 6})
+    hs300_row = pd.Series({'dif': 1.0, 'ma25': 4000, 'ma60': 3900, 'ma144': 3800, 'ma180': 3700})
+    f = _compute_regime_flags(stock_row, hs300_row, None)  # sector=None
+    assert f['entry_hs300_dif_above_zero'] is True
+    assert f['entry_hs300_bull_align'] is True
+    assert f['entry_stock_bull_align'] is True
+    assert f['entry_stock_above_ma25'] is True
