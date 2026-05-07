@@ -108,7 +108,7 @@ my_strategy/
 ### 5.4 产物
 
 - `results/trade_list.csv`：逐笔（每次买卖）明细；
-- `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；新增列 `first_buy_price`（首买入价，作为 MFE/MAE 基准）、`mfe_pct` / `mae_pct`（持仓期相对首买入价的最高浮盈 / 最深浮亏）、`dea_neg_distance_days`（首买时距上次 DEA<0 的 bar 数）；这些字段为只读观测，不参与买卖判定；
+- `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；新增列 `mfe_pct` / `mae_pct`（持仓期相对首买入价的最高浮盈 / 最深浮亏，单位百分点）、`dea_neg_distance_days`（首买时距上次 DEA<0 的 bar 数）；这些字段为只读观测，不参与买卖判定；
 - `results/equity_curve.png`：净值曲线；
 - `data/signals_log.csv`：每次入场信号当时的因子快照（供归因使用）；
 - 终端打印：总收益、Sharpe、最大回撤、胜率等。
