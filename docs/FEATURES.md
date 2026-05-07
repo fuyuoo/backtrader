@@ -66,16 +66,50 @@ my_strategy/
 
 **职责**：把多份原始 CSV 合并成"每只股票一张完整指标表"，输出到 `data/indicators/`。
 
-- **技术指标**（基于日线）：MA25 / MA60 / MA144 / MA180、MACD（DIF/DEA/MACD）、KDJ-J；
-  9 日内 high==high（停牌、一字板）会被显式置 NaN，避免假信号。
-- **多周期合并**：`compute_weekly_monthly_indicators` 读周/月线 CSV，把周/月 KDJ-J 与
-  MACD 区间标签 ffill 到日线，得到 `kdj_j_weekly`、`macd_zone_weekly` 等列。
-- **基本面合并**：`merge_fundamentals` 按 `ann_date` 而非 `end_date` 对齐，避免使用
-  发布前的财务数据（PIT 一致性）。
-- **单股因子**（`add_single_stock_factors`）：动量 60 日、距 MA60 偏离度、MACD 强度。
-- **行业动量**（`merge_sector_momentum`）：按 `stock_sector.csv` 对应到申万行业指数，
-  写入 `factor_sector_momentum_60d`。
-- **产物**：`data/indicators/<ts_code>.csv`，列含 OHLCV + 全部指标 + 全部因子。
+### 4.1 原子计算函数（可独立调用）
+
+| 函数 | 产出列 |
+|------|--------|
+| `add_ma(df)` | ma25 / ma60 / ma144 / ma180；同时把 circ_mv 万元→亿元 |
+| `add_macd(df)` | dif / dea / macd |
+| `add_kdj(df)` | kdj_j；high==low 时分母置 NaN 避免假信号 |
+| `add_week_macd_zone(df, path)` | week_kdj_j / week_macd_zone（文件不存在填 None） |
+| `add_month_macd_zone(df, path)` | month_macd_zone（文件不存在填 None） |
+| `add_factor_momentum_60d(df)` | factor_momentum_60d |
+| `add_factor_ma60_dist(df)` | factor_ma60_dist |
+| `add_factor_macd_strength(df)` | factor_macd_strength（= dea） |
+
+### 4.2 参数化主入口
+
+```python
+compute_indicators(code, src_dirs, dst_dir, groups, ...)
+```
+
+- `groups` 为字符串列表，支持：`'ma'`、`'macd'`、`'kdj'`、`'week_macd'`、`'month_macd'`、
+  `'fundamentals'`、`'sector_momentum'`、`'factor_momentum_60d'`、`'factor_ma60_dist'`、`'factor_macd_strength'`；
+- 只计算 groups 中声明的项，输出 CSV 仅含对应列，方便按场景裁剪（如行业指数无需基本面）；
+- `src_dirs` 必须含 `'daily'` 键，可选 `'weekly'` / `'monthly'`；
+- 文件不存在时抛 `FileNotFoundError`，不静默跳过。
+
+### 4.3 CLI
+
+```bash
+python my_strategy/src/calc_indicators.py --mode stock   # 股票模式
+python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
+```
+
+`config.json` 新增 `indicator_profiles.{stock,sector}`，分别定义两种模式的 groups 列表。
+
+### 4.4 其他公开函数（向后兼容）
+
+- `compute_all_indicators(df)`：原 `compute_indicators(df)` 的全量计算别名（ma+macd+kdj）；
+- `compute_weekly_monthly_indicators(ts_code, df, data_dir)`：仍保留，供 backtest.py 调用；
+- `merge_fundamentals(daily_df, daily_basic_df, fina_df)`：按 ann_date PIT 对齐合并财务数据；
+- `merge_daily_basic_fina(daily_df, code, daily_basic_dir, fina_dir)`：路径型包装器；
+- `add_single_stock_factors(df)`：一次性添加 3 个单股因子（向后兼容旧调用）；
+- `merge_sector_momentum(daily_df, sector_index_df)`：行业指数 60 日动量 merge。
+
+- **产物**：`data/indicators/<ts_code>.csv`，列含 OHLCV + groups 所选指标 + 因子。
 
 ## 5. 策略与回测（src/strategy.py + backtest.py）
 

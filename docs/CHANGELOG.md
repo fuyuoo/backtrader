@@ -15,6 +15,16 @@
 
 ---
 
+## 2026-05-07 — calc_indicators 参数化重构：按 groups 选择性计算指标
+
+- 需求：将 calc_indicators.py 的硬编码主循环改为按 groups 列表参数化，支持 stock/sector 两种 CLI 模式。
+- 改动：
+  - `my_strategy/src/calc_indicators.py`：新增 `add_ma` / `add_macd` / `add_kdj` / `add_week_macd_zone` / `add_month_macd_zone` / `add_factor_*` 原子函数；新增 `compute_indicators(code, src_dirs, dst_dir, groups, ...)` 参数化主入口；新增 `merge_daily_basic_fina` 路径型包装器；原 `compute_indicators(df)` 重命名为 `compute_all_indicators(df)`（向后兼容）；`main()` 改用 argparse + `config.indicator_profiles`。
+  - `my_strategy/config.json`：新增 `indicator_profiles.{stock,sector}` 字段。
+  - `my_strategy/tests/test_calc_indicators.py`：新增 3 个测试（only_ma_group / macd_group / regression_skip）；旧的 6 处 `compute_indicators(df)` 调用改为 `compute_all_indicators(df)`。
+  - `docs/FEATURES.md`：第 4 节全面更新，补充原子函数表、参数化接口说明、CLI 用法。
+- 影响：所有现有测试原样通过（104 passed，1 skipped）；backtest.py 调用 `compute_weekly_monthly_indicators` 未变，不受影响。
+
 ## 2026-05-07 — 入场环境快照与归因（第一阶段）
 
 - 需求：在 trade_summary 写入入场时刻 4 个环境布尔标志（HS300 DIF 水上水下、HS300 多头排列、个股多头排列、个股站上 MA25），attribution 加 5 张新报告分析环境对胜率的影响。

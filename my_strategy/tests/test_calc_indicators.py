@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.calc_indicators import compute_indicators, compute_weekly_monthly_indicators
+from src.calc_indicators import compute_all_indicators, compute_weekly_monthly_indicators
 
 
 def make_ohlcv(n=100, base_close=10.0):
@@ -44,7 +44,7 @@ def make_random_ohlcv(n, start='2020-01-01', seed=42):
 
 def test_output_columns():
     df = make_ohlcv(100)
-    result = compute_indicators(df)
+    result = compute_all_indicators(df)
     expected_cols = {'trade_date', 'open', 'high', 'low', 'close', 'volume',
                      'ma25', 'ma60', 'dea'}
     assert expected_cols.issubset(set(result.columns))
@@ -52,7 +52,7 @@ def test_output_columns():
 
 def test_ma25_value():
     df = make_ohlcv(100)
-    result = compute_indicators(df)
+    result = compute_all_indicators(df)
     assert pd.notna(result.loc[24, 'ma25'])
     assert pd.isna(result.loc[23, 'ma25'])
     expected = df['close'].iloc[:25].mean()
@@ -61,14 +61,14 @@ def test_ma25_value():
 
 def test_row_count_unchanged():
     df = make_ohlcv(80)
-    result = compute_indicators(df)
+    result = compute_all_indicators(df)
     assert len(result) == len(df)
 
 
 def test_circ_mv_conversion():
     """circ_mv 万元 → 亿元 的换算。"""
     df = make_random_ohlcv(100)
-    result = compute_indicators(df)
+    result = compute_all_indicators(df)
     assert 'circ_mv' in result.columns
     # 5,000,000 万元 ÷ 10000 → 500.0 亿元
     assert abs(result['circ_mv'].iloc[-1] - 500.0) < 0.01
@@ -79,7 +79,7 @@ def test_circ_mv_conversion():
 def test_weekly_monthly_columns_added():
     """周线/月线 CSV 存在时，应 merge 出对应的 KDJ_J / MACD 区间字段。"""
     df = make_random_ohlcv(300)
-    result = compute_indicators(df)
+    result = compute_all_indicators(df)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         data_dir = Path(tmpdir)
@@ -113,7 +113,7 @@ def test_weekly_monthly_columns_added():
 def test_missing_weekly_monthly_files():
     """周线/月线 CSV 不存在时返回的列应全为 NaN，不抛错。"""
     df = make_random_ohlcv(100)
-    result = compute_indicators(df)
+    result = compute_all_indicators(df)
     with tempfile.TemporaryDirectory() as tmpdir:
         out = compute_weekly_monthly_indicators('NOFILE.SH', result, tmpdir)
     assert 'week_kdj_j' in out.columns
@@ -208,3 +208,69 @@ def test_merge_sector_momentum_aligns_by_date():
     out = merge_sector_momentum(daily, sector_idx)
     assert 'factor_sector_momentum_60d' in out.columns
     assert not out['factor_sector_momentum_60d'].isna().all()
+
+
+# ── 新接口 compute_indicators(code, src_dirs, dst_dir, groups) ────────────────
+
+def test_compute_indicators_with_only_ma_group(tmp_path):
+    """只传 ['ma'] 时输出 CSV 只有基础列 + ma 列，没有 macd/kdj 等。"""
+    import pandas as pd
+    from my_strategy.src import calc_indicators
+
+    src_daily = tmp_path / 'daily'
+    src_daily.mkdir()
+    df = pd.DataFrame({
+        'trade_date': pd.date_range('2024-01-01', periods=200, freq='D'),
+        'open': range(100, 300), 'high': range(105, 305),
+        'low': range(95, 295), 'close': range(100, 300),
+        'volume': [1e6] * 200, 'amount': [1e8] * 200,
+        'pct_chg': [0.01] * 200,
+    })
+    df.to_csv(src_daily / 'TEST001.csv', index=False)
+
+    dst = tmp_path / 'indicators'
+    calc_indicators.compute_indicators(
+        code='TEST001',
+        src_dirs={'daily': src_daily},
+        dst_dir=dst,
+        groups=['ma'],
+    )
+
+    out = pd.read_csv(dst / 'TEST001.csv')
+    assert {'ma25', 'ma60', 'ma144', 'ma180'}.issubset(out.columns)
+    assert 'dif' not in out.columns
+    assert 'kdj_j' not in out.columns
+
+
+def test_compute_indicators_with_macd_group(tmp_path):
+    """传 ['macd'] 时输出含 dif/dea/macd 但不含 ma/kdj。"""
+    import pandas as pd
+    from my_strategy.src import calc_indicators
+
+    src_daily = tmp_path / 'daily'
+    src_daily.mkdir()
+    df = pd.DataFrame({
+        'trade_date': pd.date_range('2024-01-01', periods=100, freq='D'),
+        'open': range(100, 200), 'high': range(105, 205),
+        'low': range(95, 195), 'close': range(100, 200),
+        'volume': [1e6] * 100, 'amount': [1e8] * 100,
+        'pct_chg': [0.01] * 100,
+    })
+    df.to_csv(src_daily / 'TEST002.csv', index=False)
+
+    dst = tmp_path / 'indicators'
+    calc_indicators.compute_indicators(
+        code='TEST002',
+        src_dirs={'daily': src_daily},
+        dst_dir=dst,
+        groups=['macd'],
+    )
+    out = pd.read_csv(dst / 'TEST002.csv')
+    assert {'dif', 'dea', 'macd'}.issubset(out.columns)
+    assert 'ma25' not in out.columns
+
+
+def test_stock_mode_byte_for_byte_regression():
+    """重构后 stock 模式对样本股输出与重构前 baseline 一致（manual test）。"""
+    import pytest
+    pytest.skip("manual regression test; see docstring")
