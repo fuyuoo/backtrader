@@ -35,6 +35,14 @@ EXPECTED_FILES = [
     'stock_bull_align_stats.csv',
     'stock_above_ma25_stats.csv',
     'regime_combo_stats.csv',
+    'sector_bull_align_stats.csv',
+    'sector_above_ma25_stats.csv',
+    'sector_dif_stats.csv',
+    'sector_week_macd_stats.csv',
+    'sector_month_macd_stats.csv',
+    'sector_momentum_60d_stats.csv',
+    'sector_industry_stats.csv',
+    'sector_stock_combo_stats.csv',
 ]
 
 
