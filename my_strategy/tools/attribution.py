@@ -471,6 +471,51 @@ def compute_monthly_stats(trades):
     return df.sort_values('year_month').reset_index(drop=True)
 
 
+def _compute_bool_flag_stats(trades, flag_col):
+    """对单个布尔标志列做 2 桶聚合（True/False，NA dropna 跳过）。"""
+    cols = ['flag_value', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
+    if trades.empty or flag_col not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    sub = trades.dropna(subset=[flag_col]).copy()
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for value in [True, False]:
+        chunk = sub[sub[flag_col] == value]
+        if chunk.empty:
+            continue
+        ret = chunk['return_pct'].dropna() if 'return_pct' in chunk.columns else pd.Series(dtype=float)
+        hold = chunk['holding_days'].dropna() if 'holding_days' in chunk.columns else pd.Series(dtype=float)
+        rows.append({
+            'flag_value': str(value),
+            'count': len(chunk),
+            'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+        })
+    return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
+
+
+def compute_hs300_dif_stats(trades):
+    """按 entry_hs300_dif_above_zero 分桶（HS300 MACD DIF 水上/水下）。"""
+    return _compute_bool_flag_stats(trades, 'entry_hs300_dif_above_zero')
+
+
+def compute_hs300_bull_align_stats(trades):
+    """按 entry_hs300_bull_align 分桶（HS300 多头排列：ma25>ma60>ma144>ma180）。"""
+    return _compute_bool_flag_stats(trades, 'entry_hs300_bull_align')
+
+
+def compute_stock_bull_align_stats(trades):
+    """按 entry_stock_bull_align 分桶（个股多头排列）。"""
+    return _compute_bool_flag_stats(trades, 'entry_stock_bull_align')
+
+
+def compute_stock_above_ma25_stats(trades):
+    """按 entry_stock_above_ma25 分桶（个股 close > ma25）。"""
+    return _compute_bool_flag_stats(trades, 'entry_stock_above_ma25')
+
+
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
     """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
@@ -563,6 +608,14 @@ def run(project_root, cfg):
     signals = pd.read_csv(sig_path, parse_dates=['date'])
     trades = pd.read_csv(trade_path, parse_dates=['entry_date'])
 
+    # 4 个 regime flag 列从 csv 读回是 "True"/"False"/空 字符串，转回 Optional[bool]
+    for col in ['entry_hs300_dif_above_zero', 'entry_hs300_bull_align',
+                'entry_stock_bull_align', 'entry_stock_above_ma25']:
+        if col in trades.columns:
+            trades[col] = trades[col].map(
+                {'True': True, 'False': False, True: True, False: False}
+            )
+
     profile = compute_trade_profile(trades, signals)
     profile.to_csv(out_dir / 'trade_profile.csv', index=False)
 
@@ -602,6 +655,18 @@ def run(project_root, cfg):
 
     monthly = compute_monthly_stats(trades)
     monthly.to_csv(out_dir / 'monthly_stats.csv', index=False)
+
+    hs300_dif = compute_hs300_dif_stats(trades)
+    hs300_dif.to_csv(out_dir / 'hs300_dif_stats.csv', index=False)
+
+    hs300_bull = compute_hs300_bull_align_stats(trades)
+    hs300_bull.to_csv(out_dir / 'hs300_bull_align_stats.csv', index=False)
+
+    stock_bull = compute_stock_bull_align_stats(trades)
+    stock_bull.to_csv(out_dir / 'stock_bull_align_stats.csv', index=False)
+
+    stock_above = compute_stock_above_ma25_stats(trades)
+    stock_above.to_csv(out_dir / 'stock_above_ma25_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)

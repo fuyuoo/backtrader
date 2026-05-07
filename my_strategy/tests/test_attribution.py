@@ -529,3 +529,57 @@ def test_compute_monthly_stats_missing_column():
         'median_return', 'total_pnl_yuan', 'avg_holding_days',
     ]
     assert len(out) == 0
+
+
+def test_compute_hs300_dif_stats_basic():
+    from tools.attribution import compute_hs300_dif_stats
+    trades = pd.DataFrame([
+        {'entry_hs300_dif_above_zero': True,  'return_pct': 5.0, 'holding_days': 10, 'status': 'completed'},
+        {'entry_hs300_dif_above_zero': True,  'return_pct': -2.0, 'holding_days': 8,  'status': 'completed'},
+        {'entry_hs300_dif_above_zero': False, 'return_pct': -3.0, 'holding_days': 12, 'status': 'completed'},
+        {'entry_hs300_dif_above_zero': None,  'return_pct': 1.0, 'holding_days': 5,  'status': 'completed'},
+    ])
+    out = compute_hs300_dif_stats(trades)
+    assert list(out['flag_value']) == ['True', 'False']
+    true_row = out[out['flag_value'] == 'True'].iloc[0]
+    assert true_row['count'] == 2
+    assert true_row['win_rate'] == 0.5
+    assert true_row['avg_return'] == round((5.0 + -2.0) / 2, 4)
+
+
+def test_compute_hs300_bull_align_stats_basic():
+    from tools.attribution import compute_hs300_bull_align_stats
+    trades = pd.DataFrame([
+        {'entry_hs300_bull_align': True,  'return_pct': 4.0, 'holding_days': 10, 'status': 'completed'},
+        {'entry_hs300_bull_align': False, 'return_pct': -1.0, 'holding_days': 7, 'status': 'completed'},
+    ])
+    out = compute_hs300_bull_align_stats(trades)
+    assert set(out['flag_value']) == {'True', 'False'}
+    assert out[out['flag_value'] == 'True'].iloc[0]['win_rate'] == 1.0
+
+
+def test_compute_stock_bull_align_stats_basic():
+    from tools.attribution import compute_stock_bull_align_stats
+    trades = pd.DataFrame([
+        {'entry_stock_bull_align': True,  'return_pct': 3.0, 'holding_days': 9, 'status': 'completed'},
+        {'entry_stock_bull_align': False, 'return_pct': -2.0, 'holding_days': 6, 'status': 'completed'},
+    ])
+    out = compute_stock_bull_align_stats(trades)
+    assert len(out) == 2
+
+
+def test_compute_stock_above_ma25_stats_basic():
+    from tools.attribution import compute_stock_above_ma25_stats
+    trades = pd.DataFrame([
+        {'entry_stock_above_ma25': True,  'return_pct': 2.0, 'holding_days': 8,  'status': 'completed'},
+        {'entry_stock_above_ma25': False, 'return_pct': -4.0, 'holding_days': 11, 'status': 'completed'},
+    ])
+    out = compute_stock_above_ma25_stats(trades)
+    assert len(out) == 2
+
+
+def test_compute_hs300_dif_stats_empty_input():
+    from tools.attribution import compute_hs300_dif_stats
+    out = compute_hs300_dif_stats(pd.DataFrame())
+    assert out.empty
+    assert list(out.columns) == ['flag_value', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
