@@ -213,6 +213,15 @@ def _enrich_trade_summary(summary_df, cfg):
 
     data_dir = Path(cfg['data_dir'])
 
+    # 加载 HS300 indicators（用于入场环境标志）— 硬失败，不静默降级
+    hs300_path = data_dir / 'indicators' / '000300.SH.csv'
+    if not hs300_path.exists():
+        raise FileNotFoundError(
+            f"HS300 indicators not found at {hs300_path}. "
+            f"Run src/calc_indicators.py for 000300.SH first.")
+    hs300_df = pd.read_csv(hs300_path, parse_dates=['trade_date'])
+    hs300_df = hs300_df.set_index('trade_date')
+
     # 加载行业映射
     sector_path = data_dir / 'stock_sector.csv'
     if sector_path.exists():
@@ -237,6 +246,10 @@ def _enrich_trade_summary(summary_df, cfg):
                 row['entry_week_kdj_j'] = None
                 row['entry_week_macd_zone'] = None
                 row['entry_month_macd_zone'] = None
+                row['entry_hs300_dif_above_zero'] = None
+                row['entry_hs300_bull_align'] = None
+                row['entry_stock_bull_align'] = None
+                row['entry_stock_above_ma25'] = None
                 enriched_rows.append(row)
             continue
 
@@ -286,6 +299,14 @@ def _enrich_trade_summary(summary_df, cfg):
                     if 'month_macd_zone' in ind_df.columns and pd.notna(r.get('month_macd_zone'))
                     else None
                 )
+                hs300_row = hs300_df.loc[entry_date] if entry_date in hs300_df.index else None
+                if isinstance(hs300_row, pd.DataFrame):
+                    hs300_row = hs300_row.iloc[0]
+                flags = _compute_regime_flags(r, hs300_row)
+                row['entry_hs300_dif_above_zero'] = flags['entry_hs300_dif_above_zero']
+                row['entry_hs300_bull_align'] = flags['entry_hs300_bull_align']
+                row['entry_stock_bull_align'] = flags['entry_stock_bull_align']
+                row['entry_stock_above_ma25'] = flags['entry_stock_above_ma25']
             else:
                 row['entry_kdj_j'] = None
                 row['entry_ma60_dist_pct'] = None
@@ -295,10 +316,20 @@ def _enrich_trade_summary(summary_df, cfg):
                 row['entry_week_kdj_j'] = None
                 row['entry_week_macd_zone'] = None
                 row['entry_month_macd_zone'] = None
+                row['entry_hs300_dif_above_zero'] = None
+                row['entry_hs300_bull_align'] = None
+                row['entry_stock_bull_align'] = None
+                row['entry_stock_above_ma25'] = None
 
             enriched_rows.append(row)
 
-    return pd.DataFrame(enriched_rows).reset_index(drop=True)
+    result = pd.DataFrame(enriched_rows).reset_index(drop=True)
+    # 4 个 regime 标志保留 Python bool / None（避免 pandas 升格为 numpy.bool）
+    for col in ('entry_hs300_dif_above_zero', 'entry_hs300_bull_align',
+                'entry_stock_bull_align', 'entry_stock_above_ma25'):
+        if col in result.columns:
+            result[col] = result[col].astype(object)
+    return result
 
 
 def _compute_benchmarks_returns(cfg):

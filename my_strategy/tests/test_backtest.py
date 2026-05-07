@@ -144,3 +144,60 @@ def test_regime_flags_hs300_row_is_none():
     assert flags['entry_hs300_bull_align'] is None
     assert flags['entry_stock_bull_align'] is True
     assert flags['entry_stock_above_ma25'] is True
+
+
+def test_enrich_trade_summary_writes_regime_flags(tmp_path):
+    """_enrich_trade_summary 应为每笔 trade 写入 4 个 regime 标志。"""
+    from backtest import _enrich_trade_summary
+
+    data_dir = tmp_path / 'data'
+    (data_dir / 'indicators').mkdir(parents=True)
+
+    stock_df = pd.DataFrame({
+        'trade_date': pd.to_datetime(['2024-01-02', '2024-01-03']),
+        'close': [10.0, 5.0],
+        'ma25': [9.0, 6.0],
+        'ma60': [8.0, 7.0],
+        'ma144': [7.0, 8.0],
+        'ma180': [6.0, 9.0],
+        'kdj_j': [50.0, 30.0],
+        'circ_mv': [100.0, 100.0],
+        'week_kdj_j': [50.0, 30.0],
+        'week_macd_zone': ['区间1', '区间0'],
+        'month_macd_zone': ['区间1', '区间0'],
+        'macd': [0.5, -0.5], 'dif': [0.6, -0.4], 'dea': [0.4, -0.3],
+    })
+    stock_df.to_csv(data_dir / 'indicators' / 'TEST.SZ.csv', index=False)
+
+    hs300_df = pd.DataFrame({
+        'trade_date': pd.to_datetime(['2024-01-02', '2024-01-03']),
+        'close': [4000, 3700],
+        'ma25': [4000, 3700], 'ma60': [3900, 3800],
+        'ma144': [3800, 3900], 'ma180': [3700, 4000],
+        'dif': [0.5, -0.3], 'dea': [0.3, -0.1], 'macd': [0.2, -0.2],
+    })
+    hs300_df.to_csv(data_dir / 'indicators' / '000300.SH.csv', index=False)
+
+    pd.DataFrame({'ts_code': ['TEST.SZ'], 'industry': ['银行']}).to_csv(
+        data_dir / 'stock_sector.csv', index=False)
+
+    summary = pd.DataFrame([
+        {'ts_code': 'TEST.SZ', 'entry_date': pd.Timestamp('2024-01-02'),
+         'return_pct': 5.0, 'status': 'completed'},
+        {'ts_code': 'TEST.SZ', 'entry_date': pd.Timestamp('2024-01-03'),
+         'return_pct': -3.0, 'status': 'completed'},
+    ])
+
+    enriched = _enrich_trade_summary(summary, {'data_dir': str(data_dir)})
+
+    row1 = enriched.iloc[0]
+    assert row1['entry_hs300_dif_above_zero'] is True
+    assert row1['entry_hs300_bull_align'] is True
+    assert row1['entry_stock_bull_align'] is True
+    assert row1['entry_stock_above_ma25'] is True
+
+    row2 = enriched.iloc[1]
+    assert row2['entry_hs300_dif_above_zero'] is False
+    assert row2['entry_hs300_bull_align'] is False
+    assert row2['entry_stock_bull_align'] is False
+    assert row2['entry_stock_above_ma25'] is False
