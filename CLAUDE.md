@@ -1,6 +1,7 @@
 # CLAUDE.md
 
 * 全程使用中文回答
+* 不允许静默处理和降级操作，要暴露异常
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.

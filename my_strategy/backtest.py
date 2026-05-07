@@ -59,16 +59,38 @@ def load_feeds(cfg):
         feeds.append((ts_code, feed))
 
     if skip_no_file:
-        print(f"SKIP {len(skip_no_file)} 支：指标文件不存在 → {skip_no_file}")
+        print(f"SKIP {len(skip_no_file)} 支：指标文件不存在")
     if skip_late_listed:
-        print(f"SKIP {len(skip_late_listed)} 支：回测期内才上市 → {skip_late_listed}")
+        print(f"SKIP {len(skip_late_listed)} 支：回测期内才上市")
     if skip_insufficient:
         print(f"SKIP {len(skip_insufficient)} 支：回测窗口内 K 线数 < {min_bars} → {skip_insufficient}")
     return feeds
 
 
+class _ProgressAnalyzer(bt.Analyzer):
+    params = (('total_bars', 0),)
+
+    def start(self):
+        self._bar = 0
+        self._last_reported_pct = -1
+
+    def next(self):
+        self._bar += 1
+        if self.p.total_bars <= 0:
+            return
+        pct = self._bar * 100 // self.p.total_bars
+        step = pct // 10
+        if step > self._last_reported_pct // 10:
+            self._last_reported_pct = pct
+            print(f"  回测进度：{pct}%（第 {self._bar} / {self.p.total_bars} 交易日）", flush=True)
+
+
 def setup_cerebro(cfg, feeds, sector_map=None):
     cerebro = bt.Cerebro()
+    start = datetime.datetime.strptime(cfg['backTest_Start_data'], '%Y%m%d')
+    end = datetime.datetime.strptime(cfg['backTest_end_data'], '%Y%m%d')
+    total_bars = int((end - start).days / 365 * 252)
+    cerebro.addanalyzer(_ProgressAnalyzer, total_bars=total_bars)
 
     for name, feed in feeds:
         cerebro.adddata(feed, name=name)
@@ -707,8 +729,6 @@ _FACTOR_COLS = [
     'factor_momentum_60d', 'factor_ma60_dist', 'factor_macd_strength',
     'factor_roe', 'factor_pe_ttm', 'factor_netprofit_yoy',
     'factor_sector_momentum_60d',
-    'pct_momentum_60d', 'pct_ma60_dist', 'pct_macd_strength',
-    'pct_roe', 'pct_pe', 'pct_netprofit_yoy', 'pct_sector_momentum_60d',
 ]
 
 
@@ -748,13 +768,13 @@ def main():
     data_dir = Path(cfg['data_dir'])
     stocks = [name for name, _ in feeds]
 
-    # Build sector_map from stock_sector.csv
+    # Build sector_map from stock_sector.csv (列名为 industry)
     sector_map = {}
     sector_csv = data_dir / 'stock_sector.csv'
     if sector_csv.exists():
         sec_df = pd.read_csv(sector_csv)
-        if 'sw_index_code' in sec_df.columns:
-            sector_map = dict(zip(sec_df['ts_code'], sec_df['sw_index_code']))
+        if 'industry' in sec_df.columns:
+            sector_map = dict(zip(sec_df['ts_code'], sec_df['industry']))
 
     # Build indicators_by_code (factor merge happens post-run, not in strategy hot path)
     indicators_by_code = {}
@@ -783,6 +803,12 @@ def main():
         print(f"signals_log: {len(sig_df)} rows written to {sig_path}")
 
     print_results(result, cfg)
+
+    # 自动触发归因分析（依赖 trade_summary.csv 和 signals_log.csv）
+    from tools import attribution
+    project_root = Path(__file__).resolve().parent
+    print("\n开始归因分析...")
+    attribution.run(project_root, cfg)
 
 
 if __name__ == '__main__':

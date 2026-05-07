@@ -78,3 +78,5 @@ datas/*.py
 /my_strategy/results/
 /my_strategy/a_stock_list.txt
 /my_strategy/stock_list_backup*.csv
+/my_strategy/results
+/my_strategy/results

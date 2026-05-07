@@ -18,6 +18,7 @@
   "atr_multiplier": 1.5,
   "take_profit_min_pct": 0.03,
   "take_profit_max_pct": 0.12,
+  "index_codes": ["000300.SH", "000905.SH"],
   "benchmark_codes": ["000300.SH", "000905.SH", "000001.SH"],
   "api_rate_per_min": 500,
   "data_paths": {
