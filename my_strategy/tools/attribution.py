@@ -403,6 +403,42 @@ def compute_mfe_distribution(trades):
     return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
 
 
+_DEA_LOOKBACK_BINS = [0, 1, 2, 3, 4, 5, 7, 10, 15, 30, 60, np.inf]
+_DEA_LOOKBACK_LABELS = ['[0,1)', '[1,2)', '[2,3)', '[3,4)', '[4,5)',
+                         '[5,7)', '[7,10)', '[10,15)', '[15,30)',
+                         '[30,60)', '[60+)']
+
+
+def compute_dea_lookback_stats(trades):
+    """按 dea_neg_distance_days 11 桶扫描，评估 dea_lookback_days 阈值的合理性。
+
+    - 函数最小返回 1，所以 [0,1) 桶永远为空（防御桶）
+    - 现行 dea_lookback_days = 5 下，[1,2)..[4,5) 必有数据，[5,7) 含距离=5 触发
+    - 后段桶在阈值放宽并重跑回测后才会出现数据
+    """
+    cols = ['bucket', 'count', 'win_rate', 'avg_return', 'median_return',
+            'avg_holding_days', 'avg_add_count', 'pct_completed']
+    if trades.empty or 'dea_neg_distance_days' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    sub = trades.dropna(subset=['dea_neg_distance_days']).copy()
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    sub['_bucket'] = pd.cut(sub['dea_neg_distance_days'],
+                             bins=_DEA_LOOKBACK_BINS, labels=_DEA_LOOKBACK_LABELS,
+                             right=False, include_lowest=True)
+    rows = []
+    for bucket in _DEA_LOOKBACK_LABELS:
+        chunk = sub[sub['_bucket'] == bucket]
+        if chunk.empty:
+            continue
+        row = {'bucket': bucket}
+        row.update(_scan_bucket_aggregate(chunk))
+        rows.append(row)
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
+
+
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
     """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
@@ -528,6 +564,9 @@ def run(project_root, cfg):
 
     mfe_dist = compute_mfe_distribution(trades)
     mfe_dist.to_csv(out_dir / 'mfe_distribution.csv', index=False)
+
+    dea_lookback = compute_dea_lookback_stats(trades)
+    dea_lookback.to_csv(out_dir / 'dea_lookback_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)

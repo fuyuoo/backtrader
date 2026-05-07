@@ -11,6 +11,7 @@ from my_strategy.tools.attribution import (
     compute_add_block_stats,
     compute_mfe_mae_by_exit,
     compute_mfe_distribution,
+    compute_dea_lookback_stats,
 )
 
 
@@ -443,5 +444,46 @@ def test_compute_mfe_distribution_missing_column():
     assert list(out.columns) == [
         'bucket', 'count', 'win_rate', 'avg_return',
         'median_return', 'pct_completed',
+    ]
+    assert len(out) == 0
+
+
+def test_compute_dea_lookback_stats_buckets():
+    trades = pd.DataFrame({
+        'dea_neg_distance_days': [1, 1, 2, 4, 5, 6, 8, 12, 25, 45, 100],
+        'return_pct':              [3.0, 1.0, -2.0, 4.0, 5.0, -1.0, 2.0, -3.0, 6.0, -4.0, 8.0],
+        'holding_days':            [10, 12, 15, 18, 20, 22, 25, 28, 30, 35, 40],
+        'add_count':               [0, 1, 0, 1, 2, 0, 1, 0, 1, 0, 0],
+        'status':                  ['completed'] * 11,
+    })
+    out = compute_dea_lookback_stats(trades)
+    assert list(out.columns) == [
+        'bucket', 'count', 'win_rate', 'avg_return', 'median_return',
+        'avg_holding_days', 'avg_add_count', 'pct_completed',
+    ]
+    expected = ['[1,2)', '[2,3)', '[4,5)', '[5,7)', '[7,10)',
+                '[10,15)', '[15,30)', '[30,60)', '[60+)']
+    assert list(out['bucket']) == expected
+    row_1 = out[out['bucket'] == '[1,2)'].iloc[0]
+    assert row_1['count'] == 2
+    assert row_1['avg_return'] == 2.0
+    row_5_7 = out[out['bucket'] == '[5,7)'].iloc[0]
+    assert row_5_7['count'] == 2
+
+
+def test_compute_dea_lookback_stats_empty_input():
+    out = compute_dea_lookback_stats(pd.DataFrame())
+    assert list(out.columns) == [
+        'bucket', 'count', 'win_rate', 'avg_return', 'median_return',
+        'avg_holding_days', 'avg_add_count', 'pct_completed',
+    ]
+    assert len(out) == 0
+
+
+def test_compute_dea_lookback_stats_missing_column():
+    out = compute_dea_lookback_stats(pd.DataFrame({'return_pct': [1.0]}))
+    assert list(out.columns) == [
+        'bucket', 'count', 'win_rate', 'avg_return', 'median_return',
+        'avg_holding_days', 'avg_add_count', 'pct_completed',
     ]
     assert len(out) == 0
