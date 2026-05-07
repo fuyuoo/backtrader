@@ -96,6 +96,31 @@ def download_sw_index(index_code, start_date, end_date, out_dir, pro,
     df.to_csv(csv_path, index=False)
 
 
+def download_sw_bars(sw_code, start_date, end_date, out_dir, freq='W',
+                    sleep_sec=0.3, force=False):
+    """下载申万一级行业指数周/月线（freq='W' 或 'M'），asset='I' 必传。
+    与 downloader.download_bars 对称，唯一差别：asset='I' 而非默认股票。
+    """
+    import tushare as ts
+
+    csv_path = Path(out_dir) / f"{sw_code}.csv"
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    if csv_path.exists() and not force:
+        return
+
+    seg = ts.pro_bar(ts_code=sw_code, asset='I', freq=freq,
+                     start_date=start_date, end_date=end_date)
+    if sleep_sec:
+        time.sleep(sleep_sec)
+    if seg is None or seg.empty:
+        return
+
+    df = seg.rename(columns={'vol': 'volume'})
+    df['trade_date'] = pd.to_datetime(df['trade_date'])
+    df = df.drop_duplicates(subset='trade_date').sort_values('trade_date').reset_index(drop=True)
+    df[['trade_date', 'open', 'high', 'low', 'close', 'volume']].to_csv(csv_path, index=False)
+
+
 def main():
     import json
     import tushare as ts

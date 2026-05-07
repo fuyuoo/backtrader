@@ -104,3 +104,59 @@ def test_download_sw_index_writes_ohlcv(tmp_path):
     df = pd.read_csv(tmp_path / '801010.SI.csv')
     assert 'close' in df.columns
     assert len(df) == 2
+
+
+def test_download_sw_bars_writes_weekly_ohlcv(tmp_path, monkeypatch):
+    """download_sw_bars freq='W' 调用 ts.pro_bar(asset='I', freq='W') 并落盘。"""
+    import pandas as pd
+    from my_strategy.src import downloader_extra
+
+    captured = {}
+    fake_df = pd.DataFrame({
+        'ts_code': ['801010.SI'] * 3,
+        'trade_date': ['20240105', '20240112', '20240119'],
+        'open': [100.0, 101.0, 102.0],
+        'high': [105.0, 106.0, 107.0],
+        'low': [99.0, 100.0, 101.0],
+        'close': [104.0, 105.0, 106.0],
+        'vol': [1e9, 1.1e9, 1.2e9],
+    })
+
+    def fake_pro_bar(**kwargs):
+        captured.update(kwargs)
+        return fake_df
+
+    monkeypatch.setattr('tushare.pro_bar', fake_pro_bar)
+
+    out_dir = tmp_path / 'sw_weekly'
+    downloader_extra.download_sw_bars(
+        '801010.SI', start_date='20240101', end_date='20240131',
+        out_dir=out_dir, freq='W', sleep_sec=0,
+    )
+
+    assert captured['ts_code'] == '801010.SI'
+    assert captured['asset'] == 'I'
+    assert captured['freq'] == 'W'
+    csv_path = out_dir / '801010.SI.csv'
+    assert csv_path.exists()
+    df = pd.read_csv(csv_path)
+    assert list(df.columns) == ['trade_date', 'open', 'high', 'low', 'close', 'volume']
+    assert len(df) == 3
+
+
+def test_download_sw_bars_skips_when_file_exists(tmp_path, monkeypatch):
+    from my_strategy.src import downloader_extra
+    out_dir = tmp_path / 'sw_weekly'
+    out_dir.mkdir(parents=True)
+    (out_dir / '801010.SI.csv').write_text('existing', encoding='utf-8')
+
+    called = {'n': 0}
+    def fake_pro_bar(**kwargs):
+        called['n'] += 1
+        return None
+    monkeypatch.setattr('tushare.pro_bar', fake_pro_bar)
+
+    downloader_extra.download_sw_bars(
+        '801010.SI', '20240101', '20240131', out_dir, freq='W', sleep_sec=0,
+    )
+    assert called['n'] == 0  # 文件已存在不重复调用 API
