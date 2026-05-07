@@ -668,29 +668,33 @@ def compute_regime_combo_stats(trades):
 
 
 def compute_sector_stock_combo_stats(trades):
-    """行业多头排列 × 个股多头排列 2×2 交叉统计。"""
-    cols = ['label', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
-    if trades.empty:
+    """行业多头排列 × 个股多头排列 2×2 共振分析。
+
+    缺 entry_sector_bull_align 或 entry_stock_bull_align 的行被 dropna 跳过。
+    输出 ≤4 行（按 _SECTOR_STOCK_COMBO_LABELS 顺序），空桶跳过。
+    """
+    cols = ['combo', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
+    required = ['entry_sector_bull_align', 'entry_stock_bull_align']
+    if trades.empty or any(c not in trades.columns for c in required):
         return pd.DataFrame(columns=cols)
-    required = {'entry_sector_bull_align', 'entry_stock_bull_align'}
-    if not required.issubset(trades.columns):
-        return pd.DataFrame(columns=cols)
-    sub = trades.dropna(subset=['entry_sector_bull_align', 'entry_stock_bull_align']).copy()
+    sub = trades.dropna(subset=required).copy()
     if sub.empty:
         return pd.DataFrame(columns=cols)
     rows = []
     for label, sec_flag, stk_flag in _SECTOR_STOCK_COMBO_LABELS:
         chunk = sub[(sub['entry_sector_bull_align'] == sec_flag) &
                     (sub['entry_stock_bull_align'] == stk_flag)]
-        count = len(chunk)
+        if chunk.empty:
+            continue
         ret = chunk['return_pct'].dropna() if 'return_pct' in chunk.columns else pd.Series(dtype=float)
         hold = chunk['holding_days'].dropna() if 'holding_days' in chunk.columns else pd.Series(dtype=float)
-        win_rate = (ret > 0).mean() if len(ret) > 0 else float('nan')
-        avg_return = ret.mean() if len(ret) > 0 else float('nan')
-        avg_holding_days = hold.mean() if len(hold) > 0 else float('nan')
-        rows.append({'label': label, 'count': count,
-                     'win_rate': win_rate, 'avg_return': avg_return,
-                     'avg_holding_days': avg_holding_days})
+        rows.append({
+            'combo': label,
+            'count': len(chunk),
+            'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+        })
     return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
 
 

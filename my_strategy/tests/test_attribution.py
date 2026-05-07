@@ -771,7 +771,7 @@ def test_sector_industry_stats_skips_unmapped():
 
 
 def test_sector_stock_combo_stats_2x2():
-    """4 组合各占 1 行，count/win_rate 正确。"""
+    """4 组合各占 1 行，count/win_rate/avg_return 正确。"""
     trades = pd.DataFrame({
         'entry_sector_bull_align': [True, True, False, False],
         'entry_stock_bull_align':  [True, False, True, False],
@@ -780,14 +780,14 @@ def test_sector_stock_combo_stats_2x2():
     })
     out = compute_sector_stock_combo_stats(trades)
     assert len(out) == 4
-    assert set(out['label']) == {
+    assert set(out['combo']) == {
         '行业多头+个股多头', '行业多头+个股非多头',
         '行业非多头+个股多头', '行业非多头+个股非多头',
     }
-    row = out[out['label'] == '行业多头+个股多头'].iloc[0]
+    row = out[out['combo'] == '行业多头+个股多头'].iloc[0]
     assert row['count'] == 1
-    assert abs(row['win_rate'] - 1.0) < 1e-6
-    assert abs(row['avg_return'] - 0.05) < 1e-6
+    assert row['win_rate'] == 1.0
+    assert row['avg_return'] == 0.05
 
 
 def test_sector_stock_combo_stats_drops_none():
@@ -800,3 +800,10 @@ def test_sector_stock_combo_stats_drops_none():
     })
     out = compute_sector_stock_combo_stats(trades)
     assert out['count'].sum() == 2
+
+
+def test_sector_stock_combo_stats_empty_returns_empty_frame():
+    """空 trades 返回空 DataFrame，列名固定。"""
+    out = compute_sector_stock_combo_stats(pd.DataFrame())
+    assert list(out.columns) == ['combo', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
+    assert len(out) == 0
