@@ -122,11 +122,13 @@ my_strategy/
 输出到 `reports/`：
 
 1. **trade_profile**：按收益分桶（大盈/小盈/持平/小亏/大亏）统计因子均值、分位；
-2. **sector_winrate**：按申万一级行业统计交易数、胜率、平均收益；
-3. **factor_alpha**：每个因子的 IC（Spearman）与多空分组超额；
-4. **E-B / E-C profile**：进场信号 vs 卖出信号、进场 vs 平仓的属性对比；
-5. **entry_condition_stats**：对 7 个入场快照字段分别分组，输出长表（condition_field / bucket / count / win_rate / avg_return / avg_holding_days）；数值字段（KDJ-J、周 KDJ-J 各 4 档，MA60 偏离度 5 档）用 `pd.cut` 分桶，类别字段（ma_alignment / macd_zone / entry_week_macd_zone / entry_month_macd_zone）按值 groupby；
-6. **summary 表**：Top-N 关键发现摘要。
+2. **top_trades / bottom_trades**：收益最高 / 最低各 10 笔；
+3. **sector_winrate**：按申万一级行业统计交易数、胜率、平均收益；
+4. **factor_alpha**：每个 `factor_*` 因子的 IC（Spearman）与多空分组超额；
+5. **exit_reason_stats**：按出场原因（MA25清仓 / take_profit_1/2 / 未平仓 ...）统计胜率、收益、持仓天数、加仓次数；
+6. **add_count_stats**：按加仓次数（0/1/2/3+）统计胜率、收益、已平仓比例；
+7. **entry_condition_stats**：7 个入场快照字段（kdj_j / ma60_dist / ma_alignment / macd_zone / week/month）的单条件长表，固定阈值分桶；
+8. **yearly_stats**：按 `entry_date.year` 统计 count / win_rate / avg_return / median_return / total_pnl_yuan（绝对盈亏，元）/ avg_holding_days。
 
 输出目录由 `config.attribution_report_dir` 控制。
 

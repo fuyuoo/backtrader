@@ -15,13 +15,15 @@
 
 ---
 
-## 2026-05-07 — 新增 entry_condition_stats 入场条件统计报告
+## 2026-05-07 — 归因报告新增 4 张关键统计表
 
-- 需求：对 7 个入场快照字段（KDJ-J、MA60 偏离度、MA 排列、MACD 区间等）分别分组，输出长表统计。
+- 需求：现有归因仅覆盖行业/收益分桶/3 个因子三个维度，缺 exit_reason / add_count / 入场条件 / 年度稳定性，无法定位策略瓶颈。
 - 改动：
-  - `my_strategy/tools/attribution.py`：新增 `compute_entry_condition_stats`，支持数值字段分桶（KDJ-J 4 档、MA60 偏离度 5 档）和类别字段 groupby；接入 `run()` 输出 `entry_condition_stats.csv`。
-  - `my_strategy/tests/test_attribution.py`：追加 4 个测试用例，全部 passed（13/13）。
-- 影响：`reports/entry_condition_stats.csv` 新增产出；其他模块无影响。
+  - `my_strategy/tools/attribution.py` 新增 `compute_exit_reason_stats / compute_add_count_stats / compute_entry_condition_stats / compute_yearly_stats` 四个函数，并在 `run()` 末尾追加 4 个 `to_csv`。
+  - `my_strategy/tests/test_attribution.py` 新增 11 个单元测试覆盖正常/边界/空值。
+  - `my_strategy/tests/test_attribution_run.py` 扩展 EXPECTED_FILES 至 9 个文件。
+  - `docs/FEATURES.md` §6 同步更新输出清单。
+- 影响：回测后自动产出 9 张归因报告（之前 5 张），新增 4 张提供策略优化所需的诊断维度。详见 spec：`docs/superpowers/specs/2026-05-07-attribution-extra-stats-design.md`。
 
 ## 2026-05-07 — 修复 factor_alpha 因子默认源 + 端到端归因测试脚本
 
