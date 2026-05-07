@@ -26,6 +26,10 @@ EXPECTED_FILES = [
     'yearly_stats.csv',
     'first_buy_size_stats.csv',
     'add_block_stats.csv',
+    'mfe_mae_by_exit.csv',
+    'mfe_distribution.csv',
+    'dea_lookback_stats.csv',
+    'monthly_stats.csv',
 ]
 
 
