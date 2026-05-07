@@ -162,3 +162,65 @@ def test_strategy_writes_signals_log():
     assert rec['sector'] == '801010.SI'
     assert 'ma25' in rec
     assert 'was_bought' in rec
+
+
+def make_hold_feed_with_big_candle(big_candle_pct=0.02):
+    """生成在持仓期会出现 big_candle_pct 大小阳线的合成数据。
+
+    前 70 bar 同 make_feed 的稳定上涨；bar 70 阴线触发买入；
+    bar 80 制造一根 (close-open)/open == big_candle_pct 的阳线；
+    其余 bar 仍是温和的小阴小阳。
+    """
+    n = 150
+    dates = pd.date_range('2020-01-01', periods=n, freq='B')
+    closes = [10.0 + i * 0.05 for i in range(n)]
+    closes[70] = closes[70] - 0.2  # 阴线触发买入
+
+    opens = list(closes)
+    opens[80] = closes[80] / (1.0 + big_candle_pct)  # 让 bar 80 收阳 big_candle_pct
+
+    prev_closes = [np.nan] + closes[:-1]
+    ma60 = [np.nan] * 59 + [sum(closes[i - 59:i + 1]) / 60 for i in range(59, n)]
+    ma25 = [np.nan] * 24 + [sum(closes[i - 24:i + 1]) / 25 for i in range(24, n)]
+    dea = [-0.1] * 70 + [0.1] * (n - 70)
+
+    df = pd.DataFrame({
+        'trade_date': dates,
+        'open': opens,
+        'high': [max(o, c) + 0.05 for o, c in zip(opens, closes)],
+        'low':  [min(o, c) - 0.05 for o, c in zip(opens, closes)],
+        'close': closes,
+        'volume': [1_000_000] * n,
+        'ma25': ma25,
+        'ma60': ma60,
+        'dea': dea,
+        'prev_close': prev_closes,
+    })
+    df.index = df['trade_date']
+    return df
+
+
+def test_max_bullish_candle_pct_recorded_in_trade_log():
+    """持仓期出现 2% 阳线 → trade_log 的 max_bullish_candle_pct ≈ 0.02。"""
+    df = make_hold_feed_with_big_candle(big_candle_pct=0.02)
+    strat = run_backtest(df)
+    assert len(strat.trade_log) >= 1
+    rec = strat.trade_log[0]
+    assert 'max_bullish_candle_pct' in rec
+    assert abs(rec['max_bullish_candle_pct'] - 0.02) < 1e-6
+
+
+def test_add_blocked_when_max_bullish_above_threshold():
+    """阳线 2% > 0.01 → 后续加仓被阻断 → add_count == 0。"""
+    df = make_hold_feed_with_big_candle(big_candle_pct=0.02)
+    strat = run_backtest(df)
+    assert len(strat.trade_log) >= 1
+    assert strat.trade_log[0]['add_count'] == 0
+
+
+def test_add_allowed_when_max_bullish_below_threshold():
+    """阳线 0.5% ≤ 0.01 → 加仓机制不被该约束阻断（max_bullish_candle_pct 0.005）。"""
+    df = make_hold_feed_with_big_candle(big_candle_pct=0.005)
+    strat = run_backtest(df)
+    assert len(strat.trade_log) >= 1
+    assert strat.trade_log[0]['max_bullish_candle_pct'] <= 0.01 + 1e-9

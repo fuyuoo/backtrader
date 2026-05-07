@@ -62,7 +62,7 @@ class MyStrategy(bt.Strategy):
                 'in_ma60_obs': False,
                 'in_ma25_obs': False,
                 'entry_price': None,
-                'big_candle_seen': False,
+                'max_bullish_candle_pct': 0.0,
                 'add_count': 0,
                 'tp1_pct': None,
                 'tp2_pct': None,
@@ -97,7 +97,7 @@ class MyStrategy(bt.Strategy):
             'in_ma60_obs': False,
             'in_ma25_obs': False,
             'entry_price': None,
-            'big_candle_seen': False,
+            'max_bullish_candle_pct': 0.0,
             'add_count': 0,
             'tp1_pct': None,
             'tp2_pct': None,
@@ -156,6 +156,7 @@ class MyStrategy(bt.Strategy):
             'status': status,
             'tp1_pct': round(state['tp1_pct'], 4) if state['tp1_pct'] is not None else None,
             'tp2_pct': round(state['tp2_pct'], 4) if state['tp2_pct'] is not None else None,
+            'max_bullish_candle_pct': round(state['max_bullish_candle_pct'], 6),
         })
         ep['buys'] = []
         ep['sells'] = []
@@ -268,10 +269,12 @@ class MyStrategy(bt.Strategy):
                 entry_price = state['entry_price'] if state['entry_price'] is not None else pos.price
                 pnl_pct = (close - entry_price) / entry_price
 
-                # 记录阳线（持仓期间出现 >1% 阳线则禁止加仓）
+                # 记录持仓期单日阳线幅度的最大值（用于事后归因评估阻断阈值）
                 open_ = d.open[0]
-                if open_ > 0 and (close - open_) / open_ > 0.01:
-                    state['big_candle_seen'] = True
+                if open_ > 0:
+                    pct = (close - open_) / open_
+                    if pct > state['max_bullish_candle_pct']:
+                        state['max_bullish_candle_pct'] = pct
 
                 # MA60 止损
                 if state['in_ma60_obs']:
@@ -317,7 +320,7 @@ class MyStrategy(bt.Strategy):
                         continue
 
                 # 加仓（最多2次，满足与买入相同条件，且未出现大阳线）
-                if state['add_count'] < 2 and not state['big_candle_seen']:
+                if state['add_count'] < 2 and state['max_bullish_candle_pct'] <= 0.01:
                     prev_close = d.close[-1]
                     dea = d.dea[0]
                     if (
