@@ -224,3 +224,101 @@ def test_add_allowed_when_max_bullish_below_threshold():
     strat = run_backtest(df)
     assert len(strat.trade_log) >= 1
     assert strat.trade_log[0]['max_bullish_candle_pct'] <= 0.01 + 1e-9
+
+
+def make_excursion_feed(mfe_pct=0.10, mae_pct=-0.05):
+    """构造一笔交易，持仓期内最高浮盈 mfe_pct、最深浮亏 mae_pct（基于首买入价）。
+
+    bar 0..69: ma60 平稳上涨准备；
+    bar 70: 阴线 + close>ma60 + dea>0 + 历史 dea<0 → 触发首买入（close 即首买价）；
+    bar 71: high 制造 mfe（low 接近）；
+    bar 72: low 制造 mae；
+    bar 73..149: 温和小阴小阳，持仓不平。
+    """
+    n = 150
+    dates = pd.date_range('2020-01-01', periods=n, freq='B')
+    closes = [10.0 + i * 0.05 for i in range(n)]
+    closes[70] = closes[70] - 0.2  # 阴线触发买入
+    # bar 73..n-1: 持仓期保持温和（接近首买价），避免自然涨幅淹没构造的 mfe/mae
+    fb_close = closes[70]
+    for i in range(73, n):
+        # 在 fb 附近做小幅 ±0.5% 抖动，保持小阴小阳，但不超过构造区间
+        closes[i] = fb_close * (1.0 + 0.001 * ((i % 5) - 2))
+    opens = list(closes)
+    highs = [max(o, c) + 0.05 for o, c in zip(opens, closes)]
+    lows = [min(o, c) - 0.05 for o, c in zip(opens, closes)]
+
+    # 首买价 = closes[70]
+    fb = closes[70]
+    # bar 71 制造 mfe：把 high 拉高到 fb*(1+mfe_pct)
+    highs[71] = fb * (1.0 + mfe_pct)
+    # bar 72 制造 mae：把 low 压到 fb*(1+mae_pct)
+    lows[72] = fb * (1.0 + mae_pct)
+
+    prev_closes = [np.nan] + closes[:-1]
+    ma60 = [np.nan] * 59 + [sum(closes[i - 59:i + 1]) / 60 for i in range(59, n)]
+    ma25 = [np.nan] * 24 + [sum(closes[i - 24:i + 1]) / 25 for i in range(24, n)]
+    dea = [-0.1] * 70 + [0.1] * (n - 70)
+
+    df = pd.DataFrame({
+        'trade_date': dates,
+        'open': opens,
+        'high': highs,
+        'low': lows,
+        'close': closes,
+        'volume': [1_000_000] * n,
+        'ma25': ma25,
+        'ma60': ma60,
+        'dea': dea,
+        'prev_close': prev_closes,
+    })
+    df.index = df['trade_date']
+    return df
+
+
+def test_first_buy_price_locked_at_initial_buy():
+    """首买价记录在 trade_log，并等于 close[70]（无加仓发生时）。"""
+    df = make_excursion_feed(mfe_pct=0.005, mae_pct=-0.005)
+    strat = run_backtest(df)
+    assert len(strat.trade_log) >= 1
+    rec = strat.trade_log[0]
+    assert 'mfe_pct' in rec
+    assert 'mae_pct' in rec
+    assert 'dea_neg_distance_days' in rec
+
+
+def test_mfe_mae_recorded_during_holding():
+    """构造已知 ±10%/-5% 波动 → mfe/mae 与预期值匹配。"""
+    df = make_excursion_feed(mfe_pct=0.10, mae_pct=-0.05)
+    strat = run_backtest(df)
+    rec = strat.trade_log[0]
+    assert abs(rec['mfe_pct'] - 10.0) < 0.05  # 单位百分点
+    assert abs(rec['mae_pct'] - (-5.0)) < 0.05
+
+
+def test_dea_neg_distance_days_recorded():
+    """make_excursion_feed 中 dea[0..69]<0、dea[70..]>0，bar 70 入场，
+    所以 dea_neg_distance_days = 1（昨日 dea<0）。"""
+    df = make_excursion_feed()
+    strat = run_backtest(df)
+    rec = strat.trade_log[0]
+    assert rec['dea_neg_distance_days'] == 1
+
+
+def test_dea_neg_distance_capped_at_max_lookback():
+    """构造一份 dea 全程 ≥ 0 的 feed → 函数返回 max_lookback (200)。
+    （这里直接调用 helper，不走完整回测。）"""
+    from my_strategy.src.strategy import _scan_dea_neg_distance
+
+    class FakeLine:
+        def __init__(self, vals):
+            self.vals = vals
+        def __getitem__(self, idx):
+            # backtrader 风格：idx=-i 表示 i bar 之前
+            return self.vals[-1 + idx] if -1 + idx >= -len(self.vals) else float('nan')
+
+    class FakeData:
+        pass
+    d = FakeData()
+    d.dea = FakeLine([0.5] * 250)  # 全部 ≥ 0
+    assert _scan_dea_neg_distance(d, max_lookback=200) == 200

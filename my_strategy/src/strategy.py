@@ -7,6 +7,19 @@ def _isnan(x):
     return math.isnan(x)
 
 
+def _scan_dea_neg_distance(d, max_lookback=200):
+    """从当前 bar 往回扫，找到第一根 DEA<0 的 bar 数距离。
+
+    返回 int：1..max_lookback。NaN 跳过；找不到（max_lookback bar 内一直 ≥ 0 或 NaN）则返回 max_lookback。
+    上限 200 ≈ 一年交易日，足够覆盖现行 5 日 lookback 的扫描需求。
+    """
+    for i in range(1, max_lookback + 1):
+        v = d.dea[-i]
+        if v == v and v < 0:  # not NaN and negative
+            return i
+    return max_lookback
+
+
 class StockData(bt.feeds.PandasData):
     """自定义数据 feed，读取预计算好的指标列。"""
     lines = ('ma25', 'ma60', 'dea')
@@ -68,6 +81,10 @@ class MyStrategy(bt.Strategy):
                 'tp2_pct': None,
                 'initial_size': None,
                 'pending_atr': float('nan'),
+                'first_buy_price': None,
+                'mfe_pct': 0.0,
+                'mae_pct': 0.0,
+                'dea_neg_distance_days': None,
             }
 
         self.order_log = []
@@ -103,6 +120,10 @@ class MyStrategy(bt.Strategy):
             'tp2_pct': None,
             'initial_size': None,
             'pending_atr': float('nan'),
+            'first_buy_price': None,
+            'mfe_pct': 0.0,
+            'mae_pct': 0.0,
+            'dea_neg_distance_days': None,
         }
 
     def _has_pending_order(self, d):
@@ -157,6 +178,9 @@ class MyStrategy(bt.Strategy):
             'tp1_pct': round(state['tp1_pct'], 4) if state['tp1_pct'] is not None else None,
             'tp2_pct': round(state['tp2_pct'], 4) if state['tp2_pct'] is not None else None,
             'max_bullish_candle_pct': round(state['max_bullish_candle_pct'], 6),
+            'mfe_pct': round(state['mfe_pct'], 4),
+            'mae_pct': round(state['mae_pct'], 4),
+            'dea_neg_distance_days': state['dea_neg_distance_days'],
         })
         ep['buys'] = []
         ep['sells'] = []
@@ -276,6 +300,16 @@ class MyStrategy(bt.Strategy):
                     if pct > state['max_bullish_candle_pct']:
                         state['max_bullish_candle_pct'] = pct
 
+                # 记录持仓期内最高浮盈 / 最深浮亏（基准 = 首买入价）
+                fb = state['first_buy_price']
+                if fb is not None and fb > 0:
+                    high_pct = (d.high[0] - fb) / fb * 100.0
+                    low_pct = (d.low[0] - fb) / fb * 100.0
+                    if high_pct > state['mfe_pct']:
+                        state['mfe_pct'] = high_pct
+                    if low_pct < state['mae_pct']:
+                        state['mae_pct'] = low_pct
+
                 # MA60 止损
                 if state['in_ma60_obs']:
                     if close < ma60:
@@ -382,6 +416,8 @@ class MyStrategy(bt.Strategy):
                     state['add_count'] = 2
 
                 state['pending_atr'] = float(self.atr[d][0])
+                state['first_buy_price'] = float(close)  # set_coc=True，close 即执行价
+                state['dea_neg_distance_days'] = _scan_dea_neg_distance(d, max_lookback=200)
                 o = self.buy(data=d, size=buy_size)
                 self.order_reasons[o.ref] = 'initial_buy'
                 self.orders[d] = o
