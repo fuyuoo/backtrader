@@ -731,3 +731,39 @@ def test_sector_momentum_60d_stats_all_same_returns_empty():
     assert out.empty
     assert list(out.columns) == ['quintile', 'momentum_lo', 'momentum_hi',
                                   'count', 'win_rate', 'avg_return', 'avg_holding_days']
+
+
+def test_sector_industry_stats_groups_by_sw_code():
+    """按 ts_code 反查 sw_index_code 分桶聚合。"""
+    import pandas as pd
+    from my_strategy.tools.attribution import compute_sector_industry_stats
+
+    trades = pd.DataFrame({
+        'ts_code': ['000001.SZ', '600000.SH', '000002.SZ', '300750.SZ'],
+        'return_pct': [0.10, -0.05, 0.03, 0.20],
+        'holding_days': [10, 5, 7, 8],
+    })
+    sector_map = {
+        '000001.SZ': '801780.SI',
+        '600000.SH': '801780.SI',
+        '000002.SZ': '801180.SI',
+        '300750.SZ': '801880.SI',
+    }
+    out = compute_sector_industry_stats(trades, sector_map)
+    assert set(out['sw_index_code']) == {'801780.SI', '801180.SI', '801880.SI'}
+    bank = out.set_index('sw_index_code').loc['801780.SI']
+    assert bank['count'] == 2
+
+
+def test_sector_industry_stats_skips_unmapped():
+    """ts_code 不在 sector_map 中 → dropna 跳过。"""
+    import pandas as pd
+    from my_strategy.tools.attribution import compute_sector_industry_stats
+    trades = pd.DataFrame({
+        'ts_code': ['000001.SZ', 'UNKNOWN.SZ'],
+        'return_pct': [0.05, 0.03],
+        'holding_days': [10, 5],
+    })
+    sector_map = {'000001.SZ': '801780.SI'}
+    out = compute_sector_industry_stats(trades, sector_map)
+    assert len(out) == 1

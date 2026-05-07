@@ -174,6 +174,13 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 17. **stock_bull_align_stats**：按个股多头排列 True/False 二桶统计；
 18. **stock_above_ma25_stats**：按个股是否站上 MA25 二桶统计；
 19. **regime_combo_stats**：HS300 DIF × 个股多头排列 2x2 共振表（4 个 combo：大盘水上+个股多头 / 大盘水上+个股非多头 / 大盘水下+个股多头 / 大盘水下+个股非多头）。
+20. **sector_bull_align_stats**：按行业指数多头排列 True/False 二桶统计；
+21. **sector_above_ma25_stats**：按行业指数站上 MA25 二桶统计；
+22. **sector_dif_stats**：按行业 MACD DIF 水上/水下二桶统计；
+23. **sector_week_macd_stats**：按行业周线 MACD zone 分桶统计；
+24. **sector_month_macd_stats**：按行业月线 MACD zone 分桶统计；
+25. **sector_momentum_60d_stats**：按行业 60 日动量五分桶（Q1～Q5）统计；
+26. **sector_industry_stats**：按 ts_code → sw_index_code 映射后，按 SW 一级行业分桶聚合（count / win_rate / avg_return / avg_holding_days），按交易笔数降序排列；未映射股票自动跳过。
 
 输出目录由 `config.attribution_report_dir` 控制。
 

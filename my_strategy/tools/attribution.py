@@ -597,6 +597,30 @@ def compute_sector_momentum_60d_stats(trades):
     return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
 
 
+def compute_sector_industry_stats(trades, sector_map):
+    """按 ts_code → sw_index_code 映射后，按 31 个 SW 一级行业分桶聚合。"""
+    cols = ['sw_index_code', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
+    if trades.empty or 'ts_code' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    sub = trades.copy()
+    sub['_sw'] = sub['ts_code'].map(sector_map)
+    sub = sub.dropna(subset=['_sw'])
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for sw_code, chunk in sub.groupby('_sw'):
+        ret = chunk['return_pct'].dropna() if 'return_pct' in chunk.columns else pd.Series(dtype=float)
+        hold = chunk['holding_days'].dropna() if 'holding_days' in chunk.columns else pd.Series(dtype=float)
+        rows.append({
+            'sw_index_code': sw_code,
+            'count': len(chunk),
+            'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+        })
+    return pd.DataFrame(rows, columns=cols).sort_values('count', ascending=False).reset_index(drop=True)
+
+
 _REGIME_COMBO_LABELS = [
     ('大盘水上+个股多头', True, True),
     ('大盘水上+个股非多头', True, False),
@@ -799,6 +823,16 @@ def run(project_root, cfg):
     compute_sector_week_macd_stats(trades).to_csv(out_dir / 'sector_week_macd_stats.csv', index=False)
     compute_sector_month_macd_stats(trades).to_csv(out_dir / 'sector_month_macd_stats.csv', index=False)
     compute_sector_momentum_60d_stats(trades).to_csv(out_dir / 'sector_momentum_60d_stats.csv', index=False)
+
+    sector_map_industry = {}
+    sec_csv = project_root / cfg['data_paths']['stock_sector_csv']
+    if sec_csv.exists():
+        sec_df = pd.read_csv(sec_csv)
+        if 'sw_index_code' in sec_df.columns:
+            sec_df = sec_df.dropna(subset=['sw_index_code'])
+            sector_map_industry = dict(zip(sec_df['ts_code'], sec_df['sw_index_code']))
+    compute_sector_industry_stats(trades, sector_map_industry).to_csv(
+        out_dir / 'sector_industry_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)

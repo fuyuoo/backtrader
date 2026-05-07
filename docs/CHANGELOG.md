@@ -15,6 +15,12 @@
 
 ---
 
+## 2026-05-08 — feat(attribution): sector_industry_stats — 按 SW 一级行业分桶聚合
+
+- 需求：在 attribution.py 中新增 compute_sector_industry_stats，按 ts_code → sw_index_code 映射后对 SW 31 个一级行业分桶统计交易胜率/收益/持仓天数，并在 run() 中写出 sector_industry_stats.csv。
+- 改动：`my_strategy/tools/attribution.py`（新增函数 + run() 接入）、`my_strategy/tests/test_attribution.py`（新增 2 个测试）、`docs/FEATURES.md`（补全 Phase 2 行业报告列表）。
+- 影响：归因报告从 25 张增至 26 张；stock_sector.csv 缺失时跳过（返回空表），不影响其余报告。
+
 ## 2026-05-07 — calc_indicators 参数化重构：按 groups 选择性计算指标
 
 - 需求：将 calc_indicators.py 的硬编码主循环改为按 groups 列表参数化，支持 stock/sector 两种 CLI 模式。
