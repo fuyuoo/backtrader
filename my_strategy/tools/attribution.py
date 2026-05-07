@@ -628,6 +628,13 @@ _REGIME_COMBO_LABELS = [
     ('大盘水下+个股非多头', False, False),
 ]
 
+_SECTOR_STOCK_COMBO_LABELS = [
+    ('行业多头+个股多头',   True,  True),
+    ('行业多头+个股非多头', True,  False),
+    ('行业非多头+个股多头', False, True),
+    ('行业非多头+个股非多头', False, False),
+]
+
 
 def compute_regime_combo_stats(trades):
     """大盘 DIF 水上水下 × 个股多头排列 2x2 共振分析。
@@ -657,6 +664,31 @@ def compute_regime_combo_stats(trades):
             'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
             'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
         })
+    return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
+
+
+def compute_sector_stock_combo_stats(trades):
+    """行业多头排列 × 个股多头排列 2×2 交叉统计。"""
+    cols = ['label', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
+    if trades.empty:
+        return pd.DataFrame(columns=cols)
+    required = {'entry_sector_bull_align', 'entry_stock_bull_align'}
+    if not required.issubset(trades.columns):
+        return pd.DataFrame(columns=cols)
+    sub = trades.dropna(subset=['entry_sector_bull_align', 'entry_stock_bull_align']).copy()
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for label, sec_flag, stk_flag in _SECTOR_STOCK_COMBO_LABELS:
+        chunk = sub[(sub['entry_sector_bull_align'] == sec_flag) &
+                    (sub['entry_stock_bull_align'] == stk_flag)]
+        count = len(chunk)
+        win_rate = (chunk['return'] > 0).mean() if count > 0 else float('nan')
+        avg_return = chunk['return'].mean() if count > 0 else float('nan')
+        avg_holding_days = chunk['holding_days'].mean() if count > 0 else float('nan')
+        rows.append({'label': label, 'count': count,
+                     'win_rate': win_rate, 'avg_return': avg_return,
+                     'avg_holding_days': avg_holding_days})
     return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
 
 
@@ -833,6 +865,7 @@ def run(project_root, cfg):
             sector_map_industry = dict(zip(sec_df['ts_code'], sec_df['sw_index_code']))
     compute_sector_industry_stats(trades, sector_map_industry).to_csv(
         out_dir / 'sector_industry_stats.csv', index=False)
+    compute_sector_stock_combo_stats(trades).to_csv(out_dir / 'sector_stock_combo_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)

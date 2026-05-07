@@ -13,6 +13,7 @@ from my_strategy.tools.attribution import (
     compute_mfe_distribution,
     compute_dea_lookback_stats,
     compute_monthly_stats,
+    compute_sector_stock_combo_stats,
 )
 
 
@@ -767,3 +768,35 @@ def test_sector_industry_stats_skips_unmapped():
     sector_map = {'000001.SZ': '801780.SI'}
     out = compute_sector_industry_stats(trades, sector_map)
     assert len(out) == 1
+
+
+def test_sector_stock_combo_stats_2x2():
+    """4 组合各占 1 行，count/win_rate 正确。"""
+    trades = pd.DataFrame({
+        'entry_sector_bull_align': [True, True, False, False],
+        'entry_stock_bull_align':  [True, False, True, False],
+        'return':       [0.05, -0.02, 0.03, -0.01],
+        'holding_days': [10,    5,    8,    3],
+    })
+    out = compute_sector_stock_combo_stats(trades)
+    assert len(out) == 4
+    assert set(out['label']) == {
+        '行业多头+个股多头', '行业多头+个股非多头',
+        '行业非多头+个股多头', '行业非多头+个股非多头',
+    }
+    row = out[out['label'] == '行业多头+个股多头'].iloc[0]
+    assert row['count'] == 1
+    assert abs(row['win_rate'] - 1.0) < 1e-6
+    assert abs(row['avg_return'] - 0.05) < 1e-6
+
+
+def test_sector_stock_combo_stats_drops_none():
+    """None 行被 dropna 过滤，剩余 count.sum() == 2。"""
+    trades = pd.DataFrame({
+        'entry_sector_bull_align': [True, None, False],
+        'entry_stock_bull_align':  [True, True, False],
+        'return':       [0.05, 0.03, -0.01],
+        'holding_days': [10,    8,    3],
+    })
+    out = compute_sector_stock_combo_stats(trades)
+    assert out['count'].sum() == 2
