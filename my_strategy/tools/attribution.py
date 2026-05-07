@@ -366,6 +366,43 @@ def compute_mfe_mae_by_exit(trades):
     return df.sort_values('count', ascending=False).reset_index(drop=True)
 
 
+_MFE_BINS = [-np.inf, 0, 2, 5, 10, 20, np.inf]
+_MFE_LABELS = ['[<0%)', '[0%,2%)', '[2%,5%)', '[5%,10%)', '[10%,20%)', '[20%+)']
+
+
+def compute_mfe_distribution(trades):
+    """按 mfe_pct（持仓期最高浮盈，百分点）分 6 桶，看曾浮盈过 X% 的笔最终落地多少。"""
+    cols = ['bucket', 'count', 'win_rate', 'avg_return',
+            'median_return', 'pct_completed']
+    if trades.empty or 'mfe_pct' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    sub = trades.dropna(subset=['mfe_pct']).copy()
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    sub['_bucket'] = pd.cut(sub['mfe_pct'], bins=_MFE_BINS, labels=_MFE_LABELS,
+                             right=False, include_lowest=False)
+    rows = []
+    for bucket in _MFE_LABELS:
+        chunk = sub[sub['_bucket'] == bucket]
+        if chunk.empty:
+            continue
+        ret = chunk['return_pct'].dropna() if 'return_pct' in chunk.columns else pd.Series(dtype=float)
+        completed = ((chunk['status'] == 'completed').sum()
+                     if 'status' in chunk.columns else 0)
+        n = len(chunk)
+        rows.append({
+            'bucket': bucket,
+            'count': n,
+            'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'median_return': round(ret.median(), 4) if len(ret) else float('nan'),
+            'pct_completed': round(completed / n, 4) if n else float('nan'),
+        })
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
+
+
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
     """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
@@ -488,6 +525,9 @@ def run(project_root, cfg):
 
     mfe_mae = compute_mfe_mae_by_exit(trades)
     mfe_mae.to_csv(out_dir / 'mfe_mae_by_exit.csv', index=False)
+
+    mfe_dist = compute_mfe_distribution(trades)
+    mfe_dist.to_csv(out_dir / 'mfe_distribution.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)

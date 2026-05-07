@@ -10,6 +10,7 @@ from my_strategy.tools.attribution import (
     compute_first_buy_size_stats,
     compute_add_block_stats,
     compute_mfe_mae_by_exit,
+    compute_mfe_distribution,
 )
 
 
@@ -403,5 +404,44 @@ def test_compute_mfe_mae_by_exit_missing_column():
     assert list(out.columns) == [
         'exit_reason', 'count', 'avg_return',
         'avg_mfe', 'avg_mae', 'avg_pullback', 'avg_underwater',
+    ]
+    assert len(out) == 0
+
+
+def test_compute_mfe_distribution_buckets():
+    trades = pd.DataFrame({
+        'mfe_pct':    [-1.0,  0.5,  1.0, 3.0, 7.0, 12.0, 25.0, 4.0],
+        'return_pct': [-2.0,  -1.0, 0.5, 1.0, 5.0, 10.0, 22.0, -3.0],
+        'status':     ['completed'] * 8,
+    })
+    out = compute_mfe_distribution(trades)
+    assert list(out.columns) == [
+        'bucket', 'count', 'win_rate', 'avg_return',
+        'median_return', 'pct_completed',
+    ]
+    expected = ['[<0%)', '[0%,2%)', '[2%,5%)', '[5%,10%)', '[10%,20%)', '[20%+)']
+    assert list(out['bucket']) == expected
+    row_2_5 = out[out['bucket'] == '[2%,5%)'].iloc[0]
+    assert row_2_5['count'] == 2
+    assert row_2_5['win_rate'] == 0.5
+    row_first = out[out['bucket'] == '[<0%)'].iloc[0]
+    assert row_first['count'] == 1
+    assert row_first['win_rate'] == 0.0
+
+
+def test_compute_mfe_distribution_empty_input():
+    out = compute_mfe_distribution(pd.DataFrame())
+    assert list(out.columns) == [
+        'bucket', 'count', 'win_rate', 'avg_return',
+        'median_return', 'pct_completed',
+    ]
+    assert len(out) == 0
+
+
+def test_compute_mfe_distribution_missing_column():
+    out = compute_mfe_distribution(pd.DataFrame({'return_pct': [1.0]}))
+    assert list(out.columns) == [
+        'bucket', 'count', 'win_rate', 'avg_return',
+        'median_return', 'pct_completed',
     ]
     assert len(out) == 0
