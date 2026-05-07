@@ -30,6 +30,11 @@ EXPECTED_FILES = [
     'mfe_distribution.csv',
     'dea_lookback_stats.csv',
     'monthly_stats.csv',
+    'hs300_dif_stats.csv',
+    'hs300_bull_align_stats.csv',
+    'stock_bull_align_stats.csv',
+    'stock_above_ma25_stats.csv',
+    'regime_combo_stats.csv',
 ]
 
 
