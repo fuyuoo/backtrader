@@ -153,6 +153,16 @@ def main():
         download_sw_index(code, start, end, sw_dir, pro)
         print(f"SW {code} OK")
 
+    sw_weekly_dir = data_dir / 'sw_weekly'
+    for code in cfg['sw_index_codes']:
+        download_sw_bars(code, start, end, sw_weekly_dir, freq='W')
+        print(f"SW {code} weekly OK")
+
+    sw_monthly_dir = data_dir / 'sw_monthly'
+    for code in cfg['sw_index_codes']:
+        download_sw_bars(code, start, end, sw_monthly_dir, freq='M')
+        print(f"SW {code} monthly OK")
+
 
 if __name__ == '__main__':
     main()
