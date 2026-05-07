@@ -8,6 +8,7 @@ from my_strategy.tools.attribution import (
     compute_entry_condition_stats,
     compute_yearly_stats,
     compute_first_buy_size_stats,
+    compute_add_block_stats,
 )
 
 
@@ -305,6 +306,57 @@ def test_compute_first_buy_size_stats_empty_input():
 
 def test_compute_first_buy_size_stats_missing_column():
     out = compute_first_buy_size_stats(pd.DataFrame({'foo': [1, 2, 3]}))
+    assert list(out.columns) == [
+        'bucket', 'count', 'win_rate', 'avg_return', 'median_return',
+        'avg_holding_days', 'avg_add_count', 'pct_completed',
+    ]
+    assert len(out) == 0
+
+
+def test_compute_add_block_stats_buckets():
+    trades = pd.DataFrame({
+        'max_bullish_candle_pct': [
+            0.0,            # [0%,0.5%)
+            0.003,          # [0%,0.5%)（再加一笔）
+            0.007,          # [0.5%,1%)
+            0.012, 0.013,   # [1%,1.5%) 两笔
+            0.018,          # [1.5%,2%)
+            0.025,          # [2%,3%)
+            0.040,          # [3%,5%)
+            0.080,          # [5%,10%)
+            0.150,          # [10%+)
+        ],
+        'return_pct': [3.0, 2.0, 5.0, -1.0, -2.0, 8.0, -4.0, 6.0, -3.0, 0.0],
+        'holding_days': [10, 12, 15, 18, 20, 22, 25, 28, 30, 35],
+        'add_count': [2, 1, 1, 0, 0, 1, 0, 1, 0, 0],
+        'status': ['completed'] * 10,
+    })
+    out = compute_add_block_stats(trades)
+    assert list(out['bucket']) == [
+        '[0%,0.5%)', '[0.5%,1%)', '[1%,1.5%)',
+        '[1.5%,2%)', '[2%,3%)', '[3%,5%)',
+        '[5%,10%)', '[10%+)',
+    ]
+    row_1_15 = out[out['bucket'] == '[1%,1.5%)'].iloc[0]
+    assert row_1_15['count'] == 2
+    assert row_1_15['avg_return'] == -1.5
+    assert row_1_15['win_rate'] == 0.0
+    row_first = out[out['bucket'] == '[0%,0.5%)'].iloc[0]
+    assert row_first['count'] == 2
+    assert row_first['avg_return'] == 2.5
+
+
+def test_compute_add_block_stats_empty_input():
+    out = compute_add_block_stats(pd.DataFrame())
+    assert list(out.columns) == [
+        'bucket', 'count', 'win_rate', 'avg_return', 'median_return',
+        'avg_holding_days', 'avg_add_count', 'pct_completed',
+    ]
+    assert len(out) == 0
+
+
+def test_compute_add_block_stats_missing_column():
+    out = compute_add_block_stats(pd.DataFrame({'return_pct': [1.0, 2.0]}))
     assert list(out.columns) == [
         'bucket', 'count', 'win_rate', 'avg_return', 'median_return',
         'avg_holding_days', 'avg_add_count', 'pct_completed',

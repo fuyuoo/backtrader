@@ -298,6 +298,40 @@ def compute_first_buy_size_stats(trades):
     return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
 
 
+_ADD_BLOCK_BINS = [-np.inf, 0, 0.005, 0.01, 0.015, 0.02, 0.03, 0.05, 0.10, np.inf]
+_ADD_BLOCK_LABELS = ['[<0%)', '[0%,0.5%)', '[0.5%,1%)',
+                     '[1%,1.5%)', '[1.5%,2%)', '[2%,3%)',
+                     '[3%,5%)', '[5%,10%)', '[10%+)']
+
+
+def compute_add_block_stats(trades):
+    """按 max_bullish_candle_pct 9 桶扫描，评估加仓阻断阈值（当前 1%）的合理性。
+
+    输入字段 max_bullish_candle_pct 单位为小数（例 0.0083 表示 0.83%）。
+    """
+    cols = ['bucket', 'count', 'win_rate', 'avg_return', 'median_return',
+            'avg_holding_days', 'avg_add_count', 'pct_completed']
+    if trades.empty or 'max_bullish_candle_pct' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    sub = trades.dropna(subset=['max_bullish_candle_pct']).copy()
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    sub['_bucket'] = pd.cut(sub['max_bullish_candle_pct'],
+                             bins=_ADD_BLOCK_BINS, labels=_ADD_BLOCK_LABELS,
+                             right=False, include_lowest=False)
+    rows = []
+    for bucket in _ADD_BLOCK_LABELS:
+        chunk = sub[sub['_bucket'] == bucket]
+        if chunk.empty:
+            continue
+        row = {'bucket': bucket}
+        row.update(_scan_bucket_aggregate(chunk))
+        rows.append(row)
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
+
+
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
     """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
@@ -414,6 +448,9 @@ def run(project_root, cfg):
 
     first_buy = compute_first_buy_size_stats(trades)
     first_buy.to_csv(out_dir / 'first_buy_size_stats.csv', index=False)
+
+    add_block = compute_add_block_stats(trades)
+    add_block.to_csv(out_dir / 'add_block_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)
