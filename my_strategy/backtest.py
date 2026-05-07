@@ -5,7 +5,7 @@ import pandas as pd
 import backtrader as bt
 from pathlib import Path
 from src.strategy import StockData, StockCommission, MyStrategy
-from src.calc_indicators import compute_indicators
+from src.calc_indicators import compute_all_indicators
 
 
 def load_config(config_path='config.json'):
@@ -381,7 +381,7 @@ def run_index_strategy(cfg, index_code):
 
     df = pd.read_csv(path, parse_dates=['trade_date'])
     df = df.sort_values('trade_date').reset_index(drop=True)
-    df = compute_indicators(df)
+    df = compute_all_indicators(df)
     df.index = df['trade_date']
 
     start = datetime.datetime.strptime(cfg['backTest_Start_data'], '%Y%m%d')

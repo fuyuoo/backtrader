@@ -39,13 +39,7 @@ def add_macd(df: pd.DataFrame) -> pd.DataFrame:
 def add_kdj(df: pd.DataFrame) -> pd.DataFrame:
     """添加 KDJ_J。"""
     df = df.copy()
-    low9 = df['low'].rolling(window=9, min_periods=9).min()
-    high9 = df['high'].rolling(window=9, min_periods=9).max()
-    denom = (high9 - low9).where(high9 != low9, np.nan)
-    rsv = ((df['close'] - low9) / denom * 100).clip(0, 100)
-    k = rsv.ewm(com=2, adjust=False).mean()
-    d = k.ewm(com=2, adjust=False).mean()
-    df['kdj_j'] = (3 * k - 2 * d).round(2)
+    df['kdj_j'] = _kdj_j(df)
     return df
 
 
@@ -144,43 +138,19 @@ def compute_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def compute_weekly_monthly_indicators(ts_code, df_daily, data_dir):
-    """读取周线/月线 CSV，计算 KDJ_J 和 MACD 区间，merge 回日线 df（ffill 填充）。"""
+    """向后兼容包装器。"""
     data_dir = Path(data_dir)
-    df = df_daily.copy()
-    daily_dates = df[['trade_date']].sort_values('trade_date')
-
-    weekly_path = data_dir / 'weekly' / f"{ts_code}.csv"
-    if weekly_path.exists():
-        wdf = pd.read_csv(weekly_path, parse_dates=['trade_date']).sort_values('trade_date')
-        wdf['week_kdj_j'] = _kdj_j(wdf)
-        wdf['week_macd_zone'] = _macd_zone(wdf)
-        wdf = wdf[['trade_date', 'week_kdj_j', 'week_macd_zone']]
-        wdf_aligned = pd.merge_asof(daily_dates, wdf, on='trade_date', direction='backward')
-        df = df.merge(wdf_aligned, on='trade_date', how='left')
-    else:
-        df['week_kdj_j'] = None
-        df['week_macd_zone'] = None
-
-    monthly_path = data_dir / 'monthly' / f"{ts_code}.csv"
-    if monthly_path.exists():
-        mdf = pd.read_csv(monthly_path, parse_dates=['trade_date']).sort_values('trade_date')
-        mdf['month_macd_zone'] = _macd_zone(mdf)
-        mdf = mdf[['trade_date', 'month_macd_zone']]
-        mdf_aligned = pd.merge_asof(daily_dates, mdf, on='trade_date', direction='backward')
-        df = df.merge(mdf_aligned, on='trade_date', how='left')
-    else:
-        df['month_macd_zone'] = None
-
+    df = add_week_macd_zone(df_daily, data_dir / 'weekly' / f"{ts_code}.csv")
+    df = add_month_macd_zone(df, data_dir / 'monthly' / f"{ts_code}.csv")
     return df
 
 
 def add_single_stock_factors(df: pd.DataFrame) -> pd.DataFrame:
-    """添加单股票内可计算的打分因子。"""
-    out = df.copy()
-    out['factor_momentum_60d'] = out['close'].pct_change(60).round(6)
-    out['factor_ma60_dist'] = ((out['close'] - out['ma60']) / out['ma60']).round(6)
-    out['factor_macd_strength'] = out['dea'].round(6)
-    return out
+    """向后兼容包装器，组合三个原子因子函数。"""
+    df = add_factor_momentum_60d(df)
+    df = add_factor_ma60_dist(df)
+    df = add_factor_macd_strength(df)
+    return df
 
 
 def merge_sector_momentum(daily_df: pd.DataFrame,
@@ -317,7 +287,7 @@ def main():
                     'monthly': data_dir / 'monthly'}
         dst_dir = data_dir / 'indicators'
         sector_csv = project_root / cfg['data_paths']['stock_sector_csv']
-        sec_df = pd.read_csv(sector_csv)
+        sec_df = pd.read_csv(sector_csv) if sector_csv.exists() else pd.DataFrame()
         sector_map = (dict(zip(sec_df['ts_code'], sec_df['sw_index_code']))
                       if 'sw_index_code' in sec_df.columns else {})
         sw_dir = data_dir / 'sw_index'
