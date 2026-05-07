@@ -324,7 +324,8 @@ def _enrich_trade_summary(summary_df, cfg):
             enriched_rows.append(row)
 
     result = pd.DataFrame(enriched_rows).reset_index(drop=True)
-    # 4 个 regime 标志保留 Python bool / None（避免 pandas 升格为 numpy.bool）
+    # 仅这 4 列具有 True/False/None 三态语义，需要 object dtype 保留 Python bool/None；
+    # 旧的含 None 列（如 entry_kdj_j）是数值/字符串 + NaN，不需要此处理。
     for col in ('entry_hs300_dif_above_zero', 'entry_hs300_bull_align',
                 'entry_stock_bull_align', 'entry_stock_above_ma25'):
         if col in result.columns:

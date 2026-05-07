@@ -201,3 +201,49 @@ def test_enrich_trade_summary_writes_regime_flags(tmp_path):
     assert row2['entry_hs300_bull_align'] is False
     assert row2['entry_stock_bull_align'] is False
     assert row2['entry_stock_above_ma25'] is False
+
+
+def test_enrich_trade_summary_hs300_missing_date(tmp_path):
+    """entry_date 在股票 indicators 中存在，但不在 HS300 indicators 中：
+    HS300 两个 flag 应为 None，stock 两个 flag 仍按股票数据计算。"""
+    from backtest import _enrich_trade_summary
+
+    data_dir = tmp_path / 'data'
+    (data_dir / 'indicators').mkdir(parents=True)
+
+    # 股票在 2024-01-02 有数据（多头排列）
+    stock_df = pd.DataFrame({
+        'trade_date': pd.to_datetime(['2024-01-02']),
+        'close': [10.0],
+        'ma25': [9.0], 'ma60': [8.0], 'ma144': [7.0], 'ma180': [6.0],
+        'kdj_j': [50.0], 'circ_mv': [100.0],
+        'week_kdj_j': [50.0],
+        'week_macd_zone': ['区间1'], 'month_macd_zone': ['区间1'],
+        'macd': [0.5], 'dif': [0.6], 'dea': [0.4],
+    })
+    stock_df.to_csv(data_dir / 'indicators' / 'TEST.SZ.csv', index=False)
+
+    # HS300 仅有 2024-01-05 的数据（与 entry_date 2024-01-02 不重合）
+    hs300_df = pd.DataFrame({
+        'trade_date': pd.to_datetime(['2024-01-05']),
+        'close': [4000],
+        'ma25': [4000], 'ma60': [3900], 'ma144': [3800], 'ma180': [3700],
+        'dif': [0.5], 'dea': [0.3], 'macd': [0.2],
+    })
+    hs300_df.to_csv(data_dir / 'indicators' / '000300.SH.csv', index=False)
+
+    pd.DataFrame({'ts_code': ['TEST.SZ'], 'industry': ['银行']}).to_csv(
+        data_dir / 'stock_sector.csv', index=False)
+
+    summary = pd.DataFrame([
+        {'ts_code': 'TEST.SZ', 'entry_date': pd.Timestamp('2024-01-02'),
+         'return_pct': 5.0, 'status': 'completed'},
+    ])
+
+    enriched = _enrich_trade_summary(summary, {'data_dir': str(data_dir)})
+
+    row = enriched.iloc[0]
+    assert row['entry_hs300_dif_above_zero'] is None
+    assert row['entry_hs300_bull_align'] is None
+    assert row['entry_stock_bull_align'] is True
+    assert row['entry_stock_above_ma25'] is True
