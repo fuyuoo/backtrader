@@ -775,7 +775,7 @@ def test_sector_stock_combo_stats_2x2():
     trades = pd.DataFrame({
         'entry_sector_bull_align': [True, True, False, False],
         'entry_stock_bull_align':  [True, False, True, False],
-        'return':       [0.05, -0.02, 0.03, -0.01],
+        'return_pct':   [0.05, -0.02, 0.03, -0.01],
         'holding_days': [10,    5,    8,    3],
     })
     out = compute_sector_stock_combo_stats(trades)
@@ -795,7 +795,7 @@ def test_sector_stock_combo_stats_drops_none():
     trades = pd.DataFrame({
         'entry_sector_bull_align': [True, None, False],
         'entry_stock_bull_align':  [True, True, False],
-        'return':       [0.05, 0.03, -0.01],
+        'return_pct':   [0.05, 0.03, -0.01],
         'holding_days': [10,    8,    3],
     })
     out = compute_sector_stock_combo_stats(trades)

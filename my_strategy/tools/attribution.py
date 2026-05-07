@@ -683,9 +683,11 @@ def compute_sector_stock_combo_stats(trades):
         chunk = sub[(sub['entry_sector_bull_align'] == sec_flag) &
                     (sub['entry_stock_bull_align'] == stk_flag)]
         count = len(chunk)
-        win_rate = (chunk['return'] > 0).mean() if count > 0 else float('nan')
-        avg_return = chunk['return'].mean() if count > 0 else float('nan')
-        avg_holding_days = chunk['holding_days'].mean() if count > 0 else float('nan')
+        ret = chunk['return_pct'].dropna() if 'return_pct' in chunk.columns else pd.Series(dtype=float)
+        hold = chunk['holding_days'].dropna() if 'holding_days' in chunk.columns else pd.Series(dtype=float)
+        win_rate = (ret > 0).mean() if len(ret) > 0 else float('nan')
+        avg_return = ret.mean() if len(ret) > 0 else float('nan')
+        avg_holding_days = hold.mean() if len(hold) > 0 else float('nan')
         rows.append({'label': label, 'count': count,
                      'win_rate': win_rate, 'avg_return': avg_return,
                      'avg_holding_days': avg_holding_days})
