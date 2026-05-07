@@ -439,6 +439,38 @@ def compute_dea_lookback_stats(trades):
     return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
 
 
+def compute_monthly_stats(trades):
+    """按 entry_date 的年月分组，与 yearly_stats 同口径细化到月。
+
+    没入场的月份不补 0 行（与现 yearly_stats 同款）。
+    """
+    cols = ['year_month', 'count', 'win_rate', 'avg_return',
+            'median_return', 'total_pnl_yuan', 'avg_holding_days']
+    if trades.empty or 'entry_date' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    sub = trades.dropna(subset=['entry_date']).copy()
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    sub['entry_date'] = pd.to_datetime(sub['entry_date'])
+    sub['_year_month'] = sub['entry_date'].dt.to_period('M').astype(str)
+    rows = []
+    for ym, chunk in sub.groupby('_year_month'):
+        ret = chunk['return_pct'].dropna() if 'return_pct' in chunk.columns else pd.Series(dtype=float)
+        pnl = chunk['gross_pnl'].dropna() if 'gross_pnl' in chunk.columns else pd.Series(dtype=float)
+        hold = chunk['holding_days'].dropna() if 'holding_days' in chunk.columns else pd.Series(dtype=float)
+        rows.append({
+            'year_month': ym,
+            'count': len(chunk),
+            'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'median_return': round(ret.median(), 4) if len(ret) else float('nan'),
+            'total_pnl_yuan': round(pnl.sum(), 0) if len(pnl) else float('nan'),
+            'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+        })
+    df = pd.DataFrame(rows, columns=cols)
+    return df.sort_values('year_month').reset_index(drop=True)
+
+
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
     """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
@@ -567,6 +599,9 @@ def run(project_root, cfg):
 
     dea_lookback = compute_dea_lookback_stats(trades)
     dea_lookback.to_csv(out_dir / 'dea_lookback_stats.csv', index=False)
+
+    monthly = compute_monthly_stats(trades)
+    monthly.to_csv(out_dir / 'monthly_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)

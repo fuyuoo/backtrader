@@ -12,6 +12,7 @@ from my_strategy.tools.attribution import (
     compute_mfe_mae_by_exit,
     compute_mfe_distribution,
     compute_dea_lookback_stats,
+    compute_monthly_stats,
 )
 
 
@@ -485,5 +486,46 @@ def test_compute_dea_lookback_stats_missing_column():
     assert list(out.columns) == [
         'bucket', 'count', 'win_rate', 'avg_return', 'median_return',
         'avg_holding_days', 'avg_add_count', 'pct_completed',
+    ]
+    assert len(out) == 0
+
+
+def test_compute_monthly_stats_basic():
+    trades = pd.DataFrame({
+        'entry_date':    pd.to_datetime(['2023-01-15', '2023-01-20', '2023-03-05', '2023-03-10']),
+        'return_pct':    [3.0, -1.0, 5.0, 2.0],
+        'gross_pnl':     [3000.0, -1000.0, 5000.0, 2000.0],
+        'holding_days':  [10, 15, 20, 12],
+    })
+    out = compute_monthly_stats(trades)
+    assert list(out.columns) == [
+        'year_month', 'count', 'win_rate', 'avg_return',
+        'median_return', 'total_pnl_yuan', 'avg_holding_days',
+    ]
+    assert list(out['year_month']) == ['2023-01', '2023-03']
+    jan = out[out['year_month'] == '2023-01'].iloc[0]
+    assert jan['count'] == 2
+    assert jan['win_rate'] == 0.5
+    assert jan['avg_return'] == 1.0
+    assert jan['total_pnl_yuan'] == 2000
+    mar = out[out['year_month'] == '2023-03'].iloc[0]
+    assert mar['count'] == 2
+    assert mar['win_rate'] == 1.0
+
+
+def test_compute_monthly_stats_empty_input():
+    out = compute_monthly_stats(pd.DataFrame())
+    assert list(out.columns) == [
+        'year_month', 'count', 'win_rate', 'avg_return',
+        'median_return', 'total_pnl_yuan', 'avg_holding_days',
+    ]
+    assert len(out) == 0
+
+
+def test_compute_monthly_stats_missing_column():
+    out = compute_monthly_stats(pd.DataFrame({'return_pct': [1.0]}))
+    assert list(out.columns) == [
+        'year_month', 'count', 'win_rate', 'avg_return',
+        'median_return', 'total_pnl_yuan', 'avg_holding_days',
     ]
     assert len(out) == 0
