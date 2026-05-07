@@ -24,6 +24,8 @@ EXPECTED_FILES = [
     'add_count_stats.csv',
     'entry_condition_stats.csv',
     'yearly_stats.csv',
+    'first_buy_size_stats.csv',
+    'add_block_stats.csv',
 ]
 
 
