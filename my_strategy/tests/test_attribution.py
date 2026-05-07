@@ -4,6 +4,7 @@ from my_strategy.tools.attribution import (
     compute_top_bottom_trades,
     compute_sector_winrate,
     compute_exit_reason_stats,
+    compute_add_count_stats,
 )
 
 
@@ -121,4 +122,41 @@ def test_compute_exit_reason_stats_empty_input():
     assert list(out.columns) == ['exit_reason', 'count', 'win_rate',
                                   'avg_return', 'avg_holding_days',
                                   'avg_add_count']
+    assert len(out) == 0
+
+
+def test_compute_add_count_stats_buckets_3plus():
+    trades = pd.DataFrame({
+        'add_count': [0, 0, 1, 1, 2, 3, 4, 5],
+        'return_pct': [1.0, 2.0, 3.0, -1.0, 0.5, 10.0, 20.0, 30.0],
+        'gross_pnl': [100, 200, 300, -100, 50, 1000, 2000, 3000],
+        'holding_days': [10, 12, 20, 18, 30, 50, 60, 70],
+        'status': ['completed'] * 8,
+    })
+    out = compute_add_count_stats(trades)
+    assert set(out['add_count']) == {'0', '1', '2', '3+'}
+    bucket_3plus = out[out['add_count'] == '3+'].iloc[0]
+    assert bucket_3plus['count'] == 3
+    assert list(out['add_count']) == ['0', '1', '2', '3+']
+
+
+def test_compute_add_count_stats_pct_completed():
+    trades = pd.DataFrame({
+        'add_count': [1, 1, 1, 1],
+        'return_pct': [1.0, 2.0, float('nan'), float('nan')],
+        'gross_pnl': [100, 200, float('nan'), float('nan')],
+        'holding_days': [10, 12, float('nan'), float('nan')],
+        'status': ['completed', 'completed', 'incomplete', 'incomplete'],
+    })
+    out = compute_add_count_stats(trades)
+    row = out[out['add_count'] == '1'].iloc[0]
+    assert row['count'] == 4
+    assert row['pct_completed'] == 0.5
+
+
+def test_compute_add_count_stats_empty_input():
+    out = compute_add_count_stats(pd.DataFrame())
+    assert list(out.columns) == ['add_count', 'count', 'win_rate',
+                                  'avg_return', 'avg_holding_days',
+                                  'pct_completed']
     assert len(out) == 0

@@ -103,6 +103,38 @@ def compute_exit_reason_stats(trades):
     return pd.DataFrame(rows, columns=cols).sort_values('count', ascending=False).reset_index(drop=True)
 
 
+def compute_add_count_stats(trades):
+    """按 add_count 分组（0/1/2/3+），统计胜率/平均收益/已平仓比例。
+
+    排序：add_count 升序（'0' → '1' → '2' → '3+'）。
+    """
+    cols = ['add_count', 'count', 'win_rate', 'avg_return',
+            'avg_holding_days', 'pct_completed']
+    if trades.empty or 'add_count' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    t = trades.copy()
+    t['add_count_bucket'] = t['add_count'].apply(
+        lambda x: str(int(x)) if pd.notna(x) and x < 3 else '3+')
+    rows = []
+    for bucket, sub in t.groupby('add_count_bucket'):
+        ret = sub['return_pct'].dropna() if 'return_pct' in sub.columns else pd.Series(dtype=float)
+        hold = sub['holding_days'].dropna() if 'holding_days' in sub.columns else pd.Series(dtype=float)
+        completed = ((sub['status'] == 'completed').sum()
+                     if 'status' in sub.columns else 0)
+        rows.append({
+            'add_count': bucket,
+            'count': len(sub),
+            'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+            'pct_completed': round(completed / len(sub), 4) if len(sub) else float('nan'),
+        })
+    order = {'0': 0, '1': 1, '2': 2, '3+': 3}
+    df = pd.DataFrame(rows, columns=cols)
+    df['_ord'] = df['add_count'].map(order)
+    return df.sort_values('_ord').drop(columns='_ord').reset_index(drop=True)
+
+
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
     """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
@@ -207,6 +239,9 @@ def run(project_root, cfg):
 
     exit_reason = compute_exit_reason_stats(trades)
     exit_reason.to_csv(out_dir / 'exit_reason_stats.csv', index=False)
+
+    add_count = compute_add_count_stats(trades)
+    add_count.to_csv(out_dir / 'add_count_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)
