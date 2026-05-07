@@ -3,6 +3,7 @@ from my_strategy.tools.attribution import (
     compute_trade_profile,
     compute_top_bottom_trades,
     compute_sector_winrate,
+    compute_exit_reason_stats,
 )
 
 
@@ -80,3 +81,44 @@ def test_compute_factor_alpha_picks_top_n_per_day():
     # baseline = 全部信号平均 = (0.1+0.05-0.05+0.08+0.04-0.04)/6 ≈ 0.03
     assert roe_row['top_n_avg'] > roe_row['baseline_avg']
     assert roe_row['alpha'] > 0
+
+
+def _make_trade_summary_extended():
+    """覆盖 exit_reason / add_count / status / gross_pnl / entry_date 等扩展字段。"""
+    return pd.DataFrame({
+        'ts_code': ['A.SZ', 'B.SZ', 'C.SZ', 'D.SZ', 'E.SZ', 'F.SZ'],
+        'entry_date': pd.to_datetime(
+            ['2022-01-05', '2022-06-10', '2023-02-08', '2023-09-15',
+             '2024-03-12', '2024-11-20']),
+        'return_pct': [15.0, -3.0, 8.0, -12.0, 2.0, float('nan')],
+        'gross_pnl': [15000.0, -3000.0, 8000.0, -12000.0, 2000.0, float('nan')],
+        'holding_days': [40.0, 15.0, 60.0, 22.0, 10.0, float('nan')],
+        'add_count': [2, 0, 1, 0, 1, 1],
+        'exit_reason': ['take_profit_2', 'MA25清仓', 'take_profit_2',
+                        'MA25清仓', 'take_profit_1', '未平仓'],
+        'status': ['completed', 'completed', 'completed',
+                   'completed', 'completed', 'incomplete'],
+    })
+
+
+def test_compute_exit_reason_stats_groups_by_reason():
+    trades = _make_trade_summary_extended()
+    out = compute_exit_reason_stats(trades)
+    assert set(out['exit_reason']) == {
+        'take_profit_2', 'MA25清仓', 'take_profit_1', '未平仓'}
+    ma25 = out[out['exit_reason'] == 'MA25清仓'].iloc[0]
+    assert ma25['count'] == 2
+    assert ma25['win_rate'] == 0.0
+    assert ma25['avg_return'] == -7.5
+    incomplete = out[out['exit_reason'] == '未平仓'].iloc[0]
+    assert incomplete['count'] == 1
+    assert pd.isna(incomplete['win_rate'])
+    assert list(out['count']) == sorted(out['count'], reverse=True)
+
+
+def test_compute_exit_reason_stats_empty_input():
+    out = compute_exit_reason_stats(pd.DataFrame())
+    assert list(out.columns) == ['exit_reason', 'count', 'win_rate',
+                                  'avg_return', 'avg_holding_days',
+                                  'avg_add_count']
+    assert len(out) == 0

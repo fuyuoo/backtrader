@@ -64,6 +64,8 @@ def compute_top_bottom_trades(trades, signals, n=10):
 
 def compute_sector_winrate(trades, signals):
     j = _join_trades_with_signals(trades, signals)
+    if 'sector' not in j.columns or j['sector'].dropna().empty:
+        return pd.DataFrame(columns=['sector', 'count', 'win_rate', 'avg_return'])
     rows = []
     for sector, sub in j.groupby('sector'):
         rows.append({
@@ -73,6 +75,32 @@ def compute_sector_winrate(trades, signals):
             'avg_return': round(sub['return_pct'].mean(), 4),
         })
     return pd.DataFrame(rows).sort_values('avg_return', ascending=False)
+
+
+def compute_exit_reason_stats(trades):
+    """按 exit_reason 分组统计 count/win_rate/avg_return/avg_holding_days/avg_add_count。
+
+    NaN return_pct（如未平仓）会从 win_rate / avg_return 计算中剔除，
+    但仍计入 count。排序：count 降序。
+    """
+    cols = ['exit_reason', 'count', 'win_rate', 'avg_return',
+            'avg_holding_days', 'avg_add_count']
+    if trades.empty or 'exit_reason' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for reason, sub in trades.groupby('exit_reason'):
+        ret = sub['return_pct'].dropna() if 'return_pct' in sub.columns else pd.Series(dtype=float)
+        hold = sub['holding_days'].dropna() if 'holding_days' in sub.columns else pd.Series(dtype=float)
+        addc = sub['add_count'].dropna() if 'add_count' in sub.columns else pd.Series(dtype=float)
+        rows.append({
+            'exit_reason': reason,
+            'count': len(sub),
+            'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+            'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+            'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+            'avg_add_count': round(addc.mean(), 2) if len(addc) else float('nan'),
+        })
+    return pd.DataFrame(rows, columns=cols).sort_values('count', ascending=False).reset_index(drop=True)
 
 
 def compute_factor_alpha(signals, top_n=3, factors=None,
@@ -86,7 +114,7 @@ def compute_factor_alpha(signals, top_n=3, factors=None,
     """
     s = signals.copy()
     if factors is None:
-        factors = [c for c in s.columns if c.startswith('pct_')]
+        factors = [c for c in s.columns if c.startswith('factor_')]
 
     s = s.dropna(subset=[horizon])
     baseline_avg = s[horizon].mean()
@@ -141,15 +169,18 @@ def compute_factor_alpha(signals, top_n=3, factors=None,
             'ic_ir': round(ic_ir, 4) if not np.isnan(ic_ir) else None,
             'sample_size': len(top),
         })
+    if not rows:
+        return pd.DataFrame(columns=['factor', 'top_n_avg', 'baseline_avg',
+                                      'alpha', 'top_bottom_spread',
+                                      'ic_mean', 'ic_ir', 'sample_size'])
     return pd.DataFrame(rows).sort_values('alpha', ascending=False)
 
 
-def main():
-    import json
-    project_root = Path(__file__).resolve().parent.parent
-    cfg = json.loads((project_root / 'config.json').read_text())
+def run(project_root, cfg):
+    """根据 cfg 执行全部归因分析并写出报告。供 backtest.py 直接调用。"""
+    project_root = Path(project_root)
     sig_path = project_root / cfg['signals_log_path']
-    trade_path = project_root / 'results' / 'trade_log.csv'
+    trade_path = project_root / 'results' / 'trade_summary.csv'
     out_dir = project_root / cfg['attribution_report_dir']
 
     if not sig_path.exists():
@@ -157,7 +188,7 @@ def main():
             f"signals_log not found at {sig_path}. Run backtest.py first.")
     if not trade_path.exists():
         raise FileNotFoundError(
-            f"trade_log not found at {trade_path}. Run backtest.py first.")
+            f"trade_summary not found at {trade_path}. Run backtest.py first.")
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -174,10 +205,20 @@ def main():
     sector = compute_sector_winrate(trades, signals)
     sector.to_csv(out_dir / 'sector_winrate.csv', index=False)
 
+    exit_reason = compute_exit_reason_stats(trades)
+    exit_reason.to_csv(out_dir / 'exit_reason_stats.csv', index=False)
+
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)
 
     print(f"attribution reports written to {out_dir}")
+
+
+def main():
+    import json
+    project_root = Path(__file__).resolve().parent.parent
+    cfg = json.loads((project_root / 'config.json').read_text())
+    run(project_root, cfg)
 
 
 if __name__ == '__main__':
