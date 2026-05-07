@@ -128,7 +128,9 @@ my_strategy/
 5. **exit_reason_stats**：按出场原因（MA25清仓 / take_profit_1/2 / 未平仓 ...）统计胜率、收益、持仓天数、加仓次数；
 6. **add_count_stats**：按加仓次数（0/1/2/3+）统计胜率、收益、已平仓比例；
 7. **entry_condition_stats**：7 个入场快照字段（kdj_j / ma60_dist / ma_alignment / macd_zone / week/month）的单条件长表，固定阈值分桶；
-8. **yearly_stats**：按 `entry_date.year` 统计 count / win_rate / avg_return / median_return / total_pnl_yuan（绝对盈亏，元）/ avg_holding_days。
+8. **yearly_stats**：按 `entry_date.year` 统计 count / win_rate / avg_return / median_return / total_pnl_yuan（绝对盈亏，元）/ avg_holding_days；
+9. **first_buy_size_stats**：按 `entry_ma60_dist_pct` 11 桶扫描首仓尺寸阈值（当前 1%）的合理性；输出 count / win_rate / avg_return / median_return / avg_holding_days / avg_add_count / pct_completed；
+10. **add_block_stats**：按 `max_bullish_candle_pct`（持仓期最大阳线，由 strategy.py 记录到 trade_summary）9 桶扫描加仓阻断阈值（当前 1%）的合理性；同口径输出。
 
 输出目录由 `config.attribution_report_dir` 控制。
 

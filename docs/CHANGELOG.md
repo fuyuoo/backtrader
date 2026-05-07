@@ -15,6 +15,18 @@
 
 ---
 
+## 2026-05-07 — 归因报告新增 2 张魔数扫描表 + strategy 记录持仓期最大阳线
+
+- 需求：策略含 2 个 1% 魔数（首仓尺寸触发线、加仓阻断阈值），需要数据驱动评估其合理性。
+- 改动：
+  - `my_strategy/src/strategy.py`：`state['big_candle_seen']`(bool) → `state['max_bullish_candle_pct']`(float)；加仓判定从 `not big_candle_seen` 改为 `<= 0.01`（行为完全等价）；`_finalize_episode` 写入 `trade_summary.csv` 新列 `max_bullish_candle_pct`。
+  - `my_strategy/tools/attribution.py` 新增 `compute_first_buy_size_stats`（11 桶扫描 entry_ma60_dist_pct）、`compute_add_block_stats`（9 桶扫描 max_bullish_candle_pct）两个函数，并在 `run()` 末尾追加 2 个 `to_csv`。
+  - `my_strategy/tests/test_strategy.py` 追加 3 个用例验证行为不变性。
+  - `my_strategy/tests/test_attribution.py` 追加 6 个单元测试。
+  - `my_strategy/tests/test_attribution_run.py` `EXPECTED_FILES` 9→11。
+  - `docs/FEATURES.md` §6 同步至 10 项。
+- 影响：回测后归因 11 张报告（之前 9 张）。重跑回测后 `trade_summary.csv` 新增 `max_bullish_candle_pct` 列；初步数据：5911 笔交易中 max_bullish_candle_pct 中位数 3.8%，>1% 占 4932 笔（83%）。详见 spec：`docs/superpowers/specs/2026-05-07-magic-number-scan-design.md`。
+
 ## 2026-05-07 — 归因报告新增 4 张关键统计表
 
 - 需求：现有归因仅覆盖行业/收益分桶/3 个因子三个维度，缺 exit_reason / add_count / 入场条件 / 年度稳定性，无法定位策略瓶颈。
