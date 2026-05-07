@@ -244,6 +244,60 @@ def compute_yearly_stats(trades):
     return pd.DataFrame(rows, columns=cols).sort_values('year').reset_index(drop=True)
 
 
+_FIRST_BUY_BINS = [-np.inf, -1, -0.5, 0, 0.5, 1, 1.5, 2, 3, 5, 10, np.inf]
+_FIRST_BUY_LABELS = ['[<-1%)', '[-1%,-0.5%)', '[-0.5%,0%)',
+                     '[0%,0.5%)', '[0.5%,1%)', '[1%,1.5%)',
+                     '[1.5%,2%)', '[2%,3%)', '[3%,5%)',
+                     '[5%,10%)', '[10%+)']
+
+
+def _scan_bucket_aggregate(sub):
+    """对一个桶子集计算 count/win_rate/avg_return/median_return/avg_holding_days/avg_add_count/pct_completed。"""
+    ret = sub['return_pct'].dropna() if 'return_pct' in sub.columns else pd.Series(dtype=float)
+    hold = sub['holding_days'].dropna() if 'holding_days' in sub.columns else pd.Series(dtype=float)
+    addc = sub['add_count'].dropna() if 'add_count' in sub.columns else pd.Series(dtype=float)
+    completed = ((sub['status'] == 'completed').sum()
+                 if 'status' in sub.columns else 0)
+    n = len(sub)
+    return {
+        'count': n,
+        'win_rate': round((ret > 0).mean(), 4) if len(ret) else float('nan'),
+        'avg_return': round(ret.mean(), 4) if len(ret) else float('nan'),
+        'median_return': round(ret.median(), 4) if len(ret) else float('nan'),
+        'avg_holding_days': round(hold.mean(), 1) if len(hold) else float('nan'),
+        'avg_add_count': round(addc.mean(), 2) if len(addc) else float('nan'),
+        'pct_completed': round(completed / n, 4) if n else float('nan'),
+    }
+
+
+def compute_first_buy_size_stats(trades):
+    """按 entry_ma60_dist_pct 11 桶扫描，评估首仓尺寸阈值（当前 1%）的合理性。
+
+    输入字段 entry_ma60_dist_pct 单位为百分点（例 0.5 表示 0.5%）。
+    """
+    cols = ['bucket', 'count', 'win_rate', 'avg_return', 'median_return',
+            'avg_holding_days', 'avg_add_count', 'pct_completed']
+    if trades.empty or 'entry_ma60_dist_pct' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+    sub = trades.dropna(subset=['entry_ma60_dist_pct']).copy()
+    if sub.empty:
+        return pd.DataFrame(columns=cols)
+    sub['_bucket'] = pd.cut(sub['entry_ma60_dist_pct'],
+                             bins=_FIRST_BUY_BINS, labels=_FIRST_BUY_LABELS,
+                             right=False, include_lowest=False)
+    rows = []
+    for bucket in _FIRST_BUY_LABELS:
+        chunk = sub[sub['_bucket'] == bucket]
+        if chunk.empty:
+            continue
+        row = {'bucket': bucket}
+        row.update(_scan_bucket_aggregate(chunk))
+        rows.append(row)
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
+
+
 def compute_factor_alpha(signals, top_n=3, factors=None,
                          horizon='forward_return_20d'):
     """对每个因子计算：Top-N alpha、Bottom-N spread、Spearman IC。
@@ -357,6 +411,9 @@ def run(project_root, cfg):
 
     yearly = compute_yearly_stats(trades)
     yearly.to_csv(out_dir / 'yearly_stats.csv', index=False)
+
+    first_buy = compute_first_buy_size_stats(trades)
+    first_buy.to_csv(out_dir / 'first_buy_size_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)

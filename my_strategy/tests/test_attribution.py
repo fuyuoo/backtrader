@@ -7,6 +7,7 @@ from my_strategy.tools.attribution import (
     compute_add_count_stats,
     compute_entry_condition_stats,
     compute_yearly_stats,
+    compute_first_buy_size_stats,
 )
 
 
@@ -255,4 +256,57 @@ def test_compute_yearly_stats_empty_input():
     assert list(out.columns) == ['year', 'count', 'win_rate',
                                   'avg_return', 'median_return',
                                   'total_pnl_yuan', 'avg_holding_days']
+    assert len(out) == 0
+
+
+def test_compute_first_buy_size_stats_buckets():
+    trades = pd.DataFrame({
+        'entry_ma60_dist_pct': [
+            -1.5,           # [<-1%)
+            -0.7, -0.6,     # [-1%,-0.5%) 两笔
+            -0.2,           # [-0.5%,0%)
+            0.3,            # [0%,0.5%)
+            0.7,            # [0.5%,1%)
+            1.2,            # [1%,1.5%)
+            1.7,            # [1.5%,2%)
+            2.5,            # [2%,3%)
+            4.0,            # [3%,5%)
+            7.0,            # [5%,10%)
+            15.0,           # [10%+)
+        ],
+        'return_pct': [-5.0, 1.0, 3.0, 2.0, 4.0, -2.0, 6.0, -1.0, 8.0, -3.0, 9.0, 0.0],
+        'holding_days': [10, 12, 14, 20, 30, 25, 18, 15, 22, 28, 35, 40],
+        'add_count': [0, 1, 0, 1, 2, 0, 1, 0, 2, 0, 1, 0],
+        'status': ['completed'] * 12,
+    })
+    out = compute_first_buy_size_stats(trades)
+    assert list(out['bucket']) == [
+        '[<-1%)', '[-1%,-0.5%)', '[-0.5%,0%)',
+        '[0%,0.5%)', '[0.5%,1%)', '[1%,1.5%)',
+        '[1.5%,2%)', '[2%,3%)', '[3%,5%)',
+        '[5%,10%)', '[10%+)',
+    ]
+    row_negativehalf = out[out['bucket'] == '[-1%,-0.5%)'].iloc[0]
+    assert row_negativehalf['count'] == 2
+    assert row_negativehalf['avg_return'] == 2.0  # (1+3)/2
+    row_first = out[out['bucket'] == '[<-1%)'].iloc[0]
+    assert row_first['count'] == 1
+    assert row_first['win_rate'] == 0.0
+
+
+def test_compute_first_buy_size_stats_empty_input():
+    out = compute_first_buy_size_stats(pd.DataFrame())
+    assert list(out.columns) == [
+        'bucket', 'count', 'win_rate', 'avg_return', 'median_return',
+        'avg_holding_days', 'avg_add_count', 'pct_completed',
+    ]
+    assert len(out) == 0
+
+
+def test_compute_first_buy_size_stats_missing_column():
+    out = compute_first_buy_size_stats(pd.DataFrame({'foo': [1, 2, 3]}))
+    assert list(out.columns) == [
+        'bucket', 'count', 'win_rate', 'avg_return', 'median_return',
+        'avg_holding_days', 'avg_add_count', 'pct_completed',
+    ]
     assert len(out) == 0
