@@ -108,7 +108,7 @@ my_strategy/
 ### 5.4 产物
 
 - `results/trade_list.csv`：逐笔（每次买卖）明细；
-- `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；
+- `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；新增列 `first_buy_price`（首买入价，作为 MFE/MAE 基准）、`mfe_pct` / `mae_pct`（持仓期相对首买入价的最高浮盈 / 最深浮亏）、`dea_neg_distance_days`（首买时距上次 DEA<0 的 bar 数）；这些字段为只读观测，不参与买卖判定；
 - `results/equity_curve.png`：净值曲线；
 - `data/signals_log.csv`：每次入场信号当时的因子快照（供归因使用）；
 - 终端打印：总收益、Sharpe、最大回撤、胜率等。
@@ -130,7 +130,11 @@ my_strategy/
 7. **entry_condition_stats**：7 个入场快照字段（kdj_j / ma60_dist / ma_alignment / macd_zone / week/month）的单条件长表，固定阈值分桶；
 8. **yearly_stats**：按 `entry_date.year` 统计 count / win_rate / avg_return / median_return / total_pnl_yuan（绝对盈亏，元）/ avg_holding_days；
 9. **first_buy_size_stats**：按 `entry_ma60_dist_pct` 11 桶扫描首仓尺寸阈值（当前 1%）的合理性；输出 count / win_rate / avg_return / median_return / avg_holding_days / avg_add_count / pct_completed；
-10. **add_block_stats**：按 `max_bullish_candle_pct`（持仓期最大阳线，由 strategy.py 记录到 trade_summary）9 桶扫描加仓阻断阈值（当前 1%）的合理性；同口径输出。
+10. **add_block_stats**：按 `max_bullish_candle_pct`（持仓期最大阳线，由 strategy.py 记录到 trade_summary）9 桶扫描加仓阻断阈值（当前 1%）的合理性；同口径输出；
+11. **mfe_mae_by_exit**：按出场原因聚合 MFE（持仓期最高浮盈）/ MAE（最深浮亏）画像，列含 avg_return / avg_mfe / avg_mae / avg_pullback (mfe-return) / avg_underwater (-mae)；
+12. **mfe_distribution**：按 mfe_pct 6 桶分布，看曾浮盈过 X% 的笔最终落地胜率/avg_return；
+13. **dea_lookback_stats**：按 `dea_neg_distance_days`（距上次 DEA<0 的 bar 数，由 strategy.py 入场时记录）11 桶扫描，评估 `dea_lookback_days`（默认 5）阈值的合理性；
+14. **monthly_stats**：按 `entry_date` 年月分组，列与 yearly_stats 同口径（count / win_rate / avg_return / median_return / total_pnl_yuan / avg_holding_days）。
 
 输出目录由 `config.attribution_report_dir` 控制。
 

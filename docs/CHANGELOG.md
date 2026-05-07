@@ -15,6 +15,18 @@
 
 ---
 
+## 2026-05-07 — 归因报告新增 4 张表（持仓画像/参数扫描/月度细化）+ strategy 采集 mfe/mae/dea 距离
+
+- 需求：标准量化诊断缺失——持仓期 MFE/MAE 未跟踪、dea_lookback_days 这个魔数未做扫描归因、yearly_stats 5 行样本太薄。
+- 改动：
+  - `my_strategy/src/strategy.py`：模块函数 `_scan_dea_neg_distance(d, max_lookback=200)`；state 增 `first_buy_price / mfe_pct / mae_pct / dea_neg_distance_days`；首买时锁定基准并记录 dea 距离；持仓期更新 mfe/mae（基准 = 首买入价，加仓不变）；trade_summary.csv 新增 3 列。MFE/MAE/dea 距离均为只读观测，不参与买卖判定。
+  - `my_strategy/tools/attribution.py` 新增 4 个 compute_ 函数：`compute_mfe_mae_by_exit`（按出场原因聚合）、`compute_mfe_distribution`（6 桶）、`compute_dea_lookback_stats`（11 桶）、`compute_monthly_stats`（年月分组），并在 `run()` 末尾追加 4 个 to_csv。
+  - `my_strategy/tests/test_strategy.py` 追加 4 个用例验证行为不变性 + 数据采集正确性。
+  - `my_strategy/tests/test_attribution.py` 追加 12 个单元测试。
+  - `my_strategy/tests/test_attribution_run.py` `EXPECTED_FILES` 11 → 15。
+  - `docs/FEATURES.md` §6 同步至 14 项。
+- 影响：回测后归因 15 张报告（之前 11 张）。需重跑回测才能填充 trade_summary.csv 的 3 个新列；旧 trade_summary.csv 上 `mfe_mae_by_exit.csv` / `mfe_distribution.csv` / `dea_lookback_stats.csv` 为空表头（容错），`monthly_stats.csv` 仍可填充。详见 spec：`docs/superpowers/specs/2026-05-07-holding-excursion-attribution-design.md`。
+
 ## 2026-05-07 — 归因报告新增 2 张魔数扫描表 + strategy 记录持仓期最大阳线
 
 - 需求：策略含 2 个 1% 魔数（首仓尺寸触发线、加仓阻断阈值），需要数据驱动评估其合理性。
