@@ -15,6 +15,11 @@
 
 ---
 
+## 2026-05-08 — Phase B-prep Task 4: 移除财务因子消费侧 + 修复 cost_breakdown overall 行
+- 需求：从所有消费侧彻底移除 factor_pe_ttm / factor_roe / factor_netprofit_yoy；修复 cost_breakdown.csv overall 行 gross_pnl/net_pnl/cost_pct_of_gross 为 null 的 bug
+- 改动：`backtest.py` 清空 `_FACTOR_RENAME`，`_FACTOR_COLS` 仅保留技术因子；`attribution.py` `compute_factor_alpha` 自动发现逻辑排除财务因子；存量 reports/bottom_trades.csv、top_trades.csv 直接删除旧财务因子列；新增 `tests/test_factor_cleanup.py`（6 个测试）
+- 影响：signals_log.csv 下次回测起不再写入三个财务因子列；attribution 报告 factor_alpha.csv 不再评估财务因子
+
 ## 2026-05-08 — Phase B-prep Task 3: PIT universe 过滤
 - 需求：避免在股票上市前将其纳入回测宇宙（前瞻偏差）
 - 改动：backtest.py 新增 `_resolve_pit_window()`；`load_feeds` 数据加载循环按 `list_date`/`delist_date` 剪裁每股有效窗口；新增 `tests/test_pit_universe.py`（7 个测试）

@@ -707,9 +707,11 @@ def compute_factor_alpha(signals, top_n=3, factors=None,
     - ic_mean: 每日 Spearman(因子值, 远期收益) 序列的均值
     - ic_ir: ic_mean / ic_std（信息比率）
     """
+    _FINANCIAL_FACTORS = {'factor_pe_ttm', 'factor_roe', 'factor_netprofit_yoy'}
     s = signals.copy()
     if factors is None:
-        factors = [c for c in s.columns if c.startswith('factor_')]
+        factors = [c for c in s.columns
+                   if c.startswith('factor_') and c not in _FINANCIAL_FACTORS]
 
     s = s.dropna(subset=[horizon])
     baseline_avg = s[horizon].mean()

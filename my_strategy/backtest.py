@@ -955,11 +955,9 @@ def backfill_forward_returns(signals, indicators_by_code, horizons=(5, 20, 60)):
                 (future_close - base_close) / base_close, 6)
 
 
-_FACTOR_RENAME = {'roe': 'factor_roe', 'pe_ttm': 'factor_pe_ttm',
-                  'netprofit_yoy': 'factor_netprofit_yoy'}
+_FACTOR_RENAME = {}
 _FACTOR_COLS = [
     'factor_momentum_60d', 'factor_ma60_dist', 'factor_macd_strength',
-    'factor_roe', 'factor_pe_ttm', 'factor_netprofit_yoy',
     'factor_sector_momentum_60d',
 ]
 
