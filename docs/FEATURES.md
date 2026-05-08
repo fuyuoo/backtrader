@@ -30,7 +30,8 @@ my_strategy/
 │   ├── trade_attribution_extra.py      # 扩展归因报告（5 张：payoff/signal_stability/...）
 │   ├── portfolio_attribution.py        # 组合层归因（5 张：sharpe/sortino/drawdown_periods/...）
 │   ├── position_curve_attribution.py   # 持仓曲线归因（4 张：holding_curve/mfe_timing/...）
-│   └── attribution_runner.py           # Phase A 顶层编排（统一驱动 14 张报告 + 2 个中间文件）
+│   ├── attribution_runner.py           # Phase A 顶层编排（统一驱动 14 张报告 + 2 个中间文件）
+│   └── data_integrity_check.py        # 数据健康自检（一次性，输出 integrity_report.csv）
 ├── data/                               # 下载产物
 │   ├── daily/                          # 日线
 │   ├── weekly/, monthly/               # 周线、月线
@@ -437,4 +438,43 @@ python my_strategy/tools/verify_trades.py
 
 # 5. 跑测试
 cd my_strategy && pytest
+
+# 6. 数据健康自检（一次性）
+python -m my_strategy.tools.data_integrity_check
 ```
+
+## 14. 数据健康自检（`data_integrity_check.py`）
+
+**职责**：一次性扫描 `data/daily/*.csv` + `stock_list.csv`，将所有发现的数据问题输出到 `results/integrity_report.csv`。不修复数据，只暴露问题供人工决策。不进入回测主循环。
+
+### 调用方式
+
+```bash
+python -m my_strategy.tools.data_integrity_check
+```
+
+或在脚本中：
+
+```python
+from my_strategy.tools.data_integrity_check import run
+run(project_root, cfg)
+```
+
+### 检查项（8 种 issue_type）
+
+| issue_type | 说明 | severity |
+|---|---|---|
+| `missing_trading_day` | benchmark（000300.SH）有交易日但本股缺数据 | warning |
+| `duplicate_date` | 同一 trade_date 出现多行 | error |
+| `non_monotonic_date` | 日期不单调递增（存在回退） | error |
+| `abnormal_close_jump` | 单日 close 变化超过阈值（默认 ±25%）；前复权下不应出现 | warning |
+| `qfq_break` | close = 0 或 NaN；前复权数据不应为零 | warning |
+| `suspended_period` | 连续 ≥5 个 bar 的 OHLCV 完全相同且 volume=0（疑似停牌） | info |
+| `not_in_stock_list` | `data/daily/` 下有文件但 `stock_list.csv` 中不含该股票 | warning |
+| `in_list_no_data` | `stock_list.csv` 中有该股票但 `data/daily/` 下无文件 | warning |
+
+### 输出
+
+- 文件：`results/integrity_report.csv`
+- 列：`ts_code` / `issue_type` / `severity` / `date_or_range` / `detail`
+- severity 分三档：`error`（数据严重损坏）/ `warning`（需关注）/ `info`（信息性提示）

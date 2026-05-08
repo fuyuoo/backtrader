@@ -15,6 +15,11 @@
 
 ---
 
+## 2026-05-08 — Phase B-prep Task 1: 数据健康自检模块
+- 需求：扫描全量 daily CSV + stock_list.csv，输出问题清单供人工决策
+- 改动：新增 my_strategy/tools/data_integrity_check.py（8 个检查函数 + run()），新增 my_strategy/tests/test_data_integrity_check.py（8 个测试）
+- 影响：输出 results/integrity_report.csv（不进入 backtest 主循环）
+
 ## 2026-05-08 — Phase A 统计分析框架（13 项 / 14 张报告，全量上线）
 
 - 需求：进入 Phase B 自动调参前补齐统计盲区（风险调整收益、显著性、组合层、时间稳定性、持仓期曲线等）。
