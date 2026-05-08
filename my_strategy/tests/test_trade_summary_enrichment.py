@@ -92,6 +92,8 @@ def test_handles_open_position_no_exit_date():
         'mfe_pct': [5.0],
     })
     out = _add_trade_summary_metrics(summary, hs300_daily=_hs300_daily())
-    # 未平仓应不抛错；4 列允许 NaN
+    # 未平仓应不抛错；4 列均为 NaN
+    assert pd.isna(out.iloc[0]['mfe_minus_realized'])
+    assert pd.isna(out.iloc[0]['exit_efficiency'])
     assert pd.isna(out.iloc[0]['benchmark_return_during_holding'])
     assert pd.isna(out.iloc[0]['per_trade_alpha'])
