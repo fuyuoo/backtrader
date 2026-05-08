@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from my_strategy.tools.stats_helpers import t_test_one_sample, t_test_welch
+from my_strategy.tools.stats_helpers import t_test_one_sample, t_test_welch, bucket_stats_with_significance
 
 
 def _payoff_block(sub: pd.DataFrame, dimension: str, bucket: str) -> dict:
@@ -170,3 +170,79 @@ def compute_multi_factor_combo_stats(
                 'low_sample_warning': n < min_sample,
             })
     return pd.DataFrame(rows)
+
+
+_SIGNIFICANCE_TARGETS = [
+    # (report_name, bucket_field, value_extractor)
+    # value_extractor 接收 trades，返回 {bucket_value: series_of_returns}
+    ('exit_reason_stats', 'exit_reason',
+     lambda t: {str(v): g['return_pct'] for v, g in t.groupby('exit_reason')}
+        if 'exit_reason' in t.columns else {}),
+    ('hs300_dif_stats', 'entry_hs300_dif_above_zero',
+     lambda t: {str(v): g['return_pct'] for v, g in t.groupby('entry_hs300_dif_above_zero')}
+        if 'entry_hs300_dif_above_zero' in t.columns else {}),
+    ('hs300_bull_align_stats', 'entry_hs300_bull_align',
+     lambda t: {str(v): g['return_pct'] for v, g in t.groupby('entry_hs300_bull_align')}
+        if 'entry_hs300_bull_align' in t.columns else {}),
+    ('stock_bull_align_stats', 'entry_stock_bull_align',
+     lambda t: {str(v): g['return_pct'] for v, g in t.groupby('entry_stock_bull_align')}
+        if 'entry_stock_bull_align' in t.columns else {}),
+    ('stock_above_ma25_stats', 'entry_stock_above_ma25',
+     lambda t: {str(v): g['return_pct'] for v, g in t.groupby('entry_stock_above_ma25')}
+        if 'entry_stock_above_ma25' in t.columns else {}),
+    ('sector_bull_align_stats', 'entry_sector_bull_align',
+     lambda t: {str(v): g['return_pct'] for v, g in t.groupby('entry_sector_bull_align')}
+        if 'entry_sector_bull_align' in t.columns else {}),
+    ('sector_above_ma25_stats', 'entry_sector_above_ma25',
+     lambda t: {str(v): g['return_pct'] for v, g in t.groupby('entry_sector_above_ma25')}
+        if 'entry_sector_above_ma25' in t.columns else {}),
+    ('sector_dif_stats', 'entry_sector_dif_above_zero',
+     lambda t: {str(v): g['return_pct'] for v, g in t.groupby('entry_sector_dif_above_zero')}
+        if 'entry_sector_dif_above_zero' in t.columns else {}),
+    ('sector_week_macd_stats', 'entry_sector_week_macd_zone',
+     lambda t: {str(v): g['return_pct'] for v, g in t.groupby('entry_sector_week_macd_zone')}
+        if 'entry_sector_week_macd_zone' in t.columns else {}),
+    ('sector_month_macd_stats', 'entry_sector_month_macd_zone',
+     lambda t: {str(v): g['return_pct'] for v, g in t.groupby('entry_sector_month_macd_zone')}
+        if 'entry_sector_month_macd_zone' in t.columns else {}),
+    ('yearly_stats', 'year',
+     lambda t: {str(int(y)): g['return_pct'] for y, g in t.groupby(pd.to_datetime(t['entry_date']).dt.year)}
+        if 'entry_date' in t.columns else {}),
+]
+
+
+def compute_significance_summary(trades: pd.DataFrame) -> pd.DataFrame:
+    overall = trades['return_pct'].dropna()
+    out_rows = []
+    for report_name, bucket_field, extractor in _SIGNIFICANCE_TARGETS:
+        grouped = extractor(trades)   # NO try/except wrapper — real errors surface per CLAUDE.md policy
+        if not grouped:
+            continue
+        sub = bucket_stats_with_significance(grouped, overall)
+        if sub.empty:
+            continue
+        sub['report_name'] = report_name
+        sub['bucket_field'] = bucket_field
+        sub.rename(columns={'bucket': 'bucket_value'}, inplace=True)
+        out_rows.append(sub)
+    if not out_rows:
+        return pd.DataFrame()
+    return pd.concat(out_rows, ignore_index=True)[[
+        'report_name', 'bucket_field', 'bucket_value',
+        'n', 'mean_return', 'std_return', 'std_err',
+        'ci_low_95', 'ci_high_95',
+        't_stat_vs_zero', 'p_value_vs_zero',
+        't_stat_vs_overall', 'p_value_vs_overall',
+        'low_sample_warning', 'significant_flag',
+    ]]
+
+
+# 模块入口
+def run(trades: pd.DataFrame, out_dir: Path, signals_whitelist: list, combos: list) -> None:
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    compute_payoff_metrics(trades).to_csv(out_dir / 'payoff_metrics.csv', index=False)
+    compute_signal_stability(trades, signals_whitelist).to_csv(out_dir / 'signal_stability.csv', index=False)
+    compute_signal_correlation_matrix(trades, signals_whitelist).to_csv(out_dir / 'signal_correlation_matrix.csv', index=False)
+    compute_multi_factor_combo_stats(trades, combos).to_csv(out_dir / 'multi_factor_combo_stats.csv', index=False)
+    compute_significance_summary(trades).to_csv(out_dir / 'significance_summary.csv', index=False)

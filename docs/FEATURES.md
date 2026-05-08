@@ -204,24 +204,28 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 
 ## 8. 扩展归因报告（tools/trade_attribution_extra.py）
 
-**职责**：Phase A 统计分析框架扩展模块，从 `trade_summary.csv` 计算多维度 payoff 指标。
+**职责**：Phase A 统计分析框架扩展模块，从 `trade_summary.csv` 计算多维度 payoff 指标。共 5 张报告，通过 `run()` 模块入口统一写出。
 
 ### 公开函数
 
-| 函数 | 输入 | 输出 |
+| 函数 | 输入 | 输出文件 |
 |------|------|------|
-| `compute_payoff_metrics(trades)` | trade_summary DataFrame | 长表，含 `dimension` / `bucket` / `n` / `win_rate` / `avg_win` / `avg_loss` / `payoff_ratio` / `profit_factor` / `expectancy` / `max_win` / `max_loss` |
-| `compute_signal_stability(trades, signals_whitelist)` | trade_summary DataFrame + 信号列名列表 | 长表，含 `signal_name` / `period_year` / `n` / `win_rate` / `avg_return` / `t_stat_vs_zero` / `p_value` / `rank_within_signal` |
-| `compute_signal_correlation_matrix(trades, signals_whitelist)` | trade_summary DataFrame + 信号列名列表 | long format 两两相关表，含 `signal_a` / `signal_b` / `pearson_r` / `spearman_r` / `n` |
-| `compute_multi_factor_combo_stats(trades, combos, min_sample)` | trade_summary DataFrame + `[(name_a, name_b, name_c), ...]` 三元组列表 | 三因子交叉聚合长表，含 `signal_a_name` / `signal_a_value` / `signal_b_name` / `signal_b_value` / `signal_c_name` / `signal_c_value` / `n` / `win_rate` / `avg_return` / `t_stat_vs_overall` / `p_value_vs_overall` / `low_sample_warning` |
+| `compute_payoff_metrics(trades)` | trade_summary DataFrame | `payoff_metrics.csv` |
+| `compute_signal_stability(trades, signals_whitelist)` | trade_summary DataFrame + 信号列名列表 | `signal_stability.csv` |
+| `compute_signal_correlation_matrix(trades, signals_whitelist)` | trade_summary DataFrame + 信号列名列表 | `signal_correlation_matrix.csv` |
+| `compute_multi_factor_combo_stats(trades, combos, min_sample)` | trade_summary DataFrame + `[(name_a, name_b, name_c), ...]` 三元组列表 | `multi_factor_combo_stats.csv` |
+| `compute_significance_summary(trades)` | trade_summary DataFrame | `significance_summary.csv` |
+| `run(trades, out_dir, signals_whitelist, combos)` | 上述所有参数 + 输出目录路径 | 写出以上 5 个 CSV |
 
-`compute_payoff_metrics` 按 overall / exit_reason / year / sector / regime 五个维度各产一组行。
+`compute_payoff_metrics` 按 overall / exit_reason / year / sector / regime 五个维度各产一组行，列含 `n` / `win_rate` / `avg_win` / `avg_loss` / `payoff_ratio` / `profit_factor` / `expectancy` / `max_win` / `max_loss`。
 
 `compute_signal_stability` 对每个信号的每个值（bool 型展开为 True/False，object 型按唯一值，数值型按五分位）× 每个年份各产一行，`rank_within_signal` 按 `avg_return` 降序排名（相同信号内）。
 
 `compute_signal_correlation_matrix` 对 `signals_whitelist` 中存在于 trades 的列两两计算 Pearson 和 Spearman 相关系数，布尔列自动转 0/1，object 列用 factorize 编码，输出仅含上三角对（i < j）。
 
 `compute_multi_factor_combo_stats` 对 `combos` 中每个三元组 (a, b, c)，按 `trades.groupby([a, b, c])` 遍历所有组合格，计算每格的 win_rate / avg_return 及与全样本的 Welch t 检验；`min_sample` 控制 `low_sample_warning` 阈值（默认 100）。
+
+`compute_significance_summary` 对 `_SIGNIFICANCE_TARGETS`（11 类报告：exit_reason / hs300_dif / hs300_bull_align / stock_bull_align / stock_above_ma25 / sector_bull_align / sector_above_ma25 / sector_dif / sector_week_macd / sector_month_macd / yearly）逐类调用 `bucket_stats_with_significance`，输出统一 long format，列含 `report_name` / `bucket_field` / `bucket_value` / `n` / `mean_return` / `std_return` / `std_err` / `ci_low_95` / `ci_high_95` / `t_stat_vs_zero` / `p_value_vs_zero` / `t_stat_vs_overall` / `p_value_vs_overall` / `low_sample_warning` / `significant_flag`；对应列不存在时该目标组自动跳过（返回空行），不做静默降级。
 
 ## 9. 交易验证（tools/verify_trades.py）
 

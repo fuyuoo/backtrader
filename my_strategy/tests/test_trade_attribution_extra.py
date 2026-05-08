@@ -1,5 +1,5 @@
 import pandas as pd
-from my_strategy.tools.trade_attribution_extra import compute_payoff_metrics, compute_signal_stability, compute_signal_correlation_matrix, compute_multi_factor_combo_stats
+from my_strategy.tools.trade_attribution_extra import compute_payoff_metrics, compute_signal_stability, compute_signal_correlation_matrix, compute_multi_factor_combo_stats, compute_significance_summary
 
 
 def _make_trades():
@@ -93,3 +93,24 @@ def test_compute_multi_factor_combo_stats_3way_crosstab():
     }
     # 8 笔交易共 8 种组合可能（2^3）
     assert len(out) <= 8
+
+
+def test_compute_significance_summary_long_format_with_significance_columns():
+    trades = pd.DataFrame({
+        'return_pct': list(range(-10, 10)) * 5,  # 100 笔，足够触发显著
+        'entry_date': pd.date_range('2024-01-01', periods=100),
+        'exit_reason': ['MA25清仓'] * 50 + ['MA60止损'] * 50,
+        'entry_hs300_dif_above_zero': [True] * 60 + [False] * 40,
+    })
+    out = compute_significance_summary(trades)
+    assert set(out.columns) >= {
+        'report_name', 'bucket_field', 'bucket_value',
+        'n', 'mean_return', 'std_return', 'std_err',
+        'ci_low_95', 'ci_high_95',
+        't_stat_vs_zero', 'p_value_vs_zero',
+        't_stat_vs_overall', 'p_value_vs_overall',
+        'low_sample_warning', 'significant_flag',
+    }
+    # 至少应包含 exit_reason 和 entry_hs300_dif_above_zero 两类报告
+    assert (out['report_name'] == 'exit_reason_stats').any()
+    assert (out['report_name'] == 'hs300_dif_stats').any()

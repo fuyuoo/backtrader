@@ -15,6 +15,21 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 7：trade_attribution_extra 新增 significance_summary + 模块入口 run()
+
+- 需求：Phase A 统计分析框架 Task 7（最终任务），在 `trade_attribution_extra.py` 追加 `compute_significance_summary` 和 `run()` 模块入口，至此该模块产出 5 张报告。
+- 改动：
+  - `my_strategy/tools/trade_attribution_extra.py`：
+    - import 行扩充 `bucket_stats_with_significance`（合并入已有的 stats_helpers import 行）；
+    - 追加 `_SIGNIFICANCE_TARGETS` 常量（11 个分析目标）；
+    - 追加 `compute_significance_summary`：直接调用 `extractor(trades)` 不加 try/except 包装，遵循 CLAUDE.md "不允许静默降级" 政策，删除了计划中原有的 silent except；
+    - 追加 `run(trades, out_dir, signals_whitelist, combos)`：写出全部 5 张 CSV；
+    - `exit_reason_stats` 的 extractor 补充 `'exit_reason' in t.columns` 守卫，与其他 lambda 保持一致（harmless harmonization，让缺列时返回 `{}` 而非 KeyError）。
+  - `my_strategy/tests/test_trade_attribution_extra.py`：import 行补充 `compute_significance_summary`；追加 `test_compute_significance_summary_long_format_with_significance_columns`。
+  - `docs/FEATURES.md`：第 8 节全面更新，新增 `compute_significance_summary` / `run()` 函数说明及输出文件对应关系。
+- 偏差说明：计划代码含 `try/except Exception: grouped = {}`（silent except），已按 CLAUDE.md 政策移除；各 lambda 已有列存在性守卫（`if col in t.columns else {}`），实际不需要 try/except。
+- 影响：无破坏性变更；全套测试 136 passed 1 skipped。
+
 ## 2026-05-08 — Phase A Task 6：trade_attribution_extra 新增 multi_factor_combo_stats（三因子交叉聚合）
 
 - 需求：Phase A 统计分析框架 Task 6，在 `trade_attribution_extra.py` 追加 `compute_multi_factor_combo_stats`，对任意三因子组合做 groupby 交叉聚合，计算每个格子的 win_rate / avg_return 及与全样本的 Welch t 检验。
