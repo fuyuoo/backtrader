@@ -417,8 +417,8 @@ def _enrich_trade_summary(summary_df, cfg):
             enriched_rows.append(row)
 
     result = pd.DataFrame(enriched_rows).reset_index(drop=True)
-    # 仅这 4 列具有 True/False/None 三态语义，需要 object dtype 保留 Python bool/None；
-    # 旧的含 None 列（如 entry_kdj_j）是数值/字符串 + NaN，不需要此处理。
+    # 这 9 列具有 True/False/None 三态语义，需要 object dtype 保留 Python bool/None；
+    # entry_sector_momentum_60d 是 float（NaN 表缺失），不需要此处理。
     for col in ('entry_hs300_dif_above_zero', 'entry_hs300_bull_align',
                 'entry_stock_bull_align', 'entry_stock_above_ma25',
                 'entry_sector_bull_align', 'entry_sector_above_ma25',
