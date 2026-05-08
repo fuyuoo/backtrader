@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 6：trade_attribution_extra 新增 multi_factor_combo_stats（三因子交叉聚合）
+
+- 需求：Phase A 统计分析框架 Task 6，在 `trade_attribution_extra.py` 追加 `compute_multi_factor_combo_stats`，对任意三因子组合做 groupby 交叉聚合，计算每个格子的 win_rate / avg_return 及与全样本的 Welch t 检验。
+- 改动：
+  - `my_strategy/tools/trade_attribution_extra.py`：import 行扩充 `t_test_welch`；文件末尾追加 `compute_multi_factor_combo_stats`。
+  - `my_strategy/tests/test_trade_attribution_extra.py`：import 行补充 `compute_multi_factor_combo_stats`；追加 `test_compute_multi_factor_combo_stats_3way_crosstab`。
+  - `docs/FEATURES.md`：第 8 节公开函数表新增 `compute_multi_factor_combo_stats` 一行及行为说明。
+- 影响：无破坏性变更，既有 4 个测试仍通过，新增 1 个测试，全套 135 passed 1 skipped。
+
 ## 2026-05-08 — Phase A Task 5：trade_attribution_extra 新增 signal_correlation_matrix 报告
 
 - 需求：Phase A 统计分析框架 Task 5，在 `trade_attribution_extra.py` 追加 `compute_signal_correlation_matrix`，对信号列两两计算 Pearson + Spearman 相关系数，输出 long format。

@@ -213,12 +213,15 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 | `compute_payoff_metrics(trades)` | trade_summary DataFrame | 长表，含 `dimension` / `bucket` / `n` / `win_rate` / `avg_win` / `avg_loss` / `payoff_ratio` / `profit_factor` / `expectancy` / `max_win` / `max_loss` |
 | `compute_signal_stability(trades, signals_whitelist)` | trade_summary DataFrame + 信号列名列表 | 长表，含 `signal_name` / `period_year` / `n` / `win_rate` / `avg_return` / `t_stat_vs_zero` / `p_value` / `rank_within_signal` |
 | `compute_signal_correlation_matrix(trades, signals_whitelist)` | trade_summary DataFrame + 信号列名列表 | long format 两两相关表，含 `signal_a` / `signal_b` / `pearson_r` / `spearman_r` / `n` |
+| `compute_multi_factor_combo_stats(trades, combos, min_sample)` | trade_summary DataFrame + `[(name_a, name_b, name_c), ...]` 三元组列表 | 三因子交叉聚合长表，含 `signal_a_name` / `signal_a_value` / `signal_b_name` / `signal_b_value` / `signal_c_name` / `signal_c_value` / `n` / `win_rate` / `avg_return` / `t_stat_vs_overall` / `p_value_vs_overall` / `low_sample_warning` |
 
 `compute_payoff_metrics` 按 overall / exit_reason / year / sector / regime 五个维度各产一组行。
 
 `compute_signal_stability` 对每个信号的每个值（bool 型展开为 True/False，object 型按唯一值，数值型按五分位）× 每个年份各产一行，`rank_within_signal` 按 `avg_return` 降序排名（相同信号内）。
 
 `compute_signal_correlation_matrix` 对 `signals_whitelist` 中存在于 trades 的列两两计算 Pearson 和 Spearman 相关系数，布尔列自动转 0/1，object 列用 factorize 编码，输出仅含上三角对（i < j）。
+
+`compute_multi_factor_combo_stats` 对 `combos` 中每个三元组 (a, b, c)，按 `trades.groupby([a, b, c])` 遍历所有组合格，计算每格的 win_rate / avg_return 及与全样本的 Welch t 检验；`min_sample` 控制 `low_sample_warning` 阈值（默认 100）。
 
 ## 9. 交易验证（tools/verify_trades.py）
 

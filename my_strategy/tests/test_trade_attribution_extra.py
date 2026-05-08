@@ -1,5 +1,5 @@
 import pandas as pd
-from my_strategy.tools.trade_attribution_extra import compute_payoff_metrics, compute_signal_stability, compute_signal_correlation_matrix
+from my_strategy.tools.trade_attribution_extra import compute_payoff_metrics, compute_signal_stability, compute_signal_correlation_matrix, compute_multi_factor_combo_stats
 
 
 def _make_trades():
@@ -73,3 +73,23 @@ def test_compute_signal_correlation_matrix_long_format():
     ac = out[(out['signal_a'] == 'sig_a') & (out['signal_b'] == 'sig_c')].iloc[0]
     assert abs(ab['pearson_r'] - 1.0) < 1e-6
     assert abs(ac['pearson_r'] - (-1.0)) < 1e-6
+
+
+def test_compute_multi_factor_combo_stats_3way_crosstab():
+    trades = pd.DataFrame({
+        'return_pct': [10, -5, 8, -3, 12, -2, 15, -8],
+        'sig_a': [True, True, False, False, True, True, False, False],
+        'sig_b': [True, False, True, False, True, False, True, False],
+        'sig_c': [True, True, True, True, False, False, False, False],
+    })
+    combos = [('sig_a', 'sig_b', 'sig_c')]
+    out = compute_multi_factor_combo_stats(trades, combos)
+    assert set(out.columns) >= {
+        'signal_a_name', 'signal_a_value',
+        'signal_b_name', 'signal_b_value',
+        'signal_c_name', 'signal_c_value',
+        'n', 'win_rate', 'avg_return',
+        't_stat_vs_overall', 'p_value_vs_overall', 'low_sample_warning',
+    }
+    # 8 笔交易共 8 种组合可能（2^3）
+    assert len(out) <= 8

@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from my_strategy.tools.stats_helpers import t_test_one_sample
+from my_strategy.tools.stats_helpers import t_test_one_sample, t_test_welch
 
 
 def _payoff_block(sub: pd.DataFrame, dimension: str, bucket: str) -> dict:
@@ -135,5 +135,38 @@ def compute_signal_correlation_matrix(trades: pd.DataFrame, signals_whitelist: l
                 'pearson_r': round(float(pearson), 4) if pd.notna(pearson) else np.nan,
                 'spearman_r': round(float(spearman), 4) if pd.notna(spearman) else np.nan,
                 'n': len(sub),
+            })
+    return pd.DataFrame(rows)
+
+
+def compute_multi_factor_combo_stats(
+    trades: pd.DataFrame,
+    combos: list,
+    min_sample: int = 100,
+) -> pd.DataFrame:
+    """对每个 (a, b, c) 三元组做交叉聚合。combos: [(name_a, name_b, name_c), ...]"""
+    overall = trades['return_pct'].dropna()
+    rows = []
+    for a, b, c in combos:
+        if not all(col in trades.columns for col in (a, b, c)):
+            continue
+        for (va, vb, vc), sub in trades.groupby([a, b, c], dropna=False):
+            r = sub['return_pct'].dropna()
+            n = len(r)
+            if n == 0:
+                continue
+            t_stat, p_val = (np.nan, np.nan)
+            if n >= 2:
+                t_stat, p_val = t_test_welch(r, overall)
+            rows.append({
+                'signal_a_name': a, 'signal_a_value': str(va),
+                'signal_b_name': b, 'signal_b_value': str(vb),
+                'signal_c_name': c, 'signal_c_value': str(vc),
+                'n': n,
+                'win_rate': round(float((r > 0).mean()), 4),
+                'avg_return': round(float(r.mean()), 4),
+                't_stat_vs_overall': round(t_stat, 4) if pd.notna(t_stat) else np.nan,
+                'p_value_vs_overall': round(p_val, 4) if pd.notna(p_val) else np.nan,
+                'low_sample_warning': n < min_sample,
             })
     return pd.DataFrame(rows)
