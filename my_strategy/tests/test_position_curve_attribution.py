@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from my_strategy.tools.position_curve_attribution import compute_holding_period_curve
+from my_strategy.tools.position_curve_attribution import compute_holding_period_curve, compute_mfe_timing
 
 
 def _make_daily_pnl():
@@ -46,3 +46,34 @@ def test_compute_holding_period_curve_emits_sample_points():
     assert d0['n_active_trades'] == 2
     d3 = out[out['holding_day_n'] == 3].iloc[0]
     assert d3['n_active_trades'] == 1
+
+
+def test_compute_mfe_timing_classifies_by_position_in_holding():
+    # trade 0: peak 在持仓早期 (day 1 of 6)
+    rows = []
+    for i in range(6):
+        rows.append({
+            'trade_id': 0, 'ts_code': 'A',
+            'entry_date': pd.Timestamp('2024-01-02'),
+            'holding_day_n': i, 'date': pd.Timestamp('2024-01-02') + pd.Timedelta(days=i),
+            'close': 10.0, 'cum_return_pct': [0, 5, 3, 2, 1, 0][i],
+            'drawdown_from_peak_pct': 0.0, 'sector_code': '801010',
+        })
+    # trade 1: peak 在持仓晚期 (day 5 of 6)
+    for i in range(6):
+        rows.append({
+            'trade_id': 1, 'ts_code': 'B',
+            'entry_date': pd.Timestamp('2024-02-02'),
+            'holding_day_n': i, 'date': pd.Timestamp('2024-02-02') + pd.Timedelta(days=i),
+            'close': 20.0, 'cum_return_pct': [0, 1, 2, 3, 4, 5][i],
+            'drawdown_from_peak_pct': 0.0, 'sector_code': '801080',
+        })
+    pnl = pd.DataFrame(rows)
+    out = compute_mfe_timing(pnl)
+    assert set(out.columns) >= {
+        'mfe_timing_bucket', 'n', 'win_rate', 'avg_return',
+        'avg_holding_days', 'avg_mfe_pct',
+    }
+    buckets = out['mfe_timing_bucket'].tolist()
+    assert any('早期' in b for b in buckets)
+    assert any('晚期' in b for b in buckets)
