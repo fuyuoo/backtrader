@@ -296,6 +296,31 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 `compute_period_alpha` 按 overall / yearly / monthly 三个周期，对每个 benchmark 计算累计收益 / alpha（年化，CAPM 定义）/ beta / tracking error / information ratio，少于 5 个对齐数据点的子期自动跳过。
 `run()` 为 portfolio_attribution 模块入口，统一写出全部 5 张组合层报告。
 
+## 12. 持仓曲线归因（tools/position_curve_attribution.py）
+
+**职责**：Phase A 统计分析框架，基于 `daily_position_pnl` / `daily_portfolio_snapshot` / `trade_list` 计算持仓期曲线（4 张报告，Task 12-15 逐步追加）。
+
+### 公开函数（Task 12）
+
+| 函数 | 输入 | 输出 |
+|------|------|------|
+| `compute_holding_period_curve(daily_position_pnl)` | `daily_position_pnl` DataFrame（含 `holding_day_n` / `cum_return_pct` / `drawdown_from_peak_pct`） | 逐采样日的横截面统计 DataFrame |
+
+**采样点**：`[0, 1, 2, 3, 5, 7, 10, 15, 20, 25, 30, 40, 50, 60, 75, 90]`（含第 0 天入场时刻）。
+
+### 输出列
+
+| 列名 | 说明 |
+|------|------|
+| `holding_day_n` | 持仓第 N 天 |
+| `n_active_trades` | 该天仍活跃（有 pnl 记录）的交易笔数 |
+| `avg_cum_return` | 累计收益率均值（百分点） |
+| `median_cum_return` | 累计收益率中位数 |
+| `win_rate_at_day_n` | 当天盈利笔比例（cum_return > 0） |
+| `p25_cum_return` | 25 分位累计收益率 |
+| `p75_cum_return` | 75 分位累计收益率 |
+| `avg_drawdown_from_peak` | 均值回撤（从峰值，通常为负值） |
+
 ## 11. 配置文件（config.json）核心字段
 
 | 字段 | 说明 |

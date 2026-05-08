@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 12：新增 position_curve_attribution.py，实现 compute_holding_period_curve
+
+- 需求：Phase A 统计分析框架 Task 12，新建 `position_curve_attribution.py` 模块，实现持仓期曲线首张报告 `compute_holding_period_curve`。
+- 改动：
+  - 新建 `my_strategy/tools/position_curve_attribution.py`：`compute_holding_period_curve`，按 16 个采样日（0/1/2/3/5/7/10/15/20/25/30/40/50/60/75/90）汇总活跃交易的 avg/median/win_rate/p25/p75/drawdown 统计。
+  - 新建 `my_strategy/tests/test_position_curve_attribution.py`：`test_compute_holding_period_curve_emits_sample_points`，验证列集合、day 0 的 n_active_trades==2、day 3 的 n_active_trades==1。
+  - `docs/FEATURES.md`：新增第 12 节 position_curve_attribution，说明采样点、输出列和职责。
+- 影响：无破坏性变更；全套测试 143 passed 1 skipped。Tasks 13-15 将继续在此模块追加函数。
+
 ## 2026-05-08 — Phase A Task 11：portfolio_attribution 追加 period_alpha + run() 模块入口（模块完成）
 
 - 需求：Phase A 统计分析框架 Task 11，在 `portfolio_attribution.py` 追加 `compute_period_alpha`（对比基准的 alpha / beta / info_ratio / tracking_error）和 `run()` 模块入口（统一写出 5 张报告）。
