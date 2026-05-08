@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 15：position_curve_attribution 追加 compute_cost_breakdown + run() 模块入口（模块完成）
+
+- 需求：Phase A 统计分析框架 Task 15，在 `position_curve_attribution.py` 追加 `_cost_block`、`compute_cost_breakdown`（支持模式 A 直接读取 commission/stamp_duty 列，或模式 B 由 turnover/sell_amount 反推）和 `run()` 模块入口（统一写出 4 张报告：holding_period_curve / mfe_timing / sector_concentration_stats / cost_breakdown）。
+- 改动：
+  - `my_strategy/tools/position_curve_attribution.py`：文件末尾追加 `_cost_block`、`compute_cost_breakdown`、`run()`；模块至此完成全部 4 张报告。
+  - `my_strategy/tests/test_position_curve_attribution.py`：import 行扩充 `compute_cost_breakdown`；追加 `test_compute_cost_breakdown_with_explicit_commission_column`（模式 A）和 `test_compute_cost_breakdown_fallback_estimate_from_turnover`（模式 B）共 2 个新测试。
+  - `docs/FEATURES.md`：第 12 节函数表更新为含 `run()` 的完整 5 行，新增 `compute_cost_breakdown` 输出列说明表和数据源模式说明。
+- 影响：无破坏性变更；全套测试 147 passed 1 skipped。position_curve_attribution 模块完成。
+
 ## 2026-05-08 — Phase A Task 14：position_curve_attribution 追加 compute_sector_concentration_stats
 
 - 需求：Phase A 统计分析框架 Task 14，在 `position_curve_attribution.py` 追加 `compute_sector_concentration_stats`，统计组合逐日行业集中度的 summary 指标（avg/p95/max 最大行业占比、avg/p95 Herfindahl 指数）和 top_n 高集中日明细。

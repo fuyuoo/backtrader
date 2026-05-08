@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from my_strategy.tools.position_curve_attribution import compute_holding_period_curve, compute_mfe_timing, compute_sector_concentration_stats
+from my_strategy.tools.position_curve_attribution import compute_holding_period_curve, compute_mfe_timing, compute_sector_concentration_stats, compute_cost_breakdown
 
 
 def _make_daily_pnl():
@@ -94,3 +94,37 @@ def test_compute_sector_concentration_stats_summary_and_top_n():
     avg_max = out[(out['metric_type'] == 'summary') & (out['label'] == 'avg_max_sector_share')].iloc[0]
     # avg(0.5, 0.7, 0.3, 0.4, 1.0) = 0.58
     assert abs(avg_max['value'] - 0.58) < 1e-3
+
+
+def test_compute_cost_breakdown_with_explicit_commission_column():
+    trades = pd.DataFrame({
+        'entry_date': pd.to_datetime(['2024-01-02', '2024-02-02']),
+        'gross_pnl': [10000.0, -5000.0],
+        'commission': [30.0, 25.0],
+        'stamp_duty': [50.0, 40.0],
+        'exit_reason': ['MA25清仓', 'MA60止损'],
+    })
+    out = compute_cost_breakdown(trades, cfg={'commission_rate': 0.0003, 'stamp_duty': 0.001})
+    overall = out[(out['dimension'] == 'overall') & (out['bucket'] == 'all')].iloc[0]
+    assert overall['n_trades'] == 2
+    assert abs(overall['total_commission'] - 55.0) < 1e-6
+    assert abs(overall['total_stamp_duty'] - 90.0) < 1e-6
+    # cost_pct_of_gross = (55+90) / |10000-5000+...| 数值正确即可
+    assert overall['net_pnl'] == 10000.0 - 5000.0 - 55.0 - 90.0
+    assert (out['dimension'] == 'year').any()
+    assert (out['dimension'] == 'exit_reason').any()
+
+
+def test_compute_cost_breakdown_fallback_estimate_from_turnover():
+    trades = pd.DataFrame({
+        'entry_date': pd.to_datetime(['2024-01-02']),
+        'gross_pnl': [10000.0],
+        'turnover': [1_000_000.0],   # 双边总成交额
+        'sell_amount': [500_000.0],  # 卖出金额（印花税基数）
+        'exit_reason': ['MA25清仓'],
+    })
+    out = compute_cost_breakdown(trades, cfg={'commission_rate': 0.0003, 'stamp_duty': 0.001})
+    overall = out[(out['dimension'] == 'overall') & (out['bucket'] == 'all')].iloc[0]
+    # 0.0003 * 1_000_000 = 300, 0.001 * 500_000 = 500
+    assert abs(overall['total_commission'] - 300.0) < 1e-6
+    assert abs(overall['total_stamp_duty'] - 500.0) < 1e-6

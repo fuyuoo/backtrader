@@ -300,13 +300,15 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 
 **职责**：Phase A 统计分析框架，基于 `daily_position_pnl` / `daily_portfolio_snapshot` / `trade_list` 计算持仓期曲线（4 张报告，Task 12-15 逐步追加）。
 
-### 公开函数（Task 12–14）
+### 公开函数（Task 12–15，模块完成）
 
-| 函数 | 输入 | 输出 |
+| 函数 | 输入 | 输出文件 |
 |------|------|------|
-| `compute_holding_period_curve(daily_position_pnl)` | `daily_position_pnl` DataFrame（含 `holding_day_n` / `cum_return_pct` / `drawdown_from_peak_pct`） | 逐采样日的横截面统计 DataFrame |
-| `compute_mfe_timing(daily_position_pnl)` | 同上 | 按 MFE 发生时机（早期/中期/晚期）分组的胜率与收益汇总 DataFrame |
-| `compute_sector_concentration_stats(daily_portfolio_snapshot, top_n)` | `daily_portfolio_snapshot` DataFrame（含 `top_sector_share` / `herfindahl_index` / `top_sector_code` / `n_positions`） | 行业集中度 summary + top_n 高集中日 DataFrame |
+| `compute_holding_period_curve(daily_position_pnl)` | `daily_position_pnl` DataFrame（含 `holding_day_n` / `cum_return_pct` / `drawdown_from_peak_pct`） | `holding_period_curve.csv` |
+| `compute_mfe_timing(daily_position_pnl)` | 同上 | `mfe_timing.csv` |
+| `compute_sector_concentration_stats(daily_portfolio_snapshot, top_n)` | `daily_portfolio_snapshot` DataFrame（含 `top_sector_share` / `herfindahl_index` / `top_sector_code` / `n_positions`） | `sector_concentration_stats.csv` |
+| `compute_cost_breakdown(trades, cfg)` | trade_list（或 trade_summary）DataFrame + `cfg`（含 `commission_rate` / `stamp_duty`） | `cost_breakdown.csv` |
+| `run(project_root, cfg)` | 路径 + 配置字典 | 写出以上 4 个 CSV |
 
 **采样点**（`compute_holding_period_curve`）：`[0, 1, 2, 3, 5, 7, 10, 15, 20, 25, 30, 40, 50, 60, 75, 90]`（含第 0 天入场时刻）。
 
@@ -334,6 +336,25 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 | `top_sector_share` | top 行最大行业占比；summary 行为 NaN |
 | `herfindahl_index` | top 行 Herfindahl 指数；summary 行为 NaN |
 | `n_positions` | top 行的总持仓数；summary 行为 NaN |
+
+### 输出列（compute_cost_breakdown）
+
+| 列名 | 说明 |
+|------|------|
+| `dimension` | `overall` / `year` / `exit_reason` |
+| `bucket` | 分桶值（`all` / 年份字符串 / 出场原因字符串） |
+| `n_trades` | 该桶交易笔数 |
+| `gross_pnl` | 毛利润（元） |
+| `total_commission` | 佣金合计（元） |
+| `total_stamp_duty` | 印花税合计（元） |
+| `net_pnl` | 净利润 = gross_pnl - commission - stamp_duty |
+| `cost_pct_of_gross` | 总成本 / abs(gross_pnl) |
+| `cost_pct_of_turnover` | 总成本 / turnover（有 turnover 时才有值） |
+
+**数据源模式**：自动检测列名：
+- 模式 A（trade_list 含 `commission` + `stamp_duty` 列）：直接 sum；
+- 模式 B（仅有 `turnover` / `sell_amount`）：按 `commission_rate × turnover + stamp_duty × sell_amount` 反推；
+- 两种列均缺失时 cost 列返回 NaN（不抛异常）。
 
 ## 11. 配置文件（config.json）核心字段
 
