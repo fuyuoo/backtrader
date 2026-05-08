@@ -13,6 +13,13 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-05-08 — Phase B-prep Task 7: rolling_metrics report
+- 需求：滚动 252 日窗口的关键绩效指标，识别策略衰减 / regime 切换
+- 改动：`my_strategy/tools/portfolio_attribution.py`（compute_rolling_metrics 新增）、`my_strategy/tests/test_rolling_metrics.py`（4 个测试）
+- 影响：reports/ 新增 rolling_metrics.csv
+
+---
+
 ## 2026-05-08 — Phase B-prep Task 6: signal_importance_ranking + forward_return_5d/20d/60d
 - 需求：给 trade_summary 增加 forward_return_5d/20d/60d 列；新建 signal_importance_ranking.csv 报告
 - 改动：`my_strategy/backtest.py` 新增 `_add_forward_returns()`，在写入 trade_summary.csv 前调用；`my_strategy/tools/trade_attribution_extra.py` 新增 `compute_signal_importance_ranking()` + `_compute_ic_monthly()` + `_classify_signal_type()` 三个函数，`run()` 追加调用；新增 `my_strategy/tests/test_forward_return_enrichment.py`（3 个测试）和 `my_strategy/tests/test_signal_importance_ranking.py`（4 个测试）

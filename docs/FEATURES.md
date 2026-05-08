@@ -28,7 +28,7 @@ my_strategy/
 │   ├── stats_helpers.py                # 统计工具（置信区间、t 检验、分桶统计）
 │   ├── rebuild_position_history.py     # 重建逐日持仓 PnL + 组合快照
 │   ├── trade_attribution_extra.py      # 扩展归因报告（6 张：payoff/signal_stability/.../signal_importance_ranking）
-│   ├── portfolio_attribution.py        # 组合层归因（5 张：sharpe/sortino/drawdown_periods/...）
+│   ├── portfolio_attribution.py        # 组合层归因（6 张：sharpe/sortino/drawdown_periods/.../rolling_metrics）
 │   ├── position_curve_attribution.py   # 持仓曲线归因（4 张：holding_curve/mfe_timing/...）
 │   ├── attribution_runner.py           # Phase A 顶层编排（统一驱动 14 张报告 + 2 个中间文件）
 │   └── data_integrity_check.py        # 数据健康自检（一次性，输出 integrity_report.csv）
@@ -301,10 +301,13 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 | 函数 | 输入 | 输出 |
 |------|------|------|
 | `compute_period_alpha(strat, benchmarks)` | `pd.Series`（日收益）+ `{benchmark_code: pd.Series}` 字典 | DataFrame，列含 period_type / period_label / benchmark_code / strategy_return / benchmark_return / alpha / beta / info_ratio / tracking_error / n_trading_days |
-| `run(daily_ret, position_count_log, benchmarks, trades, cfg, out_dir)` | 上述所有参数 + 配置字典 + 输出目录路径 | 写出 5 个 CSV（portfolio_risk_metrics / losing_streak_stats / drawdown_periods / concurrent_positions_stats / period_alpha） |
+| `compute_period_alpha(strat, benchmarks)` | `pd.Series`（日收益）+ `{benchmark_code: pd.Series}` 字典 | DataFrame，列含 period_type / period_label / benchmark_code / strategy_return / benchmark_return / alpha / beta / info_ratio / tracking_error / n_trading_days |
+| `compute_rolling_metrics(daily_ret, window=252)` | `pd.Series`（日收益） | DataFrame，每行为一个滚动窗口末日；列含 window_end_date / window_size_days / n_trading_days / sharpe / sortino / win_rate_daily / max_dd_in_window / annualized_return / annualized_vol |
+| `run(daily_ret, position_count_log, benchmarks, trades, cfg, out_dir)` | 上述所有参数 + 配置字典 + 输出目录路径 | 写出 6 个 CSV（portfolio_risk_metrics / losing_streak_stats / drawdown_periods / concurrent_positions_stats / period_alpha / rolling_metrics） |
 
 `compute_period_alpha` 按 overall / yearly / monthly 三个周期，对每个 benchmark 计算累计收益 / alpha（年化，CAPM 定义）/ beta / tracking error / information ratio，少于 5 个对齐数据点的子期自动跳过。
-`run()` 为 portfolio_attribution 模块入口，统一写出全部 5 张组合层报告。
+`compute_rolling_metrics` 以默认 252 日为窗口对日收益做滚动统计，输出年化 Sharpe / Sortino / 最大回撤，可用于识别策略衰减和 regime 切换。
+`run()` 为 portfolio_attribution 模块入口，统一写出全部 6 张组合层报告。
 
 ## 12. 持仓曲线归因（tools/position_curve_attribution.py）
 
@@ -381,7 +384,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 1. `rebuild_position_history.build()` — 重建 `daily_position_pnl.csv` / `daily_portfolio_snapshot.csv`
 2. `old_attribution.run()` — 旧归因报告（27 张，保持原行为）
 3. `trade_attribution_extra.run()` — trade-level 扩展（6 张）
-4. `portfolio_attribution.run()` — 组合层风险指标（5 张）
+4. `portfolio_attribution.run()` — 组合层风险指标（6 张）
 5. `position_curve_attribution.run()` — 持仓曲线归因（4 张）
 
 ### 内置常量

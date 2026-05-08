@@ -251,6 +251,47 @@ def compute_period_alpha(strat: pd.Series, benchmarks: dict) -> pd.DataFrame:
     return pd.DataFrame([r for r in rows if r is not None])
 
 
+def compute_rolling_metrics(
+    daily_ret: pd.Series, window: int = 252,
+) -> pd.DataFrame:
+    """对 daily 收益序列做长度 window 的滚动统计。
+    输出从第 window 个 bar 起每日一行。
+    """
+    s = pd.Series(daily_ret).dropna()
+    s.index = pd.to_datetime(s.index)
+    if len(s) < window:
+        return pd.DataFrame()
+
+    rows = []
+    for i in range(window - 1, len(s)):
+        sub = s.iloc[i - window + 1:i + 1]
+        if sub.empty:
+            continue
+        equity = (1 + sub).cumprod()
+        ann_ret = float((1 + sub.mean()) ** _TRADING_DAYS - 1)
+        ann_vol = float(sub.std(ddof=1) * np.sqrt(_TRADING_DAYS))
+        downside = sub[sub < 0]
+        down_vol = float(downside.std(ddof=1) * np.sqrt(_TRADING_DAYS)) if len(downside) >= 2 else np.nan
+        sharpe = ann_ret / ann_vol if ann_vol > 0 else np.nan
+        sortino = ann_ret / down_vol if (pd.notna(down_vol) and down_vol > 0) else np.nan
+        running_peak = equity.cummax()
+        dd = equity / running_peak - 1.0
+        max_dd = float(dd.min())
+
+        rows.append({
+            'window_end_date': sub.index[-1],
+            'window_size_days': window,
+            'n_trading_days': len(sub),
+            'sharpe': round(sharpe, 4) if pd.notna(sharpe) else np.nan,
+            'sortino': round(sortino, 4) if pd.notna(sortino) else np.nan,
+            'win_rate_daily': round(float((sub > 0).mean()), 4),
+            'max_dd_in_window': round(max_dd, 4),
+            'annualized_return': round(ann_ret, 4),
+            'annualized_vol': round(ann_vol, 4),
+        })
+    return pd.DataFrame(rows)
+
+
 # 模块入口
 def run(
     daily_ret: pd.Series,
@@ -269,3 +310,4 @@ def run(
         position_count_log, max_positions=cfg.get('max_positions', 200)
     ).to_csv(out_dir / 'concurrent_positions_stats.csv', index=False)
     compute_period_alpha(daily_ret, benchmarks).to_csv(out_dir / 'period_alpha.csv', index=False)
+    compute_rolling_metrics(daily_ret).to_csv(out_dir / 'rolling_metrics.csv', index=False)
