@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 8：新增 portfolio_attribution.py，实现 compute_portfolio_risk_metrics
+
+- 需求：Phase A 统计分析框架 Task 8，新建 `portfolio_attribution.py`，计算组合层面 Sharpe / Sortino / Calmar / 最大回撤 / 年化收益等风险指标，按 overall / yearly / monthly 三维度输出。
+- 改动：
+  - 新增 `my_strategy/tools/portfolio_attribution.py`：实现 `_max_drawdown`、`_risk_block`、`compute_portfolio_risk_metrics` 三个函数；年化因子 252 交易日；下行波动率仅取负收益；Calmar 仅在 max_dd < 0 时有值。
+  - 新增 `my_strategy/tests/test_portfolio_attribution.py`：1 个测试，验证输出列集合、三种 period_type 均存在、overall max_drawdown ≤ 0。
+  - `docs/FEATURES.md`：新增第 10 节（portfolio_attribution），原"配置文件"节顺移为第 11 节。
+- 影响：无，Tasks 9-11 将在此文件中追加函数。
+
 ## 2026-05-08 — Phase A Task 7：trade_attribution_extra 新增 significance_summary + 模块入口 run()
 
 - 需求：Phase A 统计分析框架 Task 7（最终任务），在 `trade_attribution_extra.py` 追加 `compute_significance_summary` 和 `run()` 模块入口，至此该模块产出 5 张报告。

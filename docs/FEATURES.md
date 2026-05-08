@@ -237,7 +237,37 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
   必须满足上文 5.1 的 5 条入场条件；卖出端同理校验。
 - **当前状态**：196 个 episode 全部通过买入/卖出双向合规校验。
 
-## 10. 配置文件（config.json）核心字段
+## 10. 组合风险指标（tools/portfolio_attribution.py）
+
+**职责**：Phase A 统计分析框架，从日收益序列计算组合层面的风险指标，分 overall / yearly / monthly 三个维度输出。
+
+### 公开函数
+
+| 函数 | 输入 | 输出 |
+|------|------|------|
+| `compute_portfolio_risk_metrics(daily_ret)` | `pd.Series`（日收益，DatetimeIndex） | DataFrame，列含下表指标 |
+
+### 输出列
+
+| 列名 | 说明 |
+|------|------|
+| `period_type` | `'overall'` / `'yearly'` / `'monthly'` |
+| `period_label` | 全局区间字符串 / 年份 / YYYY-MM |
+| `sharpe` | 年化 Sharpe（rf=0，252 交易日） |
+| `sortino` | 年化 Sortino（仅负收益计下行波动率） |
+| `calmar` | Calmar = 年化收益 / abs(最大回撤) |
+| `max_drawdown` | 最大回撤（负值，≤ 0） |
+| `max_dd_duration_days` | 最大回撤持续天数（峰→谷日历天数） |
+| `annualized_return` | 年化收益（复利） |
+| `annualized_vol` | 年化波动率 |
+| `downside_vol` | 年化下行波动率（负收益标准差 × √252） |
+
+### 内部辅助
+
+- `_max_drawdown(equity)` — 从累计净值计算 `(max_dd, dd_duration_days)`；
+- `_risk_block(daily_ret, period_type, period_label)` — 计算单期所有指标并返回 dict，少于 2 个有效数据点时返回 `None`（自动过滤）。
+
+## 11. 配置文件（config.json）核心字段
 
 | 字段 | 说明 |
 |---|---|
