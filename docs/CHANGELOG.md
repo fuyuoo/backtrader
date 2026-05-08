@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 11：portfolio_attribution 追加 period_alpha + run() 模块入口（模块完成）
+
+- 需求：Phase A 统计分析框架 Task 11，在 `portfolio_attribution.py` 追加 `compute_period_alpha`（对比基准的 alpha / beta / info_ratio / tracking_error）和 `run()` 模块入口（统一写出 5 张报告）。
+- 改动：
+  - `my_strategy/tools/portfolio_attribution.py`：追加 `_alpha_block`（单期 alpha 计算辅助）、`compute_period_alpha`（overall/yearly/monthly 三维度对比任意数量 benchmark）、`run()`（模块入口，写出 5 个 CSV）。
+  - `my_strategy/tests/test_portfolio_attribution.py`：import 行扩充 `compute_period_alpha`；追加 `test_compute_period_alpha_with_benchmark`（验证列集合、benchmark_code 存在、overall/yearly 两种 period_type 均存在）。
+  - `docs/FEATURES.md`：第 10 节补充 Task 11 追加函数说明，标注模块完成（5 张报告 + run() 入口）。
+- 影响：无破坏性变更；全套测试 142 passed 1 skipped。portfolio_attribution.py 模块至此全部完成。
+
 ## 2026-05-08 — Phase A Task 10：portfolio_attribution 追加 concurrent_positions_stats
 
 - 需求：Phase A 统计分析框架 Task 10，在 `portfolio_attribution.py` 追加 `compute_concurrent_positions_stats`，统计逐日并发持仓数的 summary 指标（max/avg/median/p95/pct_at_cap/pct_below_50）和分桶分布（6 个 position_count_bucket）。

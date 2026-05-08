@@ -286,6 +286,16 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 
 **输入格式偏差说明**：Task 0 投研确认生产格式为 `list[int]`（per bar 持仓数，无日期配对），与计划文档描述不同；实现增加了 `list[int]` 分支，原有 DataFrame 和 `list[(date,count)]` 分支保留向前兼容。
 
+### Task 11 追加函数（模块完成）
+
+| 函数 | 输入 | 输出 |
+|------|------|------|
+| `compute_period_alpha(strat, benchmarks)` | `pd.Series`（日收益）+ `{benchmark_code: pd.Series}` 字典 | DataFrame，列含 period_type / period_label / benchmark_code / strategy_return / benchmark_return / alpha / beta / info_ratio / tracking_error / n_trading_days |
+| `run(daily_ret, position_count_log, benchmarks, trades, cfg, out_dir)` | 上述所有参数 + 配置字典 + 输出目录路径 | 写出 5 个 CSV（portfolio_risk_metrics / losing_streak_stats / drawdown_periods / concurrent_positions_stats / period_alpha） |
+
+`compute_period_alpha` 按 overall / yearly / monthly 三个周期，对每个 benchmark 计算累计收益 / alpha（年化，CAPM 定义）/ beta / tracking error / information ratio，少于 5 个对齐数据点的子期自动跳过。
+`run()` 为 portfolio_attribution 模块入口，统一写出全部 5 张组合层报告。
+
 ## 11. 配置文件（config.json）核心字段
 
 | 字段 | 说明 |

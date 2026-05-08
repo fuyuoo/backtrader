@@ -189,3 +189,78 @@ def compute_concurrent_positions_stats(
             'pct_of_time': round(days / n, 4) if n > 0 else 0.0,
         })
     return pd.DataFrame(rows)
+
+
+def _alpha_block(strat: pd.Series, bench: pd.Series,
+                 period_type: str, period_label: str, code: str) -> dict:
+    aligned = pd.concat([strat, bench], axis=1, join='inner').dropna()
+    aligned.columns = ['s', 'b']
+    if len(aligned) < 5:
+        return None
+    s, b = aligned['s'], aligned['b']
+    cov = float(s.cov(b))
+    var_b = float(b.var(ddof=1))
+    beta = cov / var_b if var_b > 0 else np.nan
+    cum_s = float((1 + s).prod() - 1)
+    cum_b = float((1 + b).prod() - 1)
+    excess = s - b
+    te = float(excess.std(ddof=1) * np.sqrt(_TRADING_DAYS))
+    excess_ann = float((1 + excess.mean()) ** _TRADING_DAYS - 1)
+    info_ratio = excess_ann / te if te > 0 else np.nan
+    alpha_ann = excess_ann if pd.isna(beta) else float(
+        (1 + s.mean()) ** _TRADING_DAYS - 1
+        - beta * ((1 + b.mean()) ** _TRADING_DAYS - 1)
+    )
+    return {
+        'period_type': period_type,
+        'period_label': period_label,
+        'benchmark_code': code,
+        'strategy_return': round(cum_s, 4),
+        'benchmark_return': round(cum_b, 4),
+        'alpha': round(alpha_ann, 4) if pd.notna(alpha_ann) else np.nan,
+        'beta': round(beta, 4) if pd.notna(beta) else np.nan,
+        'info_ratio': round(info_ratio, 4) if pd.notna(info_ratio) else np.nan,
+        'tracking_error': round(te, 4),
+        'n_trading_days': len(aligned),
+    }
+
+
+def compute_period_alpha(strat: pd.Series, benchmarks: dict) -> pd.DataFrame:
+    """benchmarks: {benchmark_code: daily_return_series}"""
+    strat = pd.Series(strat).dropna()
+    strat.index = pd.to_datetime(strat.index)
+    rows = []
+    for code, bench in benchmarks.items():
+        bench = pd.Series(bench).dropna()
+        bench.index = pd.to_datetime(bench.index)
+        label_overall = f"{strat.index.min().date()}~{strat.index.max().date()}"
+        rows.append(_alpha_block(strat, bench, 'overall', label_overall, code))
+        for y in sorted(strat.index.year.unique()):
+            s_y = strat[strat.index.year == y]
+            b_y = bench[bench.index.year == y]
+            rows.append(_alpha_block(s_y, b_y, 'yearly', str(y), code))
+        for ym in sorted(strat.index.to_period('M').astype(str).unique()):
+            s_m = strat[strat.index.to_period('M').astype(str) == ym]
+            b_m = bench[bench.index.to_period('M').astype(str) == ym]
+            rows.append(_alpha_block(s_m, b_m, 'monthly', ym, code))
+    return pd.DataFrame([r for r in rows if r is not None])
+
+
+# 模块入口
+def run(
+    daily_ret: pd.Series,
+    position_count_log,
+    benchmarks: dict,
+    trades: pd.DataFrame,
+    cfg: dict,
+    out_dir: Path,
+) -> None:
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    compute_portfolio_risk_metrics(daily_ret).to_csv(out_dir / 'portfolio_risk_metrics.csv', index=False)
+    compute_losing_streak_stats(trades).to_csv(out_dir / 'losing_streak_stats.csv', index=False)
+    compute_drawdown_periods(daily_ret).to_csv(out_dir / 'drawdown_periods.csv', index=False)
+    compute_concurrent_positions_stats(
+        position_count_log, max_positions=cfg.get('max_positions', 200)
+    ).to_csv(out_dir / 'concurrent_positions_stats.csv', index=False)
+    compute_period_alpha(daily_ret, benchmarks).to_csv(out_dir / 'period_alpha.csv', index=False)

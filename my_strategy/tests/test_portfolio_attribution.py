@@ -5,6 +5,7 @@ from my_strategy.tools.portfolio_attribution import (
     compute_losing_streak_stats,
     compute_drawdown_periods,
     compute_concurrent_positions_stats,
+    compute_period_alpha,
 )
 
 
@@ -74,3 +75,19 @@ def test_compute_concurrent_positions_stats_accepts_list_of_ints():
     out = compute_concurrent_positions_stats(log, max_positions=200)
     max_row = out[(out['metric_type'] == 'summary') & (out['bucket'] == 'max')].iloc[0]
     assert max_row['value'] == 200
+
+
+def test_compute_period_alpha_with_benchmark():
+    np.random.seed(0)
+    dates = pd.date_range('2019-01-01', '2019-12-31', freq='B')
+    strat = pd.Series(np.random.normal(0.001, 0.01, len(dates)), index=dates)
+    bench = pd.Series(np.random.normal(0.0005, 0.01, len(dates)), index=dates)
+    out = compute_period_alpha(strat, {'TEST.SH': bench})
+    assert set(out.columns) >= {
+        'period_type', 'period_label', 'benchmark_code',
+        'strategy_return', 'benchmark_return', 'alpha', 'beta',
+        'info_ratio', 'tracking_error', 'n_trading_days',
+    }
+    assert (out['benchmark_code'] == 'TEST.SH').any()
+    assert (out['period_type'] == 'overall').any()
+    assert (out['period_type'] == 'yearly').any()
