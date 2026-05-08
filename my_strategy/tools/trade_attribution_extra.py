@@ -369,9 +369,15 @@ def compute_loss_attribution(
             values = [(False, lambda x: x.astype(str).isin(['False'])),
                       (True, lambda x: x.astype(str).isin(['True']))]
         elif sig_type == 'numeric':
-            qs_full = pd.qcut(s, q=5, labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'], duplicates='drop')
-            values = [(lbl, lambda x, _q=lbl: pd.qcut(x, q=5, labels=['Q1','Q2','Q3','Q4','Q5'], duplicates='drop') == _q)
-                      for lbl in qs_full.dropna().unique()]
+            labels = ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']
+            qs_full, bins = pd.qcut(s, q=5, labels=labels, duplicates='drop', retbins=True)
+            bins[0], bins[-1] = -np.inf, np.inf
+            n_bins = len(bins) - 1
+            actual_labels = labels[:n_bins]
+            values = [
+                (lbl, lambda x, _q=lbl, _b=bins, _l=actual_labels: pd.cut(x, bins=_b, labels=_l) == _q)
+                for lbl in qs_full.dropna().unique()
+            ]
         else:
             values = [(str(v), lambda x, _v=v: x == _v) for v in s.dropna().unique()]
 
@@ -396,7 +402,8 @@ def compute_loss_attribution(
                 c = n_losses - n_l                  # signal!=val & loss
                 d = (n_universe - n_u) - (n_losses - n_l)  # signal!=val & non-loss
                 contingency = np.array([[a, b], [c, d]])
-                if (contingency >= 5).all():
+                _, _, _, expected = sp_stats.chi2_contingency(contingency, correction=False)
+                if (expected >= 5).all():
                     chi2_stat, p_val, _, _ = sp_stats.chi2_contingency(contingency, correction=False)[:4]
                     chi2_stat = float(chi2_stat)
                     p_val = float(p_val)

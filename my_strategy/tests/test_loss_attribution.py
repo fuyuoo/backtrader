@@ -43,3 +43,5 @@ def test_loss_attribution_returns_rows_on_no_losses():
     out = compute_loss_attribution(trades, signals=['sig_x'])
     # 无亏损交易，n_losses=0；输出仍应有行（freq_in_losses=NaN）
     assert (out['n_losses'] == 0).all()
+    assert out['freq_in_losses'].isna().all()
+    assert out['lift_loss'].isna().all()
