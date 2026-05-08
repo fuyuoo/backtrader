@@ -183,3 +183,13 @@ except ImportError:
    - 日期使用绝对日期；同一天多条改动各占一条
 
 适用范围：仅限 `my_strategy/` 下的功能演进。修改 `learn_backtrader/` 教程或 `backtrader/` 框架源码不在此规则内。
+
+
+## 7. 使用 superpowers 前先确认 Git 工作区干净
+
+**调用任何 superpowers skill（如 brainstorming、writing-plans、executing-plans、subagent-driven-development、test-driven-development 等）前，`MUST` 先检查 Git 工作区状态，不得在被污染的环境中开始工作。**
+
+- 执行 superpowers 流程前，先运行 `git status`，确认是否存在未提交的修改、未跟踪文件或未合并状态。
+- 工作区干净时方可直接开始；如存在未提交改动，`MUST` 向用户列出改动范围并取得明确确认（"可以在当前状态下继续" 或 "先提交/暂存再开始"），不得自行判断改动是否相关。
+- 不允许在多任务改动堆叠的状态下直接进入新一轮 superpowers 流程；新任务的 diff 必须可与既有改动清晰区分。
+- 用户明确要求"忽略当前未提交改动直接开始"时方可继续，并在执行说明中记录该例外。
