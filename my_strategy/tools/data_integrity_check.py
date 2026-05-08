@@ -83,7 +83,8 @@ def check_abnormal_close_jump(
         return []
     close = df['close'].astype(float).values
     pct_chg = np.diff(close) / close[:-1] * 100.0
-    bad_idx = np.where(np.abs(pct_chg) > threshold_pct)[0] + 1
+    finite_mask = np.isfinite(pct_chg)
+    bad_idx = np.where(finite_mask & (np.abs(pct_chg) > threshold_pct))[0] + 1
     if len(bad_idx) == 0:
         return []
     dates = pd.to_datetime(df['trade_date']).values
@@ -210,6 +211,7 @@ def run(project_root: Path, cfg: dict) -> None:
         try:
             df = pd.read_csv(csv_path)
         except Exception as e:
+            print(f"[read_error] {ts_code}: {e}")
             all_issues.append(_row(ts_code, 'read_error', 'error', '', str(e)))
             continue
         if df.empty:

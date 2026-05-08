@@ -42,7 +42,7 @@ def test_check_non_monotonic_finds_disorder():
     assert issues[0]['issue_type'] == 'non_monotonic_date'
 
 
-def test_check_abnormal_close_jump_flags_30pct():
+def test_check_abnormal_close_jump_flags_35pct():
     df = _df(
         ['2024-01-02', '2024-01-03', '2024-01-04'],
         [10.0, 13.5, 13.5],  # +35% one-day jump (前复权下不应出现)
@@ -96,3 +96,4 @@ def test_integrity_run_writes_report(tmp_path):
     integrity_run(tmp_path, cfg)
     out = pd.read_csv(tmp_path / 'results' / 'integrity_report.csv')
     assert {'ts_code', 'issue_type', 'severity', 'date_or_range', 'detail'}.issubset(out.columns)
+    assert len(out) == 0  # healthy data should produce zero issues
