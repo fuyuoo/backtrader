@@ -276,8 +276,8 @@ def compute_signal_importance_ranking(
 
     要求 trades 含 return_pct + forward_return_5d/20d/60d + entry_date。
     """
+    trades = trades.reset_index(drop=True)
     if 'entry_date' in trades.columns:
-        trades = trades.copy()
         trades['entry_date'] = pd.to_datetime(trades['entry_date'])
 
     rows = []
@@ -288,7 +288,7 @@ def compute_signal_importance_ranking(
         n = trades[sig].notna().sum()
 
         if sig_type == 'bool':
-            mask = trades[sig].astype(str).map({'True': True, 'False': False}).fillna(False)
+            mask = trades[sig].astype(str).map({'True': True, 'False': False}).fillna(False).astype(bool)
             r_true = trades.loc[mask, 'return_pct'].dropna()
             r_false = trades.loc[~mask, 'return_pct'].dropna()
         elif sig_type == 'numeric':

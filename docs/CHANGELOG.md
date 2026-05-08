@@ -13,6 +13,23 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-05-08 — Phase B-prep 统计基础与数据可信度建设（9 项）
+
+- 需求：调参（Phase B）启动前先把现有报告做对、做完整。
+- 改动：
+  - 新增 1 个数据层模块：tools/data_integrity_check.py
+  - 修改 2 处策略 / 数据加载：strategy.py 涨跌停过滤、backtest.py PIT universe
+  - 清理：财务因子从消费侧彻底移除；cost_breakdown.csv overall 行 bug 修复
+  - trade_summary.csv 新增 7 列（mfe_minus_realized / exit_efficiency /
+    benchmark_return_during_holding / per_trade_alpha / forward_return_5d/20d/60d）
+  - 新增 3 张报告：signal_importance_ranking / rolling_metrics / loss_attribution
+- 影响：
+  - reports/ 下报告数 14 → 17（不破坏现有 14 张）
+  - 全套测试 148 → 约 175
+  - 一次 backtest 时间 6:08 → 预期 6-7 分钟（PIT 过滤微增）
+
+---
+
 ## 2026-05-08 — Phase B-prep Task 8: loss_attribution report
 - 需求：识别亏损交易中哪些信号值最常出现（lift 分析 + chi-square 检验）
 - 改动：my_strategy/tools/trade_attribution_extra.py（compute_loss_attribution 新增）、my_strategy/tests/test_loss_attribution.py（3 测试）

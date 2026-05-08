@@ -489,3 +489,14 @@ run(project_root, cfg)
 - 文件：`results/integrity_report.csv`
 - 列：`ts_code` / `issue_type` / `severity` / `date_or_range` / `detail`
 - severity 分三档：`error`（数据严重损坏）/ `warning`（需关注）/ `info`（信息性提示）
+
+## 15. Phase B-prep 新增报告
+
+### 15.1 signal_importance_ranking.csv（trade_attribution_extra）
+统一信号重要性排名表：每个白名单信号一行，含 effect_size / t / p / IC / IC_IR / 综合排名。
+
+### 15.2 rolling_metrics.csv（portfolio_attribution）
+滚动 252 交易日窗口的 Sharpe / Sortino / win_rate / max_dd 等。
+
+### 15.3 loss_attribution.csv（trade_attribution_extra）
+亏损交易里每个信号值的频率 vs 全样本频率（lift_loss / lift_heavy_loss / chi2_p_value）。
