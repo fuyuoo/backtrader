@@ -201,4 +201,24 @@ def run(project_root: Path, cfg: dict) -> None:
     else:
         # 退回到 trade_summary
         trade_list = pd.read_csv(results_dir / 'trade_summary.csv', parse_dates=['entry_date'])
+
+    # trade_list 本身不含 gross_pnl，从 trade_summary 按 episode join
+    if 'gross_pnl' not in trade_list.columns or trade_list['gross_pnl'].isna().all():
+        trade_summary_path = results_dir / 'trade_summary.csv'
+        if trade_summary_path.exists():
+            summary_cols = pd.read_csv(trade_summary_path, nrows=0).columns
+            if 'episode' in summary_cols and 'gross_pnl' in summary_cols:
+                summary = pd.read_csv(trade_summary_path, usecols=['episode', 'gross_pnl'])
+                trade_list = trade_list.merge(summary, on='episode', how='left',
+                                              suffixes=('', '_from_summary'))
+                if 'gross_pnl_from_summary' in trade_list.columns:
+                    if 'gross_pnl' in trade_list.columns:
+                        trade_list['gross_pnl'] = (
+                            trade_list['gross_pnl']
+                            .combine_first(trade_list['gross_pnl_from_summary'])
+                        )
+                    else:
+                        trade_list['gross_pnl'] = trade_list['gross_pnl_from_summary']
+                    trade_list = trade_list.drop(columns=['gross_pnl_from_summary'])
+
     compute_cost_breakdown(trade_list, cfg).to_csv(out_dir / 'cost_breakdown.csv', index=False)

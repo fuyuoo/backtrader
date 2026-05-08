@@ -14,7 +14,7 @@ def test_no_financial_factor_cols(csv_name, tmp_path):
 
     本测试在端到端跑完一次后才有意义；CI 环境若没有真实 reports，跳过。
     """
-    report = Path('my_strategy/reports') / csv_name
+    report = Path(__file__).parent.parent / 'reports' / csv_name
     if not report.exists():
         pytest.skip(f"{csv_name} 不存在（端到端未跑过），跳过")
     df = pd.read_csv(report)
