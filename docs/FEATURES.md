@@ -26,7 +26,8 @@ my_strategy/
 │   ├── attribution.py                  # 多角度归因报告
 │   ├── verify_trades.py                # 逐 episode 信号合规校验
 │   ├── stats_helpers.py                # 统计工具（置信区间、t 检验、分桶统计）
-│   └── rebuild_position_history.py     # 重建逐日持仓 PnL + 组合快照
+│   ├── rebuild_position_history.py     # 重建逐日持仓 PnL + 组合快照
+│   └── trade_attribution_extra.py      # 扩展归因报告（payoff_metrics 等）
 ├── data/                               # 下载产物
 │   ├── daily/                          # 日线
 │   ├── weekly/, monthly/               # 周线、月线
@@ -200,6 +201,18 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 | `build(project_root, cfg)` | 路径 + 配置字典 | 从磁盘读取并写 `results/daily_position_pnl.csv` / `results/daily_portfolio_snapshot.csv` |
 
 **注**：磁盘 daily CSV 使用 `trade_date` 列名，`build()` 内部读取后重命名为 `date` 再传入纯函数，不影响单元测试签名。
+
+## 8. 扩展归因报告（tools/trade_attribution_extra.py）
+
+**职责**：Phase A 统计分析框架扩展模块，从 `trade_summary.csv` 计算多维度 payoff 指标。
+
+### 公开函数
+
+| 函数 | 输入 | 输出 |
+|------|------|------|
+| `compute_payoff_metrics(trades)` | trade_summary DataFrame | 长表，含 `dimension` / `bucket` / `n` / `win_rate` / `avg_win` / `avg_loss` / `payoff_ratio` / `profit_factor` / `expectancy` / `max_win` / `max_loss` |
+
+`compute_payoff_metrics` 按 overall / exit_reason / year / sector / regime 五个维度各产一组行。
 
 ## 9. 交易验证（tools/verify_trades.py）
 

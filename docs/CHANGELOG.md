@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 3：trade_attribution_extra 模块（payoff_metrics）
+
+- 需求：Phase A 统计分析框架 Task 3，新建 `trade_attribution_extra.py`，实现 `compute_payoff_metrics`，按 overall / exit_reason / year / sector / regime 五个维度计算 payoff 画像（win_rate / avg_win / avg_loss / payoff_ratio / profit_factor / expectancy）。
+- 改动：
+  - `my_strategy/tools/trade_attribution_extra.py`（新建）：`_payoff_block` / `compute_payoff_metrics` 两个函数；`payoff_ratio` / `profit_factor` 保留完整精度（未 round），以通过 1e-6 精度断言。
+  - `my_strategy/tests/test_trade_attribution_extra.py`（新建）：2 个单元测试覆盖 overall 行数值与维度完整性。
+  - `docs/FEATURES.md`：新增第 8 节"扩展归因报告"，目录结构补充新模块。
+- 影响：无，未改动任何已有文件。
+
 ## 2026-05-08 — Phase A Task 2：rebuild_position_history 模块（逐日持仓 PnL + 组合快照）
 
 - 需求：Phase A 统计分析框架 Task 2，事后重建 `daily_position_pnl.csv` 与 `daily_portfolio_snapshot.csv`，不修改 backtest.py。
