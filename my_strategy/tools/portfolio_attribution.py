@@ -28,7 +28,7 @@ def _risk_block(daily_ret: pd.Series, period_type: str, period_label: str) -> di
     if len(r) < 2:
         return None
     equity = (1 + r).cumprod()
-    ann_ret = float((1 + r.mean()) ** _TRADING_DAYS - 1)
+    ann_ret = float((1 + r).prod() ** (_TRADING_DAYS / len(r)) - 1)
     ann_vol = float(r.std(ddof=1) * np.sqrt(_TRADING_DAYS))
     downside = r[r < 0]
     down_vol = float(downside.std(ddof=1) * np.sqrt(_TRADING_DAYS)) if len(downside) >= 2 else np.nan
@@ -268,7 +268,7 @@ def compute_rolling_metrics(
         if sub.empty:
             continue
         equity = (1 + sub).cumprod()
-        ann_ret = float((1 + sub.mean()) ** _TRADING_DAYS - 1)
+        ann_ret = float((1 + sub).prod() ** (_TRADING_DAYS / len(sub)) - 1)
         ann_vol = float(sub.std(ddof=1) * np.sqrt(_TRADING_DAYS))
         downside = sub[sub < 0]
         down_vol = float(downside.std(ddof=1) * np.sqrt(_TRADING_DAYS)) if len(downside) >= 2 else np.nan

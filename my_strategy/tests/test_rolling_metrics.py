@@ -13,7 +13,8 @@ def test_rolling_metrics_columns():
     )
     out = compute_rolling_metrics(daily_ret, window=252)
     expected = {'window_end_date', 'window_size_days', 'n_trading_days',
-                'sharpe', 'sortino', 'win_rate_daily', 'max_dd_in_window'}
+                'sharpe', 'sortino', 'win_rate_daily', 'max_dd_in_window',
+                'annualized_return', 'annualized_vol'}
     assert expected.issubset(set(out.columns))
 
 
@@ -28,12 +29,14 @@ def test_rolling_metrics_returns_post_window_rows():
 
 
 def test_rolling_metrics_uptrend_positive_sharpe():
-    """持续上升 daily_ret → rolling Sharpe 应 >= 0。"""
-    daily_ret = pd.Series([0.001] * 300,
-                          index=pd.date_range('2024-01-01', periods=300, freq='B'))
+    """持续正收益 → rolling Sharpe 应为正有限值。"""
+    rng = np.random.RandomState(1)
+    daily_ret = pd.Series(
+        0.001 + rng.normal(0, 0.005, size=300),  # positive drift with noise
+        index=pd.date_range('2024-01-01', periods=300, freq='B'),
+    )
     out = compute_rolling_metrics(daily_ret, window=252)
-    # 所有窗口都是恒定收益，Sharpe 是 inf 或非常大；这里只要求 >= 0
-    assert (out['sharpe'].fillna(0) >= 0).all()
+    assert out['sharpe'].dropna().gt(0).all()
 
 
 def test_rolling_metrics_max_dd_negative():

@@ -301,7 +301,6 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 | 函数 | 输入 | 输出 |
 |------|------|------|
 | `compute_period_alpha(strat, benchmarks)` | `pd.Series`（日收益）+ `{benchmark_code: pd.Series}` 字典 | DataFrame，列含 period_type / period_label / benchmark_code / strategy_return / benchmark_return / alpha / beta / info_ratio / tracking_error / n_trading_days |
-| `compute_period_alpha(strat, benchmarks)` | `pd.Series`（日收益）+ `{benchmark_code: pd.Series}` 字典 | DataFrame，列含 period_type / period_label / benchmark_code / strategy_return / benchmark_return / alpha / beta / info_ratio / tracking_error / n_trading_days |
 | `compute_rolling_metrics(daily_ret, window=252)` | `pd.Series`（日收益） | DataFrame，每行为一个滚动窗口末日；列含 window_end_date / window_size_days / n_trading_days / sharpe / sortino / win_rate_daily / max_dd_in_window / annualized_return / annualized_vol |
 | `run(daily_ret, position_count_log, benchmarks, trades, cfg, out_dir)` | 上述所有参数 + 配置字典 + 输出目录路径 | 写出 6 个 CSV（portfolio_risk_metrics / losing_streak_stats / drawdown_periods / concurrent_positions_stats / period_alpha / rolling_metrics） |
 
