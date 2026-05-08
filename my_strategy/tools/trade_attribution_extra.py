@@ -4,6 +4,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from my_strategy.tools.stats_helpers import t_test_one_sample
+
 
 def _payoff_block(sub: pd.DataFrame, dimension: str, bucket: str) -> dict:
     n = len(sub)
@@ -58,3 +60,53 @@ def compute_payoff_metrics(trades: pd.DataFrame) -> pd.DataFrame:
             label = f"hs300_dif={a}|stock_bull={b}"
             rows.append(_payoff_block(sub, 'regime', label))
     return pd.DataFrame([r for r in rows if r is not None])
+
+
+def _enumerate_signal_values(trades: pd.DataFrame, signal: str) -> list:
+    """对一个信号字段返回 [(value_label, mask_series), ...]"""
+    s = trades[signal]
+    if s.dtype == bool or set(s.dropna().unique()) <= {True, False, 'True', 'False'}:
+        return [
+            (f"{signal}=True", s.astype(str).isin(['True'])),
+            (f"{signal}=False", s.astype(str).isin(['False'])),
+        ]
+    if s.dtype == 'object':
+        return [(f"{signal}={v}", s == v) for v in sorted(s.dropna().unique().astype(str))]
+    # 数值列 → 5 分位
+    qs = pd.qcut(s, q=5, labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'], duplicates='drop')
+    return [(f"{signal}={lbl}", qs == lbl) for lbl in qs.dropna().unique()]
+
+
+def compute_signal_stability(trades: pd.DataFrame, signals_whitelist: list) -> pd.DataFrame:
+    rows = []
+    if 'entry_date' not in trades.columns:
+        return pd.DataFrame()
+    years = pd.to_datetime(trades['entry_date']).dt.year
+    for signal in signals_whitelist:
+        if signal not in trades.columns:
+            continue
+        for label, mask in _enumerate_signal_values(trades, signal):
+            sub = trades[mask]
+            sub_years = years[mask]
+            for y, g in sub.groupby(sub_years):
+                r = g['return_pct'].dropna()
+                if len(r) == 0:
+                    continue
+                t_stat, p_val = t_test_one_sample(r) if len(r) >= 2 else (np.nan, np.nan)
+                rows.append({
+                    'signal_name': label,
+                    'period_year': int(y),
+                    'n': len(r),
+                    'win_rate': round(float((r > 0).mean()), 4),
+                    'avg_return': round(float(r.mean()), 4),
+                    't_stat_vs_zero': round(t_stat, 4) if pd.notna(t_stat) else np.nan,
+                    'p_value': round(p_val, 4) if pd.notna(p_val) else np.nan,
+                })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df['rank_within_signal'] = (
+        df.groupby('signal_name')['avg_return']
+          .rank(method='dense', ascending=False).astype(int)
+    )
+    return df

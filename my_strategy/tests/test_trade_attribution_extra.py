@@ -1,5 +1,5 @@
 import pandas as pd
-from my_strategy.tools.trade_attribution_extra import compute_payoff_metrics
+from my_strategy.tools.trade_attribution_extra import compute_payoff_metrics, compute_signal_stability
 
 
 def _make_trades():
@@ -39,3 +39,23 @@ def test_compute_payoff_metrics_includes_exit_reason_and_year_dimensions():
     assert (out['dimension'] == 'year').any()
     assert (out['dimension'] == 'sector').any()
     assert (out['dimension'] == 'regime').any()
+
+
+def test_compute_signal_stability_outputs_per_signal_per_year():
+    trades = pd.DataFrame({
+        'return_pct': [10, -5, 8, -3, 12, -2, 15, -8],
+        'entry_date': pd.to_datetime([
+            '2019-01-01', '2019-06-01', '2020-01-01', '2020-06-01',
+            '2021-01-01', '2021-06-01', '2022-01-01', '2022-06-01']),
+        'entry_hs300_dif_above_zero': [True, False, True, False, True, False, True, False],
+        'entry_stock_bull_align': [True, True, True, True, False, False, False, False],
+    })
+    out = compute_signal_stability(trades, signals_whitelist=[
+        'entry_hs300_dif_above_zero', 'entry_stock_bull_align'])
+    assert set(out.columns) >= {
+        'signal_name', 'period_year', 'n', 'win_rate', 'avg_return',
+        't_stat_vs_zero', 'p_value', 'rank_within_signal',
+    }
+    # entry_hs300_dif_above_zero=True 在 2019/2020/2021/2022 各 1 笔
+    sig_true = out[(out['signal_name'] == 'entry_hs300_dif_above_zero=True')]
+    assert sorted(sig_true['period_year'].tolist()) == [2019, 2020, 2021, 2022]

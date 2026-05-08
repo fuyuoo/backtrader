@@ -211,8 +211,11 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 | 函数 | 输入 | 输出 |
 |------|------|------|
 | `compute_payoff_metrics(trades)` | trade_summary DataFrame | 长表，含 `dimension` / `bucket` / `n` / `win_rate` / `avg_win` / `avg_loss` / `payoff_ratio` / `profit_factor` / `expectancy` / `max_win` / `max_loss` |
+| `compute_signal_stability(trades, signals_whitelist)` | trade_summary DataFrame + 信号列名列表 | 长表，含 `signal_name` / `period_year` / `n` / `win_rate` / `avg_return` / `t_stat_vs_zero` / `p_value` / `rank_within_signal` |
 
 `compute_payoff_metrics` 按 overall / exit_reason / year / sector / regime 五个维度各产一组行。
+
+`compute_signal_stability` 对每个信号的每个值（bool 型展开为 True/False，object 型按唯一值，数值型按五分位）× 每个年份各产一行，`rank_within_signal` 按 `avg_return` 降序排名（相同信号内）。
 
 ## 9. 交易验证（tools/verify_trades.py）
 

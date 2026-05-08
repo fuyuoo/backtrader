@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 4：trade_attribution_extra 新增 signal_stability 报告
+
+- 需求：Phase A 统计分析框架 Task 4，在 `trade_attribution_extra.py` 追加 `compute_signal_stability`，按信号值 × 年份分组计算 win_rate / avg_return / t_stat / p_value / rank_within_signal。
+- 改动：
+  - `my_strategy/tools/trade_attribution_extra.py`：追加 `_enumerate_signal_values` / `compute_signal_stability`；顶部补充 `from my_strategy.tools.stats_helpers import t_test_one_sample`。
+  - `my_strategy/tests/test_trade_attribution_extra.py`：追加 `test_compute_signal_stability_outputs_per_signal_per_year`；import 行补充 `compute_signal_stability`。
+  - `docs/FEATURES.md`：第 8 节公开函数表新增 `compute_signal_stability` 一行并补充行为说明。
+- 影响：无，未改动任何已有函数。
+
 ## 2026-05-08 — Phase A Task 3：trade_attribution_extra 模块（payoff_metrics）
 
 - 需求：Phase A 统计分析框架 Task 3，新建 `trade_attribution_extra.py`，实现 `compute_payoff_metrics`，按 overall / exit_reason / year / sector / regime 五个维度计算 payoff 画像（win_rate / avg_win / avg_loss / payoff_ratio / profit_factor / expectancy）。
