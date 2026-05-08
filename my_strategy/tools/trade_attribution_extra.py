@@ -110,3 +110,30 @@ def compute_signal_stability(trades: pd.DataFrame, signals_whitelist: list) -> p
           .rank(method='dense', ascending=False).astype(int)
     )
     return df
+
+
+def compute_signal_correlation_matrix(trades: pd.DataFrame, signals_whitelist: list) -> pd.DataFrame:
+    """两两相关性（Pearson + Spearman），long format。布尔列先转 0/1。"""
+    cols = [c for c in signals_whitelist if c in trades.columns]
+    df = trades[cols].copy()
+    for c in cols:
+        if df[c].dtype == bool or set(df[c].dropna().astype(str).unique()) <= {'True', 'False'}:
+            df[c] = df[c].astype(str).map({'True': 1, 'False': 0})
+        elif df[c].dtype == 'object':
+            df[c] = pd.factorize(df[c])[0]
+        df[c] = pd.to_numeric(df[c], errors='coerce')
+    rows = []
+    for i, a in enumerate(cols):
+        for b in cols[i+1:]:
+            sub = df[[a, b]].dropna()
+            if len(sub) < 2:
+                continue
+            pearson = sub[a].corr(sub[b], method='pearson')
+            spearman = sub[a].corr(sub[b], method='spearman')
+            rows.append({
+                'signal_a': a, 'signal_b': b,
+                'pearson_r': round(float(pearson), 4) if pd.notna(pearson) else np.nan,
+                'spearman_r': round(float(spearman), 4) if pd.notna(spearman) else np.nan,
+                'n': len(sub),
+            })
+    return pd.DataFrame(rows)

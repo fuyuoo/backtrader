@@ -1,5 +1,5 @@
 import pandas as pd
-from my_strategy.tools.trade_attribution_extra import compute_payoff_metrics, compute_signal_stability
+from my_strategy.tools.trade_attribution_extra import compute_payoff_metrics, compute_signal_stability, compute_signal_correlation_matrix
 
 
 def _make_trades():
@@ -59,3 +59,17 @@ def test_compute_signal_stability_outputs_per_signal_per_year():
     # entry_hs300_dif_above_zero=True 在 2019/2020/2021/2022 各 1 笔
     sig_true = out[(out['signal_name'] == 'entry_hs300_dif_above_zero=True')]
     assert sorted(sig_true['period_year'].tolist()) == [2019, 2020, 2021, 2022]
+
+
+def test_compute_signal_correlation_matrix_long_format():
+    trades = pd.DataFrame({
+        'sig_a': [1, 0, 1, 0, 1],
+        'sig_b': [1, 0, 1, 0, 1],   # 完全相关
+        'sig_c': [0, 1, 0, 1, 0],   # 完全反相关
+    })
+    out = compute_signal_correlation_matrix(trades, ['sig_a', 'sig_b', 'sig_c'])
+    assert set(out.columns) >= {'signal_a', 'signal_b', 'pearson_r', 'spearman_r', 'n'}
+    ab = out[(out['signal_a'] == 'sig_a') & (out['signal_b'] == 'sig_b')].iloc[0]
+    ac = out[(out['signal_a'] == 'sig_a') & (out['signal_b'] == 'sig_c')].iloc[0]
+    assert abs(ab['pearson_r'] - 1.0) < 1e-6
+    assert abs(ac['pearson_r'] - (-1.0)) < 1e-6

@@ -15,6 +15,12 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 5：trade_attribution_extra 新增 signal_correlation_matrix 报告
+
+- 需求：Phase A 统计分析框架 Task 5，在 `trade_attribution_extra.py` 追加 `compute_signal_correlation_matrix`，对信号列两两计算 Pearson + Spearman 相关系数，输出 long format。
+- 改动：`my_strategy/tools/trade_attribution_extra.py` 追加函数；`my_strategy/tests/test_trade_attribution_extra.py` 追加测试；`docs/FEATURES.md` 第 8 节更新。
+- 影响：无破坏性变更，现有 3 个测试仍通过，新增 1 个测试。
+
 ## 2026-05-08 — Phase A Task 4：trade_attribution_extra 新增 signal_stability 报告
 
 - 需求：Phase A 统计分析框架 Task 4，在 `trade_attribution_extra.py` 追加 `compute_signal_stability`，按信号值 × 年份分组计算 win_rate / avg_return / t_stat / p_value / rank_within_signal。
