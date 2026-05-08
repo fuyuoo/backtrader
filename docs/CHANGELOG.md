@@ -15,6 +15,11 @@
 
 ---
 
+## 2026-05-08 — Phase B-prep Task 5: trade_summary 新增 4 个交易质量指标列
+- 需求：在 trade_summary.csv 中新增 mfe_minus_realized、exit_efficiency、benchmark_return_during_holding、per_trade_alpha 4 列，用于评估出场效率和单笔超额收益
+- 改动：`backtest.py` 新增 `_add_trade_summary_metrics()` 函数，在写入 trade_summary.csv 前调用；`my_strategy/tests/test_trade_summary_enrichment.py` 新增 6 个 TDD 测试；`docs/FEATURES.md` §5.4 补充新列说明
+- 影响：trade_summary.csv 末尾多 4 列，下游归因读取时按列名访问不受影响
+
 ## 2026-05-08 — Phase B-prep Task 4: 移除财务因子消费侧 + 修复 cost_breakdown overall 行
 - 需求：从所有消费侧彻底移除 factor_pe_ttm / factor_roe / factor_netprofit_yoy；修复 cost_breakdown.csv overall 行 gross_pnl/net_pnl/cost_pct_of_gross 为 null 的 bug
 - 改动：`backtest.py` 清空 `_FACTOR_RENAME`，`_FACTOR_COLS` 仅保留技术因子；`attribution.py` `compute_factor_alpha` 自动发现逻辑排除财务因子；存量 reports/bottom_trades.csv、top_trades.csv 直接删除旧财务因子列；新增 `tests/test_factor_cleanup.py`（6 个测试）

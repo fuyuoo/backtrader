@@ -151,7 +151,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 ### 5.4 产物
 
 - `results/trade_list.csv`：逐笔（每次买卖）明细；
-- `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；新增列 `mfe_pct` / `mae_pct`（持仓期相对首买入价的最高浮盈 / 最深浮亏，单位百分点）、`dea_neg_distance_days`（首买时距上次 DEA<0 的 bar 数）；这些字段为只读观测，不参与买卖判定；新增 4 个入场环境布尔快照列 `entry_hs300_dif_above_zero` / `entry_hs300_bull_align` / `entry_stock_bull_align` / `entry_stock_above_ma25`，分别表示进场当日 HS300 MACD DIF 是否水上、HS300 是否完整多头排列（ma25>ma60>ma144>ma180）、个股是否完整多头排列、个股是否站上 MA25；
+- `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；新增列 `mfe_pct` / `mae_pct`（持仓期相对首买入价的最高浮盈 / 最深浮亏，单位百分点）、`dea_neg_distance_days`（首买时距上次 DEA<0 的 bar 数）；这些字段为只读观测，不参与买卖判定；新增 4 个入场环境布尔快照列 `entry_hs300_dif_above_zero` / `entry_hs300_bull_align` / `entry_stock_bull_align` / `entry_stock_above_ma25`，分别表示进场当日 HS300 MACD DIF 是否水上、HS300 是否完整多头排列（ma25>ma60>ma144>ma180）、个股是否完整多头排列、个股是否站上 MA25；新增 4 个交易质量指标列：`mfe_minus_realized`（mfe_pct - return_pct，衡量潜在盈利未实现部分）、`exit_efficiency`（return_pct / mfe_pct，mfe=0 时为 NaN，衡量出场时机效率）、`benchmark_return_during_holding`（持仓期 HS300 同期累计收益 %，数据来自 `data/daily/000300.SH.csv`）、`per_trade_alpha`（return_pct 减去同期 HS300 收益，即单笔超额）；未平仓行（exit_date 为 NaT）的 4 列均为 NaN；
 - `results/equity_curve.png`：净值曲线；
 - `results/skipped_signals.csv`：被涨跌停过滤的信号明细（列：date / ts_code / skip_reason / close）；仅当有跳过信号时生成；
 - `data/signals_log.csv`：每次入场信号当时的因子快照（供归因使用）；

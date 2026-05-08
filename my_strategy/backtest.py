@@ -494,6 +494,66 @@ def _enrich_trade_summary(summary_df, cfg):
     return result
 
 
+def _add_trade_summary_metrics(
+    summary: pd.DataFrame,
+    hs300_daily: pd.DataFrame = None,
+) -> pd.DataFrame:
+    """给 trade_summary 增加 4 列：
+    - mfe_minus_realized = mfe_pct - return_pct
+    - exit_efficiency = return_pct / mfe_pct（mfe_pct > 0 时；否则 NaN）
+    - benchmark_return_during_holding = HS300 同期累计收益 (%)
+    - per_trade_alpha = return_pct - benchmark_return_during_holding
+
+    hs300_daily 缺失时后两列为 NaN，但前两列仍正常计算。
+    未平仓（exit_date 为 NaT）行：4 列均 NaN。
+    """
+    out = summary.copy()
+    has_exit = pd.to_datetime(out['exit_date'], errors='coerce').notna()
+
+    # 列 1, 2：仅依赖现有列
+    out['mfe_minus_realized'] = pd.to_numeric(out['mfe_pct'], errors='coerce') \
+                                 - pd.to_numeric(out['return_pct'], errors='coerce')
+    mfe = pd.to_numeric(out['mfe_pct'], errors='coerce')
+    ret = pd.to_numeric(out['return_pct'], errors='coerce')
+    out['exit_efficiency'] = ret.where(mfe > 0) / mfe.where(mfe > 0)
+
+    # 未平仓的清掉前 2 列（行为约定）
+    out.loc[~has_exit, ['mfe_minus_realized', 'exit_efficiency']] = pd.NA
+
+    # 列 3, 4：依赖 hs300_daily
+    out['benchmark_return_during_holding'] = pd.NA
+    out['per_trade_alpha'] = pd.NA
+    if hs300_daily is None or hs300_daily.empty:
+        return out
+
+    hs = hs300_daily.copy()
+    hs['trade_date'] = pd.to_datetime(hs['trade_date'])
+    hs = hs.set_index('trade_date').sort_index()
+
+    bench_returns = []
+    alphas = []
+    for _, r in out.iterrows():
+        ed = pd.to_datetime(r['entry_date'], errors='coerce')
+        xd = pd.to_datetime(r['exit_date'], errors='coerce')
+        if pd.isna(ed) or pd.isna(xd):
+            bench_returns.append(pd.NA)
+            alphas.append(pd.NA)
+            continue
+        try:
+            entry_close = hs.loc[hs.index >= ed].iloc[0]['close']
+            exit_close = hs.loc[hs.index <= xd].iloc[-1]['close']
+            br = (exit_close - entry_close) / entry_close * 100.0
+            bench_returns.append(br)
+            ret_val = pd.to_numeric(r['return_pct'], errors='coerce')
+            alphas.append(ret_val - br if pd.notna(ret_val) else pd.NA)
+        except (KeyError, IndexError):
+            bench_returns.append(pd.NA)
+            alphas.append(pd.NA)
+    out['benchmark_return_during_holding'] = bench_returns
+    out['per_trade_alpha'] = alphas
+    return out
+
+
 def _compute_benchmarks_returns(cfg):
     """从 data_dir 加载多个基准指数 CSV。
 
@@ -883,6 +943,10 @@ def print_results(result, cfg):
     summary_df = pd.DataFrame(r.trade_log)
     if not summary_df.empty:
         summary_df = _enrich_trade_summary(summary_df, cfg)
+        # 加载 HS300 daily 用于计算单笔 alpha
+        hs300_daily_path = Path(cfg['data_dir']) / 'daily' / '000300.SH.csv'
+        hs300_daily = pd.read_csv(hs300_daily_path) if hs300_daily_path.exists() else None
+        summary_df = _add_trade_summary_metrics(summary_df, hs300_daily=hs300_daily)
         summary_df.to_csv(results_dir / 'trade_summary.csv', index=False)
         print(f"完整交易汇总已保存到 {results_dir / 'trade_summary.csv'}")
 
