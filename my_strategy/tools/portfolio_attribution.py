@@ -61,3 +61,86 @@ def compute_portfolio_risk_metrics(daily_ret: pd.Series) -> pd.DataFrame:
     for ym, g in daily_ret.groupby(daily_ret.index.to_period('M').astype(str)):
         rows.append(_risk_block(g, 'monthly', ym))
     return pd.DataFrame([r for r in rows if r is not None])
+
+
+def compute_losing_streak_stats(trades: pd.DataFrame) -> pd.DataFrame:
+    if 'return_pct' not in trades.columns or 'entry_date' not in trades.columns:
+        return pd.DataFrame()
+    t = trades.sort_values('entry_date')
+    signs = (t['return_pct'] > 0).astype(int).where(t['return_pct'] != 0, np.nan)
+
+    def _streaks(arr, target):
+        max_len = cur = 0
+        lengths = []
+        for x in arr:
+            if x == target:
+                cur += 1
+                max_len = max(max_len, cur)
+            else:
+                if cur > 0:
+                    lengths.append(cur)
+                cur = 0
+        if cur > 0:
+            lengths.append(cur)
+        return max_len, lengths
+
+    longest_loss, loss_lens = _streaks(signs.fillna(-1).tolist(), 0)
+    longest_win, _ = _streaks(signs.fillna(-1).tolist(), 1)
+    avg_loss_streak = float(np.mean(loss_lens)) if loss_lens else 0.0
+    pct_ge_5 = float(np.mean([x >= 5 for x in loss_lens])) if loss_lens else 0.0
+    return pd.DataFrame([
+        {'metric': 'longest_losing_streak', 'value': longest_loss},
+        {'metric': 'longest_winning_streak', 'value': longest_win},
+        {'metric': 'avg_losing_streak_length', 'value': round(avg_loss_streak, 4)},
+        {'metric': 'pct_losing_streaks_ge_5', 'value': round(pct_ge_5, 4)},
+    ])
+
+
+def compute_drawdown_periods(daily_ret: pd.Series, top_n: int = 10) -> pd.DataFrame:
+    r = pd.Series(daily_ret).dropna()
+    r.index = pd.to_datetime(r.index)
+    equity = (1 + r).cumprod()
+    running_peak = equity.cummax()
+    in_dd = equity < running_peak
+
+    # 找到所有回撤区间
+    periods = []
+    i = 0
+    arr = in_dd.values
+    idx = equity.index
+    while i < len(arr):
+        if arr[i]:
+            start = i
+            # 找峰值（前一个非回撤点的峰）
+            peak_idx = start - 1 if start > 0 else 0
+            peak_value = float(equity.iloc[peak_idx])
+            # 找谷底
+            j = i
+            trough_value = float(equity.iloc[j])
+            trough_idx = j
+            while j < len(arr) and arr[j]:
+                if equity.iloc[j] < trough_value:
+                    trough_value = float(equity.iloc[j])
+                    trough_idx = j
+                j += 1
+            recovery_idx = j if j < len(arr) else None
+            periods.append({
+                'start_date': idx[peak_idx],
+                'trough_date': idx[trough_idx],
+                'recovery_date': idx[recovery_idx] if recovery_idx is not None else pd.NaT,
+                'peak_value': peak_value,
+                'trough_value': trough_value,
+                'drawdown_pct': round((trough_value / peak_value - 1) * 100, 4),
+                'duration_days': (idx[trough_idx] - idx[peak_idx]).days,
+                'recovery_days': (idx[recovery_idx] - idx[trough_idx]).days
+                                 if recovery_idx is not None else -1,
+            })
+            i = j
+        else:
+            i += 1
+    df = pd.DataFrame(periods)
+    if df.empty:
+        return df
+    df = df.sort_values('drawdown_pct').head(top_n).reset_index(drop=True)
+    df.insert(0, 'rank', range(1, len(df) + 1))
+    return df

@@ -267,6 +267,13 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 - `_max_drawdown(equity)` — 从累计净值计算 `(max_dd, dd_duration_days)`；
 - `_risk_block(daily_ret, period_type, period_label)` — 计算单期所有指标并返回 dict，少于 2 个有效数据点时返回 `None`（自动过滤）。
 
+### Task 9 追加函数
+
+| 函数 | 输入 | 输出 |
+|------|------|------|
+| `compute_losing_streak_stats(trades)` | trade_summary DataFrame（需含 `return_pct` / `entry_date`） | 4 行 long format（metric / value）：longest_losing_streak / longest_winning_streak / avg_losing_streak_length / pct_losing_streaks_ge_5 |
+| `compute_drawdown_periods(daily_ret, top_n)` | `pd.Series`（日收益，DatetimeIndex）+ `top_n`（默认 10） | 最深 top_n 个回撤区间 DataFrame，列含 rank / start_date / trough_date / recovery_date / peak_value / trough_value / drawdown_pct / duration_days / recovery_days |
+
 ## 11. 配置文件（config.json）核心字段
 
 | 字段 | 说明 |

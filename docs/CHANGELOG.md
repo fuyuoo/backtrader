@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 9：portfolio_attribution 追加 losing_streak_stats + drawdown_periods
+
+- 需求：Phase A 统计分析框架 Task 9，在 `portfolio_attribution.py` 追加 `compute_losing_streak_stats`（连败/连胜统计）和 `compute_drawdown_periods`（Top-N 回撤区间）两个函数。
+- 改动：
+  - `my_strategy/tools/portfolio_attribution.py`：文件末尾追加 `compute_losing_streak_stats` 和 `compute_drawdown_periods`；原有 `compute_portfolio_risk_metrics` 及辅助函数不变。
+  - `my_strategy/tests/test_portfolio_attribution.py`：import 行扩充两个新函数；追加 `test_compute_losing_streak_stats_finds_longest_streaks`（验证 longest_loss==3, longest_win==2）和 `test_compute_drawdown_periods_returns_top_n_with_durations`（验证列集合、len≤3、drawdown_pct<0）。
+  - `docs/FEATURES.md`：第 10 节补充 Task 9 追加函数说明表。
+- 影响：无破坏性变更；全套 3 个 portfolio_attribution 测试全部通过。
+
 ## 2026-05-08 — Phase A Task 8：新增 portfolio_attribution.py，实现 compute_portfolio_risk_metrics
 
 - 需求：Phase A 统计分析框架 Task 8，新建 `portfolio_attribution.py`，计算组合层面 Sharpe / Sortino / Calmar / 最大回撤 / 年化收益等风险指标，按 overall / yearly / monthly 三维度输出。
