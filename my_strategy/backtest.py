@@ -567,14 +567,20 @@ def _add_forward_returns(
     for w in windows:
         out[f'forward_return_{w}d'] = pd.NA
 
+    processed_lookup = {}
+    for ts_key, df_raw in daily_lookup.items():
+        df_copy = df_raw.copy()
+        df_copy['trade_date'] = pd.to_datetime(df_copy['trade_date'])
+        processed_lookup[ts_key] = df_copy.sort_values('trade_date').reset_index(drop=True)
+
     for idx, r in out.iterrows():
         ts = r['ts_code']
         ed = pd.to_datetime(r['entry_date'], errors='coerce')
-        if pd.isna(ed) or ts not in daily_lookup:
+        if pd.isna(ed) or ts not in processed_lookup:
             continue
-        d = daily_lookup[ts].copy()
-        d['trade_date'] = pd.to_datetime(d['trade_date'])
-        d = d.sort_values('trade_date').reset_index(drop=True)
+        d = processed_lookup.get(ts)
+        if d is None:
+            continue
         mask_entry = d['trade_date'] >= ed
         if not mask_entry.any():
             continue

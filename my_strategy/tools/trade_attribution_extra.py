@@ -311,7 +311,7 @@ def compute_signal_importance_ranking(
         if 'entry_date' in trades.columns and sig_type in ('bool', 'numeric'):
             sig_numeric = (trades[sig].astype(str).map({'True': 1, 'False': 0}).astype(float)
                             if sig_type == 'bool' else trades[sig].astype(float))
-            ic_5_mean, ic_5_std = _compute_ic_monthly(
+            ic_5_mean, _ = _compute_ic_monthly(
                 sig_numeric, trades.get('forward_return_5d', pd.Series()),
                 trades['entry_date'])
             ic_20_mean, _ = _compute_ic_monthly(
@@ -356,4 +356,3 @@ def run(trades: pd.DataFrame, out_dir: Path, signals_whitelist: list, combos: li
     compute_significance_summary(trades).to_csv(out_dir / 'significance_summary.csv', index=False)
     compute_signal_importance_ranking(trades, signals_whitelist).to_csv(
         out_dir / 'signal_importance_ranking.csv', index=False)
-    compute_significance_summary(trades).to_csv(out_dir / 'significance_summary.csv', index=False)
