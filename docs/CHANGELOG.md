@@ -15,6 +15,13 @@
 
 ---
 
+## 2026-05-08 — Phase B-prep Task 3: PIT universe 过滤
+- 需求：避免在股票上市前将其纳入回测宇宙（前瞻偏差）
+- 改动：backtest.py 新增 `_resolve_pit_window()`；`load_feeds` 数据加载循环按 `list_date`/`delist_date` 剪裁每股有效窗口；新增 `tests/test_pit_universe.py`（7 个测试）
+- 影响：实际加载股票数可能略减少（较新上市股票在早期窗口被跳过）；本次跳过 11 / 802 股
+
+---
+
 ## 2026-05-08 — Phase B-prep Task 2: A 股涨跌停过滤
 - 需求：涨停日不开仓/加仓，跌停日不卖出，避免虚假成交
 - 改动：`my_strategy/src/strategy.py` 新增 `_is_limit_up` / `_is_limit_down` / `_log_skipped_signal` 三个方法及 `LIMIT_UP_THRESHOLD` / `LIMIT_DOWN_THRESHOLD` 常量，`next()` 各下单点加防护；`my_strategy/backtest.py` 新增 `skipped_signals.csv` 输出；新增 `my_strategy/tests/test_strategy_limit_filter.py`（5 个单元测试）

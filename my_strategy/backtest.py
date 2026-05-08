@@ -15,6 +15,39 @@ from src.strategy import StockData, StockCommission, MyStrategy
 from src.calc_indicators import compute_all_indicators
 
 
+def _resolve_pit_window(
+    list_date,
+    delist_date,
+    bt_start: 'pd.Timestamp',
+    bt_end: 'pd.Timestamp',
+):
+    """返回该股票在当前 backtest 窗口内的有效 (fromdate, todate) tuple。
+    若该股票完全不在窗口内（上市晚于 bt_end 或退市早于 bt_start），返回 None。
+    list_date / delist_date 可为 NaN（缺数据）；缺 list_date 时退化为 bt_start。
+    """
+    def _parse(d):
+        if pd.isna(d):
+            return None
+        s = str(d)
+        if '.' in s:
+            s = s.split('.')[0]  # "19910403.0" → "19910403"
+        return pd.to_datetime(s, format='%Y%m%d', errors='coerce')
+
+    listed = _parse(list_date)
+    delisted = _parse(delist_date)
+
+    fromdate = max(listed, bt_start) if listed is not None else bt_start
+    todate = min(delisted, bt_end) if delisted is not None else bt_end
+
+    if fromdate > bt_end:
+        return None  # 上市晚于窗口
+    if todate < bt_start:
+        return None  # 退市早于窗口
+    if fromdate > todate:
+        return None  # 边缘情况
+    return fromdate, todate
+
+
 def load_config(config_path='config.json'):
     with open(config_path, 'r') as f:
         return json.load(f)
@@ -31,8 +64,16 @@ def load_feeds(cfg):
     benchmark_codes = set(cfg.get('benchmark_codes') or [])
     if cfg.get('benchmark_code'):
         benchmark_codes.add(cfg['benchmark_code'])
-    stocks = [ts for ts in pd.read_csv(cfg['stock_list_path'])['ts_code'].tolist()
+    stock_list_df = pd.read_csv(cfg['stock_list_path'])
+    stocks = [ts for ts in stock_list_df['ts_code'].tolist()
               if ts not in benchmark_codes]
+    # PIT universe lookup：按 list_date / delist_date 剪裁每只股票的回测窗口
+    bt_start = pd.Timestamp(cfg['backTest_Start_data'])
+    bt_end = pd.Timestamp(cfg['backTest_end_data'])
+    list_date_lookup = dict(zip(stock_list_df['ts_code'], stock_list_df['list_date'])) \
+        if 'list_date' in stock_list_df.columns else {}
+    delist_date_lookup = dict(zip(stock_list_df['ts_code'], stock_list_df['delist_date'])) \
+        if 'delist_date' in stock_list_df.columns else {}
     data_dir = Path(cfg['data_dir'])
     start = datetime.datetime.strptime(cfg['backTest_Start_data'], '%Y%m%d')
     end = datetime.datetime.strptime(cfg['backTest_end_data'], '%Y%m%d')
@@ -41,8 +82,23 @@ def load_feeds(cfg):
     min_bars = int(total_days / 365 * 252 * 0.8)
 
     skip_no_file, skip_late_listed, skip_insufficient = [], [], []
+    n_skipped_pit = 0
     feeds = []
     for ts_code in stocks:
+        # PIT 过滤：按上市/退市日剪裁该股的有效回测窗口
+        pit = _resolve_pit_window(
+            list_date_lookup.get(ts_code, pd.NA),
+            delist_date_lookup.get(ts_code, pd.NA),
+            bt_start, bt_end,
+        )
+        if pit is None:
+            n_skipped_pit += 1
+            continue
+        fromdate, todate = pit
+        # 转回 datetime（StockData 接受 datetime）
+        fromdate = fromdate.to_pydatetime()
+        todate = todate.to_pydatetime()
+
         path = data_dir / 'indicators' / f"{ts_code}.csv"
         if not path.exists():
             skip_no_file.append(ts_code)
@@ -52,19 +108,20 @@ def load_feeds(cfg):
         df.index = df['trade_date']
 
         # 条件 2：回测开始前必须有数据（上市早于回测开始）
-        if df.index.min() >= start:
+        if df.index.min() >= fromdate:
             skip_late_listed.append(ts_code)
             continue
 
         # 条件 3：回测窗口内 K 线数足够
-        in_window = (df.index >= start) & (df.index <= end)
+        in_window = (df.index >= fromdate) & (df.index <= todate)
         if in_window.sum() < min_bars:
             skip_insufficient.append(ts_code)
             continue
 
-        feed = StockData(dataname=df, fromdate=start, todate=end)
+        feed = StockData(dataname=df, fromdate=fromdate, todate=todate)
         feeds.append((ts_code, feed))
 
+    print(f"[backtest] PIT universe 过滤跳过 {n_skipped_pit} / {len(stock_list_df)} 股")
     if skip_no_file:
         print(f"SKIP {len(skip_no_file)} 支：指标文件不存在")
     if skip_late_listed:

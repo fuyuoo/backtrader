@@ -145,7 +145,8 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 - `StockData`（PandasData 子类）暴露 `ma25/ma60/dea` 三条预计算线；
 - `StockCommission`：买入只收佣金，卖出佣金 + 印花税；
 - 自定义 `BacktestProgressAnalyzer`：按 bar 进度打印百分比；
-- 数据预过滤：剔除上市过晚 / 中途退市 / 指标文件缺失的股票，跳过原因汇总打印。
+- 数据预过滤：剔除上市过晚 / 中途退市 / 指标文件缺失的股票，跳过原因汇总打印；
+- PIT universe 过滤：按 `stock_list.csv` 中的 `list_date` / `delist_date` 剪裁每只股票的有效回测窗口，避免将未上市股票纳入回测宇宙（前瞻偏差）；`list_date` 缺失时退化为 bt_start（保守）。
 
 ### 5.4 产物
 
