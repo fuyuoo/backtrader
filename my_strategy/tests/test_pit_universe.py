@@ -5,7 +5,6 @@
 返回该股的有效 (fromdate, todate) tuple。
 """
 import pandas as pd
-import pytest
 from datetime import datetime
 from my_strategy.backtest import _resolve_pit_window
 

@@ -31,7 +31,8 @@ def _resolve_pit_window(
         s = str(d)
         if '.' in s:
             s = s.split('.')[0]  # "19910403.0" → "19910403"
-        return pd.to_datetime(s, format='%Y%m%d', errors='coerce')
+        result = pd.to_datetime(s, format='%Y%m%d', errors='coerce')
+        return None if pd.isnull(result) else result
 
     listed = _parse(list_date)
     delisted = _parse(delist_date)
@@ -107,8 +108,8 @@ def load_feeds(cfg):
         df = df.sort_values('trade_date').reset_index(drop=True)
         df.index = df['trade_date']
 
-        # 条件 2：回测开始前必须有数据（上市早于回测开始）
-        if df.index.min() >= fromdate:
+        # 条件 2：回测开始前必须有数据（上市早于回测开始，锚定到 bt_start 而非 PIT 调整后的 fromdate）
+        if df.index.min() >= start:
             skip_late_listed.append(ts_code)
             continue
 
@@ -121,7 +122,7 @@ def load_feeds(cfg):
         feed = StockData(dataname=df, fromdate=fromdate, todate=todate)
         feeds.append((ts_code, feed))
 
-    print(f"[backtest] PIT universe 过滤跳过 {n_skipped_pit} / {len(stock_list_df)} 股")
+    print(f"[backtest] PIT universe 过滤跳过 {n_skipped_pit} / {len(stocks)} 股")
     if skip_no_file:
         print(f"SKIP {len(skip_no_file)} 支：指标文件不存在")
     if skip_late_listed:
