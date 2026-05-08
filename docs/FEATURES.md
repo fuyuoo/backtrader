@@ -27,7 +27,7 @@ my_strategy/
 │   ├── verify_trades.py                # 逐 episode 信号合规校验
 │   ├── stats_helpers.py                # 统计工具（置信区间、t 检验、分桶统计）
 │   ├── rebuild_position_history.py     # 重建逐日持仓 PnL + 组合快照
-│   ├── trade_attribution_extra.py      # 扩展归因报告（6 张：payoff/signal_stability/.../signal_importance_ranking）
+│   ├── trade_attribution_extra.py      # 扩展归因报告（7 张：payoff/signal_stability/.../signal_importance_ranking/loss_attribution）
 │   ├── portfolio_attribution.py        # 组合层归因（6 张：sharpe/sortino/drawdown_periods/.../rolling_metrics）
 │   ├── position_curve_attribution.py   # 持仓曲线归因（4 张：holding_curve/mfe_timing/...）
 │   ├── attribution_runner.py           # Phase A 顶层编排（统一驱动 14 张报告 + 2 个中间文件）
@@ -211,7 +211,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 
 ## 8. 扩展归因报告（tools/trade_attribution_extra.py）
 
-**职责**：Phase A 统计分析框架扩展模块，从 `trade_summary.csv` 计算多维度 payoff 指标。共 6 张报告，通过 `run()` 模块入口统一写出。
+**职责**：Phase A 统计分析框架扩展模块，从 `trade_summary.csv` 计算多维度 payoff 指标。共 7 张报告，通过 `run()` 模块入口统一写出。
 
 ### 公开函数
 
@@ -223,7 +223,8 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 | `compute_multi_factor_combo_stats(trades, combos, min_sample)` | trade_summary DataFrame + `[(name_a, name_b, name_c), ...]` 三元组列表 | `multi_factor_combo_stats.csv` |
 | `compute_significance_summary(trades)` | trade_summary DataFrame | `significance_summary.csv` |
 | `compute_signal_importance_ranking(trades, signals)` | trade_summary DataFrame + 信号列名列表 | `signal_importance_ranking.csv` |
-| `run(trades, out_dir, signals_whitelist, combos)` | 上述所有参数 + 输出目录路径 | 写出以上 6 个 CSV |
+| `compute_loss_attribution(trades, signals, heavy_loss_threshold)` | trade_summary DataFrame + 信号列名列表 + 重亏阈值（默认 -5.0%） | `loss_attribution.csv` |
+| `run(trades, out_dir, signals_whitelist, combos)` | 上述所有参数 + 输出目录路径 | 写出以上 7 个 CSV |
 
 `compute_payoff_metrics` 按 overall / exit_reason / year / sector / regime 五个维度各产一组行，列含 `n` / `win_rate` / `avg_win` / `avg_loss` / `payoff_ratio` / `profit_factor` / `expectancy` / `max_win` / `max_loss`。
 
@@ -236,6 +237,8 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 `compute_significance_summary` 对 `_SIGNIFICANCE_TARGETS`（11 类报告：exit_reason / hs300_dif / hs300_bull_align / stock_bull_align / stock_above_ma25 / sector_bull_align / sector_above_ma25 / sector_dif / sector_week_macd / sector_month_macd / yearly）逐类调用 `bucket_stats_with_significance`，输出统一 long format，列含 `report_name` / `bucket_field` / `bucket_value` / `n` / `mean_return` / `std_return` / `std_err` / `ci_low_95` / `ci_high_95` / `t_stat_vs_zero` / `p_value_vs_zero` / `t_stat_vs_overall` / `p_value_vs_overall` / `low_sample_warning` / `significant_flag`；对应列不存在时该目标组自动跳过（返回空行），不做静默降级。
 
 `compute_signal_importance_ranking` 对 `signals` 列表中每个信号综合计算 effect_size（True/False 或上/下半各组平均收益之差）、Welch t 检验、以及月度 Spearman IC（分别对 forward_return_5d/20d/60d），输出含 `signal_name` / `signal_type` / `n` / `mean_return_when_true` / `mean_return_when_false` / `effect_size` / `t_stat` / `p_value` / `ic_mean_5d` / `ic_mean_20d` / `ic_mean_60d` / `ic_ir_60d` / `rank_by_effect_size` / `rank_by_ic` / `rank_combined` 的宽表，按 `rank_combined`（effect_size 排名 × 0.5 + IC 排名 × 0.5）升序排列；信号不在 trades 列中时自动跳过；依赖 trade_summary 中的 `forward_return_5d/20d/60d` 列（Task 6 新增）。
+
+`compute_loss_attribution` 对每个信号的每个枚举值（bool 展 True/False，数值按 5 分位，categorical 按唯一值）计算在全集 / 亏损交易 / 重亏交易中的出现频率 `freq_in_universe` / `freq_in_losses` / `freq_in_heavy_losses`、提升倍率 `lift_loss` / `lift_heavy_loss`，以及卡方独立性检验 `chi2_stat` / `p_value`；无亏损时 freq/lift 列为 NaN，仍输出行（`n_losses=0`）；`heavy_loss_threshold` 默认 -5.0%。
 
 ## 9. 交易验证（tools/verify_trades.py）
 
@@ -382,7 +385,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 
 1. `rebuild_position_history.build()` — 重建 `daily_position_pnl.csv` / `daily_portfolio_snapshot.csv`
 2. `old_attribution.run()` — 旧归因报告（27 张，保持原行为）
-3. `trade_attribution_extra.run()` — trade-level 扩展（6 张）
+3. `trade_attribution_extra.run()` — trade-level 扩展（7 张）
 4. `portfolio_attribution.run()` — 组合层风险指标（6 张）
 5. `position_curve_attribution.run()` — 持仓曲线归因（4 张）
 

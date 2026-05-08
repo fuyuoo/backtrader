@@ -13,6 +13,13 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-05-08 — Phase B-prep Task 8: loss_attribution report
+- 需求：识别亏损交易中哪些信号值最常出现（lift 分析 + chi-square 检验）
+- 改动：my_strategy/tools/trade_attribution_extra.py（compute_loss_attribution 新增）、my_strategy/tests/test_loss_attribution.py（3 测试）
+- 影响：reports/ 新增 loss_attribution.csv
+
+---
+
 ## 2026-05-08 — Phase B-prep Task 7: rolling_metrics report
 - 需求：滚动 252 日窗口的关键绩效指标，识别策略衰减 / regime 切换
 - 改动：`my_strategy/tools/portfolio_attribution.py`（compute_rolling_metrics 新增）、`my_strategy/tests/test_rolling_metrics.py`（4 个测试）

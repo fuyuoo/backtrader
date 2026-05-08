@@ -345,6 +345,76 @@ def compute_signal_importance_ranking(
     return df.sort_values('rank_combined').reset_index(drop=True)
 
 
+def compute_loss_attribution(
+    trades: pd.DataFrame, signals: list, heavy_loss_threshold: float = -5.0,
+) -> pd.DataFrame:
+    """对每个 signal 列出"信号值 vs 亏损交易频率"对比表。
+
+    输出每个 (signal, value) 一行。numeric 信号按 5 分位枚举；bool/cat 按唯一值。
+    """
+    n_universe = len(trades)
+    losses = trades[trades['return_pct'] < 0]
+    heavy = trades[trades['return_pct'] < heavy_loss_threshold]
+    n_losses = len(losses)
+    n_heavy = len(heavy)
+
+    rows = []
+    for sig in signals:
+        if sig not in trades.columns:
+            continue
+        s = trades[sig]
+        sig_type = _classify_signal_type(s)
+
+        if sig_type == 'bool':
+            values = [(False, lambda x: x.astype(str).isin(['False'])),
+                      (True, lambda x: x.astype(str).isin(['True']))]
+        elif sig_type == 'numeric':
+            qs_full = pd.qcut(s, q=5, labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'], duplicates='drop')
+            values = [(lbl, lambda x, _q=lbl: pd.qcut(x, q=5, labels=['Q1','Q2','Q3','Q4','Q5'], duplicates='drop') == _q)
+                      for lbl in qs_full.dropna().unique()]
+        else:
+            values = [(str(v), lambda x, _v=v: x == _v) for v in s.dropna().unique()]
+
+        for val, mask_fn in values:
+            mask_uni = mask_fn(s)
+            mask_loss = mask_fn(losses[sig]) if n_losses > 0 else pd.Series([], dtype=bool)
+            mask_heavy = mask_fn(heavy[sig]) if n_heavy > 0 else pd.Series([], dtype=bool)
+            n_u = int(mask_uni.sum())
+            n_l = int(mask_loss.sum()) if n_losses > 0 else 0
+            n_h = int(mask_heavy.sum()) if n_heavy > 0 else 0
+            freq_u = n_u / n_universe if n_universe > 0 else 0.0
+            freq_l = n_l / n_losses if n_losses > 0 else np.nan
+            freq_h = n_h / n_heavy if n_heavy > 0 else np.nan
+            lift_l = freq_l / freq_u if (pd.notna(freq_l) and freq_u > 0) else np.nan
+            lift_h = freq_h / freq_u if (pd.notna(freq_h) and freq_u > 0) else np.nan
+
+            # chi-square test：信号 vs (loss/non-loss)
+            chi2_stat, p_val = (np.nan, np.nan)
+            if n_losses > 0 and n_universe > n_losses:
+                a = n_l                             # signal=val & loss
+                b = n_u - n_l                       # signal=val & non-loss
+                c = n_losses - n_l                  # signal!=val & loss
+                d = (n_universe - n_u) - (n_losses - n_l)  # signal!=val & non-loss
+                contingency = np.array([[a, b], [c, d]])
+                if (contingency >= 5).all():
+                    chi2_stat, p_val, _, _ = sp_stats.chi2_contingency(contingency, correction=False)[:4]
+                    chi2_stat = float(chi2_stat)
+                    p_val = float(p_val)
+
+            rows.append({
+                'signal_name': sig, 'signal_value': str(val),
+                'freq_in_universe': round(freq_u, 4),
+                'freq_in_losses': round(freq_l, 4) if pd.notna(freq_l) else np.nan,
+                'freq_in_heavy_losses': round(freq_h, 4) if pd.notna(freq_h) else np.nan,
+                'lift_loss': round(lift_l, 4) if pd.notna(lift_l) else np.nan,
+                'lift_heavy_loss': round(lift_h, 4) if pd.notna(lift_h) else np.nan,
+                'chi2_stat': round(chi2_stat, 4) if pd.notna(chi2_stat) else np.nan,
+                'p_value': round(p_val, 6) if pd.notna(p_val) else np.nan,
+                'n_universe': n_u, 'n_losses': n_l, 'n_heavy_losses': n_h,
+            })
+    return pd.DataFrame(rows)
+
+
 # 模块入口
 def run(trades: pd.DataFrame, out_dir: Path, signals_whitelist: list, combos: list) -> None:
     out_dir = Path(out_dir)
@@ -356,3 +426,5 @@ def run(trades: pd.DataFrame, out_dir: Path, signals_whitelist: list, combos: li
     compute_significance_summary(trades).to_csv(out_dir / 'significance_summary.csv', index=False)
     compute_signal_importance_ranking(trades, signals_whitelist).to_csv(
         out_dir / 'signal_importance_ranking.csv', index=False)
+    compute_loss_attribution(trades, signals_whitelist).to_csv(
+        out_dir / 'loss_attribution.csv', index=False)
