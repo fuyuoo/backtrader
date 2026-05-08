@@ -138,6 +138,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
   `take_profit_min_pct` / `take_profit_max_pct` 截断；
 - MA25 跌破止损（仅在已经触发过 take_profit_1 之后生效）；
 - `cerebro.broker.set_coc(True)`：市价单当日收盘成交，**信号日 == 执行日**。
+- **涨跌停过滤**：`_is_limit_up` / `_is_limit_down` 检测当日涨跌幅 ≥ ±9.9%；涨停日不开仓/加仓，跌停日不止损/止盈（无法成交），跳过的信号写入 `skipped_log` 并于回测结束后输出 `results/skipped_signals.csv`。
 
 ### 5.3 回测组件
 
@@ -151,6 +152,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 - `results/trade_list.csv`：逐笔（每次买卖）明细；
 - `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；新增列 `mfe_pct` / `mae_pct`（持仓期相对首买入价的最高浮盈 / 最深浮亏，单位百分点）、`dea_neg_distance_days`（首买时距上次 DEA<0 的 bar 数）；这些字段为只读观测，不参与买卖判定；新增 4 个入场环境布尔快照列 `entry_hs300_dif_above_zero` / `entry_hs300_bull_align` / `entry_stock_bull_align` / `entry_stock_above_ma25`，分别表示进场当日 HS300 MACD DIF 是否水上、HS300 是否完整多头排列（ma25>ma60>ma144>ma180）、个股是否完整多头排列、个股是否站上 MA25；
 - `results/equity_curve.png`：净值曲线；
+- `results/skipped_signals.csv`：被涨跌停过滤的信号明细（列：date / ts_code / skip_reason / close）；仅当有跳过信号时生成；
 - `data/signals_log.csv`：每次入场信号当时的因子快照（供归因使用）；
 - 终端打印：总收益、Sharpe、最大回撤、胜率等。
 

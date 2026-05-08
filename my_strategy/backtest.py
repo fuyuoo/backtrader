@@ -976,6 +976,15 @@ def main():
         sig_df.to_csv(sig_path, index=False)
         print(f"signals_log: {len(sig_df)} rows written to {sig_path}")
 
+    # 写入被涨跌停过滤的信号（如有）
+    skipped_log = getattr(strat, 'skipped_log', [])
+    if skipped_log:
+        skipped_df = pd.DataFrame(skipped_log)
+        skipped_path = Path(cfg.get('results_dir', str(Path(__file__).resolve().parent / 'results'))) / 'skipped_signals.csv'
+        skipped_path.parent.mkdir(parents=True, exist_ok=True)
+        skipped_df.to_csv(skipped_path, index=False)
+        print(f"[backtest] {len(skipped_df)} 条信号被涨跌停过滤，已写入 {skipped_path}")
+
     print_results(result, cfg)
 
     # 自动触发归因分析（依赖 trade_summary.csv 和 signals_log.csv）

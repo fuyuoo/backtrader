@@ -97,6 +97,7 @@ class MyStrategy(bt.Strategy):
         self.trade_log = []
         self.position_count_log = []
         self.signals_log = []
+        self.skipped_log = []
 
     def _current_position_count(self):
         count = 0
@@ -129,6 +130,40 @@ class MyStrategy(bt.Strategy):
     def _has_pending_order(self, d):
         o = self.orders.get(d)
         return o is not None and o.alive()
+
+    LIMIT_UP_THRESHOLD = 9.9   # +9.9% 起算涨停（A 股标准 ±10% 留 0.1% 容差）
+    LIMIT_DOWN_THRESHOLD = -9.9  # -9.9% 起算跌停
+
+    def _is_limit_up(self, data) -> bool:
+        """当日 close 相对前一日已涨停（pct_chg ≥ +9.9%）。"""
+        if len(data) < 2:
+            return False
+        prev_close = data.close[-1]
+        cur_close = data.close[0]
+        if prev_close is None or cur_close is None or prev_close <= 0:
+            return False
+        pct_chg = (cur_close - prev_close) / prev_close * 100.0
+        return pct_chg >= MyStrategy.LIMIT_UP_THRESHOLD
+
+    def _is_limit_down(self, data) -> bool:
+        """当日 close 相对前一日已跌停（pct_chg ≤ -9.9%）。"""
+        if len(data) < 2:
+            return False
+        prev_close = data.close[-1]
+        cur_close = data.close[0]
+        if prev_close is None or cur_close is None or prev_close <= 0:
+            return False
+        pct_chg = (cur_close - prev_close) / prev_close * 100.0
+        return pct_chg <= MyStrategy.LIMIT_DOWN_THRESHOLD
+
+    def _log_skipped_signal(self, data, reason: str):
+        """记录被涨跌停过滤的信号到 self.skipped_log（runtime list）。"""
+        self.skipped_log.append({
+            'date': self.datas[0].datetime.date(0),
+            'ts_code': data._name if hasattr(data, '_name') else str(data),
+            'skip_reason': reason,
+            'close': float(data.close[0]),
+        })
 
     def _finalize_episode(self, d, status='completed'):
         state = self.stock_state[d]
@@ -313,9 +348,12 @@ class MyStrategy(bt.Strategy):
                 # MA60 止损
                 if state['in_ma60_obs']:
                     if close < ma60:
-                        o = self.close(data=d, exectype=bt.Order.Market)
-                        self.order_reasons[o.ref] = 'MA60_stop'
-                        self.orders[d] = o
+                        if self._is_limit_down(d):
+                            self._log_skipped_signal(d, reason='limit_down')
+                        else:
+                            o = self.close(data=d, exectype=bt.Order.Market)
+                            self.order_reasons[o.ref] = 'MA60_stop'
+                            self.orders[d] = o
                         continue
                     else:
                         state['in_ma60_obs'] = False
@@ -326,9 +364,12 @@ class MyStrategy(bt.Strategy):
                 if state['take_profit_count'] >= 2 and ma25 == ma25:
                     if state['in_ma25_obs']:
                         if close < ma25:
-                            o = self.close(data=d, exectype=bt.Order.Market)
-                            self.order_reasons[o.ref] = 'MA25_stop'
-                            self.orders[d] = o
+                            if self._is_limit_down(d):
+                                self._log_skipped_signal(d, reason='limit_down')
+                            else:
+                                o = self.close(data=d, exectype=bt.Order.Market)
+                                self.order_reasons[o.ref] = 'MA25_stop'
+                                self.orders[d] = o
                             continue
                         else:
                             state['in_ma25_obs'] = False
@@ -342,15 +383,21 @@ class MyStrategy(bt.Strategy):
                 tp_sell_size = min(int(base_size / 3 / 100) * 100, pos.size)
                 if state['take_profit_count'] == 0 and pnl_pct >= tp1:
                     if tp_sell_size > 0:
-                        o = self.sell(data=d, size=tp_sell_size, exectype=bt.Order.Market)
-                        self.order_reasons[o.ref] = 'take_profit_1'
-                        self.orders[d] = o
+                        if self._is_limit_down(d):
+                            self._log_skipped_signal(d, reason='limit_down')
+                        else:
+                            o = self.sell(data=d, size=tp_sell_size, exectype=bt.Order.Market)
+                            self.order_reasons[o.ref] = 'take_profit_1'
+                            self.orders[d] = o
                         continue
                 elif state['take_profit_count'] == 1 and pnl_pct >= tp2:
                     if tp_sell_size > 0:
-                        o = self.sell(data=d, size=tp_sell_size, exectype=bt.Order.Market)
-                        self.order_reasons[o.ref] = 'take_profit_2'
-                        self.orders[d] = o
+                        if self._is_limit_down(d):
+                            self._log_skipped_signal(d, reason='limit_down')
+                        else:
+                            o = self.sell(data=d, size=tp_sell_size, exectype=bt.Order.Market)
+                            self.order_reasons[o.ref] = 'take_profit_2'
+                            self.orders[d] = o
                         continue
 
                 # 加仓（最多2次，满足与买入相同条件，且未出现大阳线）
@@ -367,9 +414,12 @@ class MyStrategy(bt.Strategy):
                         if any(v < 0 for v in past_deas if not _isnan(v)):
                             add_size = int(self.position_limit / 3 / close / 100) * 100
                             if add_size > 0:
-                                o = self.buy(data=d, size=add_size)
-                                self.order_reasons[o.ref] = 'add_on'
-                                self.orders[d] = o
+                                if self._is_limit_up(d):
+                                    self._log_skipped_signal(d, reason='limit_up')
+                                else:
+                                    o = self.buy(data=d, size=add_size)
+                                    self.order_reasons[o.ref] = 'add_on'
+                                    self.orders[d] = o
 
             else:
                 prev_close = d.close[-1]
@@ -410,6 +460,10 @@ class MyStrategy(bt.Strategy):
                                      skip_reason=skip_reason)
 
                 if skip_reason:
+                    continue
+
+                if self._is_limit_up(d):
+                    self._log_skipped_signal(d, reason='limit_up')
                     continue
 
                 if (close - ma60) / ma60 <= 0.01:

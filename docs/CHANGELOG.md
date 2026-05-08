@@ -15,6 +15,11 @@
 
 ---
 
+## 2026-05-08 — Phase B-prep Task 2: A 股涨跌停过滤
+- 需求：涨停日不开仓/加仓，跌停日不卖出，避免虚假成交
+- 改动：`my_strategy/src/strategy.py` 新增 `_is_limit_up` / `_is_limit_down` / `_log_skipped_signal` 三个方法及 `LIMIT_UP_THRESHOLD` / `LIMIT_DOWN_THRESHOLD` 常量，`next()` 各下单点加防护；`my_strategy/backtest.py` 新增 `skipped_signals.csv` 输出；新增 `my_strategy/tests/test_strategy_limit_filter.py`（5 个单元测试）
+- 影响：输出 `results/skipped_signals.csv`；实际交易次数可能略有减少
+
 ## 2026-05-08 — Phase B-prep Task 1: 数据健康自检模块
 - 需求：扫描全量 daily CSV + stock_list.csv，输出问题清单供人工决策
 - 改动：新增 my_strategy/tools/data_integrity_check.py（8 个检查函数 + run()），新增 my_strategy/tests/test_data_integrity_check.py（8 个测试）
