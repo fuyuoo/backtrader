@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from my_strategy.tools.position_curve_attribution import compute_holding_period_curve, compute_mfe_timing
+from my_strategy.tools.position_curve_attribution import compute_holding_period_curve, compute_mfe_timing, compute_sector_concentration_stats
 
 
 def _make_daily_pnl():
@@ -77,3 +77,20 @@ def test_compute_mfe_timing_classifies_by_position_in_holding():
     buckets = out['mfe_timing_bucket'].tolist()
     assert any('早期' in b for b in buckets)
     assert any('晚期' in b for b in buckets)
+
+
+def test_compute_sector_concentration_stats_summary_and_top_n():
+    snap = pd.DataFrame({
+        'date': pd.date_range('2024-01-01', periods=5),
+        'n_positions': [10, 10, 10, 10, 10],
+        'sectors_held': [3, 2, 5, 4, 1],
+        'top_sector_code': ['801010', '801010', '801080', '801010', '801080'],
+        'top_sector_share': [0.5, 0.7, 0.3, 0.4, 1.0],
+        'herfindahl_index': [0.30, 0.50, 0.20, 0.25, 1.0],
+    })
+    out = compute_sector_concentration_stats(snap, top_n=2)
+    assert (out['metric_type'] == 'summary').any()
+    assert (out['metric_type'] == 'top_concentrated_day').any()
+    avg_max = out[(out['metric_type'] == 'summary') & (out['label'] == 'avg_max_sector_share')].iloc[0]
+    # avg(0.5, 0.7, 0.3, 0.4, 1.0) = 0.58
+    assert abs(avg_max['value'] - 0.58) < 1e-3

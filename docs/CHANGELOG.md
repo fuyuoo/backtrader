@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 14：position_curve_attribution 追加 compute_sector_concentration_stats
+
+- 需求：Phase A 统计分析框架 Task 14，在 `position_curve_attribution.py` 追加 `compute_sector_concentration_stats`，统计组合逐日行业集中度的 summary 指标（avg/p95/max 最大行业占比、avg/p95 Herfindahl 指数）和 top_n 高集中日明细。
+- 改动：
+  - `my_strategy/tools/position_curve_attribution.py`：文件末尾追加 `compute_sector_concentration_stats`，输入 `daily_portfolio_snapshot`（需含 `top_sector_share` / `herfindahl_index` / `top_sector_code` / `n_positions`），输出含 `metric_type`（summary / top_concentrated_day）的长格式 DataFrame。
+  - `my_strategy/tests/test_position_curve_attribution.py`：import 行扩充新函数；追加 `test_compute_sector_concentration_stats_summary_and_top_n`（验证 summary/top_concentrated_day 均存在、avg_max_sector_share≈0.58）。
+  - `docs/FEATURES.md`：第 12 节函数表扩充 Task 13–14 两个新函数，新增 `compute_sector_concentration_stats` 输出列说明表。
+- 影响：无破坏性变更；全套测试 145 passed 1 skipped。
+
 ## 2026-05-08 — Phase A Task 12：新增 position_curve_attribution.py，实现 compute_holding_period_curve
 
 - 需求：Phase A 统计分析框架 Task 12，新建 `position_curve_attribution.py` 模块，实现持仓期曲线首张报告 `compute_holding_period_curve`。

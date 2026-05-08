@@ -300,15 +300,17 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 
 **职责**：Phase A 统计分析框架，基于 `daily_position_pnl` / `daily_portfolio_snapshot` / `trade_list` 计算持仓期曲线（4 张报告，Task 12-15 逐步追加）。
 
-### 公开函数（Task 12）
+### 公开函数（Task 12–14）
 
 | 函数 | 输入 | 输出 |
 |------|------|------|
 | `compute_holding_period_curve(daily_position_pnl)` | `daily_position_pnl` DataFrame（含 `holding_day_n` / `cum_return_pct` / `drawdown_from_peak_pct`） | 逐采样日的横截面统计 DataFrame |
+| `compute_mfe_timing(daily_position_pnl)` | 同上 | 按 MFE 发生时机（早期/中期/晚期）分组的胜率与收益汇总 DataFrame |
+| `compute_sector_concentration_stats(daily_portfolio_snapshot, top_n)` | `daily_portfolio_snapshot` DataFrame（含 `top_sector_share` / `herfindahl_index` / `top_sector_code` / `n_positions`） | 行业集中度 summary + top_n 高集中日 DataFrame |
 
-**采样点**：`[0, 1, 2, 3, 5, 7, 10, 15, 20, 25, 30, 40, 50, 60, 75, 90]`（含第 0 天入场时刻）。
+**采样点**（`compute_holding_period_curve`）：`[0, 1, 2, 3, 5, 7, 10, 15, 20, 25, 30, 40, 50, 60, 75, 90]`（含第 0 天入场时刻）。
 
-### 输出列
+### 输出列（compute_holding_period_curve）
 
 | 列名 | 说明 |
 |------|------|
@@ -320,6 +322,18 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 | `p25_cum_return` | 25 分位累计收益率 |
 | `p75_cum_return` | 75 分位累计收益率 |
 | `avg_drawdown_from_peak` | 均值回撤（从峰值，通常为负值） |
+
+### 输出列（compute_sector_concentration_stats）
+
+| 列名 | 说明 |
+|------|------|
+| `metric_type` | `summary`（汇总行）或 `top_concentrated_day`（高集中日） |
+| `label` | summary 时为指标名（avg/p95/max_max_sector_share、avg/p95_herfindahl_index）；top 时为日期字符串 |
+| `value` | summary 行的指标值；top 行为 NaN |
+| `top_sector_code` | top 行的最大行业代码；summary 行为空字符串 |
+| `top_sector_share` | top 行最大行业占比；summary 行为 NaN |
+| `herfindahl_index` | top 行 Herfindahl 指数；summary 行为 NaN |
+| `n_positions` | top 行的总持仓数；summary 行为 NaN |
 
 ## 11. 配置文件（config.json）核心字段
 

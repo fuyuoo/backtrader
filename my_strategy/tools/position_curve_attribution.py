@@ -68,3 +68,42 @@ def compute_mfe_timing(daily_position_pnl: pd.DataFrame) -> pd.DataFrame:
     for c in ['win_rate', 'avg_return', 'avg_holding_days', 'avg_mfe_pct']:
         out[c] = out[c].round(4)
     return out
+
+
+def compute_sector_concentration_stats(
+    daily_portfolio_snapshot: pd.DataFrame,
+    top_n: int = 10,
+) -> pd.DataFrame:
+    snap = daily_portfolio_snapshot
+    rows = []
+    summary_specs = [
+        ('avg_max_sector_share', 'top_sector_share', lambda s: s.mean()),
+        ('p95_max_sector_share', 'top_sector_share', lambda s: s.quantile(0.95)),
+        ('max_max_sector_share', 'top_sector_share', lambda s: s.max()),
+        ('avg_herfindahl_index', 'herfindahl_index', lambda s: s.mean()),
+        ('p95_herfindahl_index', 'herfindahl_index', lambda s: s.quantile(0.95)),
+    ]
+    for label, col, fn in summary_specs:
+        if col not in snap.columns:
+            continue
+        rows.append({
+            'metric_type': 'summary',
+            'label': label,
+            'value': round(float(fn(snap[col])), 4),
+            'top_sector_code': '',
+            'top_sector_share': np.nan,
+            'herfindahl_index': np.nan,
+            'n_positions': np.nan,
+        })
+    top = snap.sort_values('top_sector_share', ascending=False).head(top_n)
+    for _, r in top.iterrows():
+        rows.append({
+            'metric_type': 'top_concentrated_day',
+            'label': str(pd.to_datetime(r['date']).date()),
+            'value': np.nan,
+            'top_sector_code': r['top_sector_code'],
+            'top_sector_share': round(float(r['top_sector_share']), 4),
+            'herfindahl_index': round(float(r['herfindahl_index']), 4),
+            'n_positions': int(r['n_positions']),
+        })
+    return pd.DataFrame(rows)
