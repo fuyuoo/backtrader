@@ -122,7 +122,7 @@ def compute_signal_correlation_matrix(trades: pd.DataFrame, signals_whitelist: l
     for c in cols:
         if df[c].dtype == bool or set(df[c].dropna().astype(str).unique()) <= {'True', 'False'}:
             df[c] = df[c].astype(str).map({'True': 1, 'False': 0})
-        elif df[c].dtype == 'object':
+        elif df[c].dtype == 'object' or pd.api.types.is_string_dtype(df[c]):
             df[c] = pd.factorize(df[c])[0]
         df[c] = pd.to_numeric(df[c], errors='coerce')
     rows = []

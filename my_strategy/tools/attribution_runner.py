@@ -12,7 +12,7 @@ from my_strategy.tools import (
 )
 
 
-# 默认信号白名单（Task 0 调研后可替换）
+# 默认信号白名单（来自 Task 0 调研，与 trade_summary.csv 实际列名对齐）
 DEFAULT_SIGNALS_WHITELIST = [
     'entry_hs300_dif_above_zero', 'entry_hs300_bull_align',
     'entry_stock_bull_align', 'entry_stock_above_ma25',
@@ -21,7 +21,7 @@ DEFAULT_SIGNALS_WHITELIST = [
     'entry_sector_week_macd_zone', 'entry_sector_month_macd_zone',
     'entry_month_macd_zone', 'entry_week_macd_zone',
     'ma_alignment',
-    'factor_momentum_60d', 'factor_ma60_dist',
+    'entry_sector_momentum_60d', 'entry_ma60_dist_pct',
 ]
 
 DEFAULT_COMBOS = [

@@ -114,17 +114,38 @@ def _cost_block(sub: pd.DataFrame, dimension: str, bucket: str, cfg: dict) -> di
     if n == 0:
         return None
     if 'commission' in sub.columns and 'stamp_duty' in sub.columns:
+        # 模式 A：trade_list 显式记录了成本列
         commission = float(sub['commission'].fillna(0).sum())
         stamp = float(sub['stamp_duty'].fillna(0).sum())
         turnover = float(sub['turnover'].fillna(0).sum()) if 'turnover' in sub.columns else np.nan
     else:
         comm_rate = float(cfg.get('commission_rate', 0.0003))
         stamp_rate = float(cfg.get('stamp_duty', 0.001))
-        turnover = float(sub['turnover'].fillna(0).sum()) if 'turnover' in sub.columns else np.nan
-        sell_amt = (float(sub['sell_amount'].fillna(0).sum())
-                    if 'sell_amount' in sub.columns else turnover / 2 if pd.notna(turnover) else np.nan)
-        commission = comm_rate * turnover if pd.notna(turnover) else np.nan
-        stamp = stamp_rate * sell_amt if pd.notna(sell_amt) else np.nan
+        if 'turnover' in sub.columns:
+            turnover = float(sub['turnover'].fillna(0).sum())
+            sell_amt = (float(sub['sell_amount'].fillna(0).sum())
+                        if 'sell_amount' in sub.columns
+                        else turnover / 2)
+        elif {'price', 'size'}.issubset(sub.columns):
+            # 模式 C：trade_list 仅 (date, ts_code, side, size, price, ...) — 用 price*size 反推
+            notional = sub['price'].fillna(0) * sub['size'].fillna(0).abs()
+            turnover = float(notional.sum())
+            if 'side' in sub.columns:
+                sell_mask = sub['side'].astype(str).str.lower().isin(['sell', 's', 'short'])
+                sell_amt = float(notional[sell_mask].sum())
+            else:
+                sell_amt = turnover / 2
+        else:
+            raise ValueError(
+                f"cost_breakdown bucket={bucket}: trades 缺少成本计算所需列。"
+                f" 需要满足以下任一组合："
+                f" (a) commission + stamp_duty；"
+                f" (b) turnover [+ sell_amount]；"
+                f" (c) price + size [+ side]。"
+                f" 实际列：{list(sub.columns)}"
+            )
+        commission = comm_rate * turnover
+        stamp = stamp_rate * sell_amt
     gross = float(sub['gross_pnl'].fillna(0).sum()) if 'gross_pnl' in sub.columns else np.nan
     total_cost = (commission if pd.notna(commission) else 0.0) + (stamp if pd.notna(stamp) else 0.0)
     net = gross - total_cost if pd.notna(gross) else np.nan

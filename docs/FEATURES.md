@@ -23,11 +23,14 @@ my_strategy/
 │   ├── calc_indicators.py              # MA/MACD/KDJ + 多周期合并 + 因子合成
 │   └── strategy.py                     # MyStrategy + StockData feed + 佣金模型
 ├── tools/
-│   ├── attribution.py                  # 多角度归因报告
+│   ├── attribution.py                  # 多角度归因报告（旧）
 │   ├── verify_trades.py                # 逐 episode 信号合规校验
 │   ├── stats_helpers.py                # 统计工具（置信区间、t 检验、分桶统计）
 │   ├── rebuild_position_history.py     # 重建逐日持仓 PnL + 组合快照
-│   └── trade_attribution_extra.py      # 扩展归因报告（payoff_metrics 等）
+│   ├── trade_attribution_extra.py      # 扩展归因报告（5 张：payoff/signal_stability/...）
+│   ├── portfolio_attribution.py        # 组合层归因（5 张：sharpe/sortino/drawdown_periods/...）
+│   ├── position_curve_attribution.py   # 持仓曲线归因（4 张：holding_curve/mfe_timing/...）
+│   └── attribution_runner.py           # Phase A 顶层编排（统一驱动 14 张报告 + 2 个中间文件）
 ├── data/                               # 下载产物
 │   ├── daily/                          # 日线
 │   ├── weekly/, monthly/               # 周线、月线

@@ -152,6 +152,11 @@ def compute_concurrent_positions_stats(
 ) -> pd.DataFrame:
     """输入可以是 list[int]（每根 Bar 的并发持仓数，per Task 0 投研）、
     list[(date, count)] 或 DataFrame[date, count]。"""
+    if position_count_log is None:
+        raise ValueError(
+            "position_count_log is None — strategy must populate "
+            "self.position_count_log on each bar (see strategy.py)."
+        )
     if isinstance(position_count_log, list):
         if not position_count_log:
             df = pd.DataFrame({'date': [], 'count': []})

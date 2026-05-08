@@ -30,7 +30,17 @@ def fake_project(tmp_path):
         'entry_sector_dif_above_zero': [True, True, False, True, False, False],
     })
     trades.to_csv(root / "results" / "trade_summary.csv", index=False)
-    trades.to_csv(root / "results" / "trade_list.csv", index=False)
+    # trade_list.csv 模拟生产 schema：包含 price/size/side，cost_breakdown 走模式 C 反推
+    trade_list = pd.DataFrame({
+        'date': trades['entry_date'].tolist() + trades['exit_date'].tolist(),
+        'ts_code': trades['ts_code'].tolist() * 2,
+        'side': ['buy'] * 6 + ['sell'] * 6,
+        'size': [100] * 12,
+        'price': trades['avg_cost'].tolist() + (trades['avg_cost'] * (1 + trades['return_pct'] / 100)).tolist(),
+        'reason': ['init'] * 6 + ['MA25清仓'] * 6,
+        'episode': list(range(1, 7)) * 2,
+    })
+    trade_list.to_csv(root / "results" / "trade_list.csv", index=False)
 
     # 每个 ts_code 的日线（路径修正：data/daily/{ts_code}.csv）
     for code in ['000001.SZ', '000002.SZ']:
