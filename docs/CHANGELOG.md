@@ -15,7 +15,26 @@
 
 ---
 
-## 2026-05-08 — Phase A Task 16：attribution_runner 顶层编排（Phase A 完成）
+## 2026-05-08 — Phase A 统计分析框架（13 项 / 14 张报告，全量上线）
+
+- 需求：进入 Phase B 自动调参前补齐统计盲区（风险调整收益、显著性、组合层、时间稳定性、持仓期曲线等）。
+- 改动：
+  - 新增 6 模块：`my_strategy/tools/{stats_helpers, rebuild_position_history, trade_attribution_extra, portfolio_attribution, position_curve_attribution, attribution_runner}.py`。
+  - 新增 14 张报告 CSV（`my_strategy/reports/`）+ 2 个中间数据文件（`my_strategy/results/{daily_position_pnl, daily_portfolio_snapshot}.csv`）。
+  - `my_strategy/backtest.py`：`main()` 末尾入口由 `attribution.run` 改为 `attribution_runner.run`，新增 benchmark 日数据加载（按 `cfg.benchmark_codes` 从 `data/daily/{code}.csv` 读 close 算 pct_change）；同时把 `time_return = pd.Series(r.analyzers._TimeReturn.get_analysis())` 上移到归因调用之前；顶部注入 `sys.path` 让 `attribution_runner` 内部 `from my_strategy.tools import ...` 在 `cd my_strategy && python backtest.py` 上下文也能解析。
+  - `my_strategy/tools/trade_attribution_extra.py`：修复 `_enumerate_signal_values` 在 pandas 3.x 下漏判字符串 dtype 的 bug（字符串列原本错误地落到 qcut 分支抛 `TypeError`）；新增 `pd.api.types.is_string_dtype` 与 `is_numeric_dtype` 守卫。
+- 影响：
+  - 现有 28 张归因报告 schema 不变；`my_strategy/tools/attribution.py` 不变。
+  - 端到端 `python backtest.py` 跑通：14 张新报告 + 2 个中间文件全部产出；3 个抽样指标合理（Sharpe 0.32、max_dd -10.99%、payoff_ratio 2.15）。
+  - 全套 pytest：148 passed, 1 skipped，无回归。
+
+## 2026-05-08 — Phase A Task 13：position_curve_attribution 追加 mfe_timing（补登）
+
+- 需求：Phase A Task 13，在 `position_curve_attribution.py` 追加 `compute_mfe_timing`（按 MFE 出现位置分早/中/晚期三档）。
+- 改动：`my_strategy/tools/position_curve_attribution.py` 追加 `compute_mfe_timing`；`my_strategy/tests/test_position_curve_attribution.py` 追加测试。
+- 备注：原 Task 13 实施 commit (`06d1d81`) 因 cwd 误判遗漏 docs 更新，本次在 Phase A 收尾文档中补登。
+
+## 2026-05-08 — Phase A Task 16：attribution_runner 顶层编排
 
 - 需求：Phase A 统计分析框架 Task 16，新建 `attribution_runner.py` 顶层编排模块，依次调用 rebuild_position_history → old_attribution → trade_attribution_extra → portfolio_attribution → position_curve_attribution，统一产出全部 14 张新报告 + 2 个中间文件。
 - 改动：

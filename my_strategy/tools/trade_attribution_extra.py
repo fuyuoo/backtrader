@@ -70,9 +70,12 @@ def _enumerate_signal_values(trades: pd.DataFrame, signal: str) -> list:
             (f"{signal}=True", s.astype(str).isin(['True'])),
             (f"{signal}=False", s.astype(str).isin(['False'])),
         ]
-    if s.dtype == 'object':
+    # 字符串/object 列：按唯一值枚举（pandas 3.x 下字符串 dtype 为 'string' 而非 'object'）
+    if s.dtype == 'object' or pd.api.types.is_string_dtype(s):
         return [(f"{signal}={v}", s == v) for v in sorted(s.dropna().unique().astype(str))]
     # 数值列 → 5 分位
+    if not pd.api.types.is_numeric_dtype(s):
+        return []
     qs = pd.qcut(s, q=5, labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'], duplicates='drop')
     return [(f"{signal}={lbl}", qs == lbl) for lbl in qs.dropna().unique()]
 

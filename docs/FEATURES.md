@@ -379,7 +379,23 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 - `DEFAULT_SIGNALS_WHITELIST`：14 个信号列名白名单，供 `compute_signal_stability` / `compute_signal_correlation_matrix` 使用
 - `DEFAULT_COMBOS`：3 个三元组，供 `compute_multi_factor_combo_stats` 使用
 
-Phase A 统计分析框架全部 16 个 Task 至此完成。
+### backtest.py 接入点（Task 17）
+
+`main()` 最末尾调用 `attribution_runner.run`，传入：
+- `daily_ret = pd.Series(r.analyzers._TimeReturn.get_analysis())`（来自 cerebro 的 `_TimeReturn` 分析器）
+- `position_count_log = getattr(r, 'position_count_log', None)`（策略累计的 `list[int]`）
+- `benchmarks = {code: pct_change(close)}`（从 `data/daily/{code}.csv` 读 close 求日收益，按 `cfg.benchmark_codes` 列出的全部基准代码）
+
+文件顶部注入 `sys.path.insert(0, project_root)` 以保证 `attribution_runner` 内部 `from my_strategy.tools import ...` 在 `cd my_strategy && python backtest.py` 上下文也能解析。
+
+### 端到端验证（2026-05-08）
+
+`python backtest.py` 跑通：
+- 14 张报告 + 2 个中间文件全部产出
+- 关键指标合理：Sharpe 0.32 / max_drawdown -10.99% / payoff_ratio 2.15
+- 全套 pytest：148 passed, 1 skipped，无回归
+
+Phase A 统计分析框架全部 18 个 Task（Task 0 调研 + 17 实施）至此完成。
 
 ## 11. 配置文件（config.json）核心字段
 

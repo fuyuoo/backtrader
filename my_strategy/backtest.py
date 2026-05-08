@@ -1,9 +1,16 @@
 import json
+import sys
 import datetime
 import statistics
+from pathlib import Path
+
+# 确保项目根在 sys.path，attribution_runner 内部 `from my_strategy.tools import ...` 才能解析
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 import pandas as pd
 import backtrader as bt
-from pathlib import Path
 from src.strategy import StockData, StockCommission, MyStrategy
 from src.calc_indicators import compute_all_indicators
 
@@ -972,10 +979,35 @@ def main():
     print_results(result, cfg)
 
     # 自动触发归因分析（依赖 trade_summary.csv 和 signals_log.csv）
-    from tools import attribution
+    from tools import attribution_runner
     project_root = Path(__file__).resolve().parent
+
+    r = result[0]
+    time_return = pd.Series(r.analyzers._TimeReturn.get_analysis())
+
+    # 加载 benchmark daily returns（来自 data/daily/{code}.csv）
+    benchmarks = {}
+    benchmark_codes = cfg.get('benchmark_codes') or []
+    if not benchmark_codes and cfg.get('benchmark_code'):
+        benchmark_codes = [cfg['benchmark_code']]
+    for code in benchmark_codes:
+        bench_path = project_root / 'data' / 'daily' / f"{code}.csv"
+        if not bench_path.exists():
+            raise FileNotFoundError(
+                f"benchmark daily file missing: {bench_path}. "
+                f"Either remove {code} from cfg.benchmark_codes or download the data first."
+            )
+        df = pd.read_csv(bench_path, parse_dates=['trade_date']).set_index('trade_date').sort_index()
+        benchmarks[code] = df['close'].pct_change().dropna()
+
     print("\n开始归因分析...")
-    attribution.run(project_root, cfg)
+    attribution_runner.run(
+        project_root=project_root,
+        cfg=cfg,
+        daily_ret=time_return,
+        position_count_log=getattr(r, 'position_count_log', None),
+        benchmarks=benchmarks,
+    )
 
 
 if __name__ == '__main__':
