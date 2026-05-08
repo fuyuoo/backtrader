@@ -174,7 +174,7 @@ def run(project_root: Path, cfg: dict) -> None:
 
     trade_list_path = results_dir / 'trade_list.csv'
     if trade_list_path.exists():
-        trade_list = pd.read_csv(trade_list_path, parse_dates=['entry_date'], errors='ignore') \
+        trade_list = pd.read_csv(trade_list_path, parse_dates=['entry_date']) \
                      if 'entry_date' in pd.read_csv(trade_list_path, nrows=0).columns \
                      else pd.read_csv(trade_list_path)
     else:

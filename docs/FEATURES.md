@@ -356,6 +356,31 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 - 模式 B（仅有 `turnover` / `sell_amount`）：按 `commission_rate × turnover + stamp_duty × sell_amount` 反推；
 - 两种列均缺失时 cost 列返回 NaN（不抛异常）。
 
+## 13. 顶层编排（tools/attribution_runner.py）
+
+**职责**：Phase A 统计分析框架顶层编排，依次调用所有子模块并产出全部 14 张新报告 + 2 个中间文件。
+
+### 公开函数
+
+| 函数 | 输入 | 行为 |
+|------|------|------|
+| `run(project_root, cfg, daily_ret, position_count_log, benchmarks)` | 路径 + 配置字典 + 日收益序列 + 持仓数日志 + 基准字典 | 依次调用 5 个子模块，写出全部报告 |
+
+### 执行顺序
+
+1. `rebuild_position_history.build()` — 重建 `daily_position_pnl.csv` / `daily_portfolio_snapshot.csv`
+2. `old_attribution.run()` — 旧归因报告（27 张，保持原行为）
+3. `trade_attribution_extra.run()` — trade-level 扩展（5 张）
+4. `portfolio_attribution.run()` — 组合层风险指标（5 张）
+5. `position_curve_attribution.run()` — 持仓曲线归因（4 张）
+
+### 内置常量
+
+- `DEFAULT_SIGNALS_WHITELIST`：14 个信号列名白名单，供 `compute_signal_stability` / `compute_signal_correlation_matrix` 使用
+- `DEFAULT_COMBOS`：3 个三元组，供 `compute_multi_factor_combo_stats` 使用
+
+Phase A 统计分析框架全部 16 个 Task 至此完成。
+
 ## 11. 配置文件（config.json）核心字段
 
 | 字段 | 说明 |

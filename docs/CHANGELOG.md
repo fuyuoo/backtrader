@@ -15,6 +15,16 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 16：attribution_runner 顶层编排（Phase A 完成）
+
+- 需求：Phase A 统计分析框架 Task 16，新建 `attribution_runner.py` 顶层编排模块，依次调用 rebuild_position_history → old_attribution → trade_attribution_extra → portfolio_attribution → position_curve_attribution，统一产出全部 14 张新报告 + 2 个中间文件。
+- 改动：
+  - `my_strategy/tools/attribution_runner.py`：新建，公开 `run()` 入口，含 `DEFAULT_SIGNALS_WHITELIST`（14 列）和 `DEFAULT_COMBOS`（3 个三元组）。
+  - `my_strategy/tests/test_attribution_runner.py`：新建集成测试，修正 fixture 日线路径为 `data/daily/{code}.csv`（Deviation 1），mock `old_attribution.run`（Deviation 3b）。
+  - `my_strategy/tools/position_curve_attribution.py`：修复 `run()` 中 `pd.read_csv(..., errors='ignore')` 调用（该参数在新版 pandas 中已删除，导致 TypeError）。
+  - `docs/FEATURES.md`：新增第 13 节，记录顶层编排模块。
+- 影响：Phase A 全部 16 个 Task 完成；全套 148 passed 1 skipped。
+
 ## 2026-05-08 — Phase A Task 15：position_curve_attribution 追加 compute_cost_breakdown + run() 模块入口（模块完成）
 
 - 需求：Phase A 统计分析框架 Task 15，在 `position_curve_attribution.py` 追加 `_cost_block`、`compute_cost_breakdown`（支持模式 A 直接读取 commission/stamp_duty 列，或模式 B 由 turnover/sell_amount 反推）和 `run()` 模块入口（统一写出 4 张报告：holding_period_curve / mfe_timing / sector_concentration_stats / cost_breakdown）。
