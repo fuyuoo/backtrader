@@ -15,6 +15,15 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 2：rebuild_position_history 模块（逐日持仓 PnL + 组合快照）
+
+- 需求：Phase A 统计分析框架 Task 2，事后重建 `daily_position_pnl.csv` 与 `daily_portfolio_snapshot.csv`，不修改 backtest.py。
+- 改动：
+  - `my_strategy/tools/rebuild_position_history.py`（新建）：`build_daily_position_pnl` / `build_daily_portfolio_snapshot` / `build` 三个公开函数；`build()` 内处理磁盘 `trade_date` → `date` 列名转换，daily 路径修正为 `data/daily/{ts_code}.csv`。
+  - `my_strategy/tests/test_rebuild_position_history.py`（新建）：3 个单元测试覆盖逐日展开、组合聚合、缺失数据报错。
+  - `docs/FEATURES.md`：新增第 7 节"逐日持仓重建"，目录结构补充两个新模块，章节编号更新。
+- 影响：无，未改动任何已有文件。
+
 ## 2026-05-08 — 行业多空环境快照与归因（第二阶段）完成
 
 - 需求：在入场时刻快照行业指数的多空状态（多头排列、站上MA25、DIF水上水下、周/月线MACD zone、60日动量），并生成 8 张新归因报告分析行业环境对交易胜率/收益的影响。

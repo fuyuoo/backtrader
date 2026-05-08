@@ -24,7 +24,9 @@ my_strategy/
 │   └── strategy.py                     # MyStrategy + StockData feed + 佣金模型
 ├── tools/
 │   ├── attribution.py                  # 多角度归因报告
-│   └── verify_trades.py                # 逐 episode 信号合规校验
+│   ├── verify_trades.py                # 逐 episode 信号合规校验
+│   ├── stats_helpers.py                # 统计工具（置信区间、t 检验、分桶统计）
+│   └── rebuild_position_history.py     # 重建逐日持仓 PnL + 组合快照
 ├── data/                               # 下载产物
 │   ├── daily/                          # 日线
 │   ├── weekly/, monthly/               # 周线、月线
@@ -185,7 +187,21 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 
 输出目录由 `config.attribution_report_dir` 控制。
 
-## 7. 交易验证（tools/verify_trades.py）
+## 7. 逐日持仓重建（tools/rebuild_position_history.py）
+
+**职责**：不修改 `backtest.py`，从 `trade_summary.csv` + `data/daily/` + `stock_sector.csv` 事后重建两张宽表。
+
+### 公开函数
+
+| 函数 | 输入 | 输出 |
+|------|------|------|
+| `build_daily_position_pnl(trades, dailies, sector_map)` | DataFrame × dict × DataFrame | `(trade_id, date)` 长表，含 `cum_return_pct` / `drawdown_from_peak_pct` / `sector_code` |
+| `build_daily_portfolio_snapshot(daily_position_pnl)` | 上表 | 按 date 聚合的组合层指标：`n_positions` / `sectors_held` / `top_sector_code` / `top_sector_share` / `herfindahl_index` |
+| `build(project_root, cfg)` | 路径 + 配置字典 | 从磁盘读取并写 `results/daily_position_pnl.csv` / `results/daily_portfolio_snapshot.csv` |
+
+**注**：磁盘 daily CSV 使用 `trade_date` 列名，`build()` 内部读取后重命名为 `date` 再传入纯函数，不影响单元测试签名。
+
+## 9. 交易验证（tools/verify_trades.py）
 
 **职责**：独立工具，不依赖回测产物以外的状态，逐 episode 校验：
 
@@ -195,7 +211,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
   必须满足上文 5.1 的 5 条入场条件；卖出端同理校验。
 - **当前状态**：196 个 episode 全部通过买入/卖出双向合规校验。
 
-## 8. 配置文件（config.json）核心字段
+## 10. 配置文件（config.json）核心字段
 
 | 字段 | 说明 |
 |---|---|
@@ -215,7 +231,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 | `signals_log_path` | 入场信号日志输出路径 |
 | `attribution_report_dir` | 归因报告输出目录 |
 
-## 9. 运行命令速查
+## 11. 运行命令速查
 
 ```bash
 # 1. 一键拉取股票池 + 全部数据 + 计算指标
