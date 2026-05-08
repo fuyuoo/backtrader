@@ -15,6 +15,16 @@
 
 ---
 
+## 2026-05-08 — Phase A Task 10：portfolio_attribution 追加 concurrent_positions_stats
+
+- 需求：Phase A 统计分析框架 Task 10，在 `portfolio_attribution.py` 追加 `compute_concurrent_positions_stats`，统计逐日并发持仓数的 summary 指标（max/avg/median/p95/pct_at_cap/pct_below_50）和分桶分布（6 个 position_count_bucket）。
+- 改动：
+  - `my_strategy/tools/portfolio_attribution.py`：文件末尾追加 `compute_concurrent_positions_stats`；支持 `list[int]`（生产格式）/ `list[(date,count)]` / `DataFrame[date,count]` 三种输入形式。
+  - `my_strategy/tests/test_portfolio_attribution.py`：import 行扩充新函数；追加 `test_compute_concurrent_positions_stats_summary_and_buckets`（验证 summary/bucket 两种 metric_type 均存在、max==200、pct_at_cap==0.2）和 `test_compute_concurrent_positions_stats_accepts_list_of_ints`（验证生产输入格式）。
+  - `docs/FEATURES.md`：第 10 节补充 Task 10 追加函数说明，含输入格式偏差说明。
+- 偏差说明：Task 0 投研确认 `r.position_count_log` 为 `list[int]`（非计划所述 `list[(date,count)]`）；实现增加 `list[int]` 分支，测试新增一个专门验证此路径的用例。
+- 影响：无破坏性变更；全套测试 141 passed 1 skipped。
+
 ## 2026-05-08 — Phase A Task 9：portfolio_attribution 追加 losing_streak_stats + drawdown_periods
 
 - 需求：Phase A 统计分析框架 Task 9，在 `portfolio_attribution.py` 追加 `compute_losing_streak_stats`（连败/连胜统计）和 `compute_drawdown_periods`（Top-N 回撤区间）两个函数。

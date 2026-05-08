@@ -4,6 +4,7 @@ from my_strategy.tools.portfolio_attribution import (
     compute_portfolio_risk_metrics,
     compute_losing_streak_stats,
     compute_drawdown_periods,
+    compute_concurrent_positions_stats,
 )
 
 
@@ -49,3 +50,27 @@ def test_compute_drawdown_periods_returns_top_n_with_durations():
     }
     assert len(out) <= 3
     assert all(out['drawdown_pct'] < 0)
+
+
+def test_compute_concurrent_positions_stats_summary_and_buckets():
+    log = pd.DataFrame({
+        'date': pd.date_range('2024-01-01', periods=10),
+        'count': [50, 60, 100, 100, 150, 180, 200, 200, 90, 50],
+    })
+    out = compute_concurrent_positions_stats(log, max_positions=200)
+    assert (out['metric_type'] == 'summary').any()
+    assert (out['metric_type'] == 'position_count_bucket').any()
+    max_row = out[(out['metric_type'] == 'summary') & (out['bucket'] == 'max')].iloc[0]
+    assert max_row['value'] == 200
+    pct_at_cap = out[
+        (out['metric_type'] == 'summary') & (out['bucket'] == 'pct_at_cap')
+    ].iloc[0]
+    # 200 出现 2 次 / 10 天 = 0.2
+    assert abs(pct_at_cap['value'] - 0.2) < 1e-6
+
+
+def test_compute_concurrent_positions_stats_accepts_list_of_ints():
+    log = [50, 60, 100, 100, 150, 180, 200, 200, 90, 50]
+    out = compute_concurrent_positions_stats(log, max_positions=200)
+    max_row = out[(out['metric_type'] == 'summary') & (out['bucket'] == 'max')].iloc[0]
+    assert max_row['value'] == 200

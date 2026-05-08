@@ -144,3 +144,48 @@ def compute_drawdown_periods(daily_ret: pd.Series, top_n: int = 10) -> pd.DataFr
     df = df.sort_values('drawdown_pct').head(top_n).reset_index(drop=True)
     df.insert(0, 'rank', range(1, len(df) + 1))
     return df
+
+
+def compute_concurrent_positions_stats(
+    position_count_log,
+    max_positions: int,
+) -> pd.DataFrame:
+    """输入可以是 list[int]（每根 Bar 的并发持仓数，per Task 0 投研）、
+    list[(date, count)] 或 DataFrame[date, count]。"""
+    if isinstance(position_count_log, list):
+        if not position_count_log:
+            df = pd.DataFrame({'date': [], 'count': []})
+        elif isinstance(position_count_log[0], (int, float, np.integer, np.floating)):
+            # list[int] — per Task 0, the real production schema
+            df = pd.DataFrame({
+                'date': pd.RangeIndex(len(position_count_log)),
+                'count': position_count_log,
+            })
+        else:
+            df = pd.DataFrame(position_count_log, columns=['date', 'count'])
+    else:
+        df = pd.DataFrame(position_count_log).copy()
+        if 'count' not in df.columns:
+            df = df.rename(columns={df.columns[1]: 'count'})
+    counts = df['count'].astype(int)
+    n = len(counts)
+    rows = [
+        {'metric_type': 'summary', 'bucket': 'max', 'value': float(counts.max()), 'days_at_level': np.nan, 'pct_of_time': np.nan},
+        {'metric_type': 'summary', 'bucket': 'avg', 'value': round(float(counts.mean()), 2), 'days_at_level': np.nan, 'pct_of_time': np.nan},
+        {'metric_type': 'summary', 'bucket': 'median', 'value': float(counts.median()), 'days_at_level': np.nan, 'pct_of_time': np.nan},
+        {'metric_type': 'summary', 'bucket': 'p95', 'value': float(counts.quantile(0.95)), 'days_at_level': np.nan, 'pct_of_time': np.nan},
+        {'metric_type': 'summary', 'bucket': 'pct_at_cap', 'value': round(float((counts == max_positions).mean()), 4), 'days_at_level': np.nan, 'pct_of_time': np.nan},
+        {'metric_type': 'summary', 'bucket': 'pct_below_50', 'value': round(float((counts < 50).mean()), 4), 'days_at_level': np.nan, 'pct_of_time': np.nan},
+    ]
+    edges = [(0, 0), (1, 25), (26, 50), (51, 100), (101, 150), (151, 200)]
+    for lo, hi in edges:
+        mask = (counts >= lo) & (counts <= hi)
+        days = int(mask.sum())
+        rows.append({
+            'metric_type': 'position_count_bucket',
+            'bucket': f"{lo}-{hi}" if lo != hi else str(lo),
+            'value': np.nan,
+            'days_at_level': days,
+            'pct_of_time': round(days / n, 4) if n > 0 else 0.0,
+        })
+    return pd.DataFrame(rows)

@@ -274,6 +274,18 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 | `compute_losing_streak_stats(trades)` | trade_summary DataFrame（需含 `return_pct` / `entry_date`） | 4 行 long format（metric / value）：longest_losing_streak / longest_winning_streak / avg_losing_streak_length / pct_losing_streaks_ge_5 |
 | `compute_drawdown_periods(daily_ret, top_n)` | `pd.Series`（日收益，DatetimeIndex）+ `top_n`（默认 10） | 最深 top_n 个回撤区间 DataFrame，列含 rank / start_date / trough_date / recovery_date / peak_value / trough_value / drawdown_pct / duration_days / recovery_days |
 
+### Task 10 追加函数
+
+| 函数 | 输入 | 输出 |
+|------|------|------|
+| `compute_concurrent_positions_stats(position_count_log, max_positions)` | `list[int]`（每根 Bar 的并发持仓数，生产格式）/ `list[(date, count)]` / `DataFrame[date, count]` + `max_positions`（满仓上限） | long format DataFrame，列含 metric_type / bucket / value / days_at_level / pct_of_time |
+
+**输出结构**：
+- `metric_type == 'summary'`（6 行）：max / avg / median / p95 / pct_at_cap / pct_below_50
+- `metric_type == 'position_count_bucket'`（6 行）：`0` / `1-25` / `26-50` / `51-100` / `101-150` / `151-200`，各桶 days_at_level 和 pct_of_time
+
+**输入格式偏差说明**：Task 0 投研确认生产格式为 `list[int]`（per bar 持仓数，无日期配对），与计划文档描述不同；实现增加了 `list[int]` 分支，原有 DataFrame 和 `list[(date,count)]` 分支保留向前兼容。
+
 ## 11. 配置文件（config.json）核心字段
 
 | 字段 | 说明 |
