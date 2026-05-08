@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy import stats as sp_stats
 
 from my_strategy.tools.stats_helpers import t_test_one_sample, t_test_welch, bucket_stats_with_significance
 
@@ -240,6 +241,110 @@ def compute_significance_summary(trades: pd.DataFrame) -> pd.DataFrame:
     ]]
 
 
+def _compute_ic_monthly(
+    series: pd.Series, forward: pd.Series, entry_dates: pd.Series,
+) -> tuple:
+    """按 entry_date 月份分桶，每月算一次 spearman；返回 (mean, std)。"""
+    df = pd.DataFrame({'s': series, 'f': forward, 'm': entry_dates.dt.to_period('M')})
+    df = df.dropna(subset=['s', 'f'])
+    if df.empty:
+        return (np.nan, np.nan)
+    monthly_ic = []
+    for _, g in df.groupby('m'):
+        if len(g) < 5:
+            continue
+        rho, _ = sp_stats.spearmanr(g['s'], g['f'])
+        if pd.notna(rho):
+            monthly_ic.append(rho)
+    if len(monthly_ic) < 2:
+        return (np.nan, np.nan)
+    return (float(np.mean(monthly_ic)), float(np.std(monthly_ic, ddof=1)))
+
+
+def _classify_signal_type(s: pd.Series) -> str:
+    if s.dtype == bool or set(s.dropna().astype(str).unique()) <= {'True', 'False'}:
+        return 'bool'
+    if pd.api.types.is_numeric_dtype(s):
+        return 'numeric'
+    return 'categorical'
+
+
+def compute_signal_importance_ranking(
+    trades: pd.DataFrame, signals: list,
+) -> pd.DataFrame:
+    """对每个 signal 综合算 effect_size / t / p / IC / IC_IR / 排名。
+
+    要求 trades 含 return_pct + forward_return_5d/20d/60d + entry_date。
+    """
+    if 'entry_date' in trades.columns:
+        trades = trades.copy()
+        trades['entry_date'] = pd.to_datetime(trades['entry_date'])
+
+    rows = []
+    for sig in signals:
+        if sig not in trades.columns:
+            continue
+        sig_type = _classify_signal_type(trades[sig])
+        n = trades[sig].notna().sum()
+
+        if sig_type == 'bool':
+            mask = trades[sig].astype(str).map({'True': True, 'False': False}).fillna(False)
+            r_true = trades.loc[mask, 'return_pct'].dropna()
+            r_false = trades.loc[~mask, 'return_pct'].dropna()
+        elif sig_type == 'numeric':
+            median = trades[sig].median()
+            mask = trades[sig] > median
+            r_true = trades.loc[mask, 'return_pct'].dropna()
+            r_false = trades.loc[~mask, 'return_pct'].dropna()
+        else:
+            r_true = pd.Series([], dtype=float)
+            r_false = pd.Series([], dtype=float)
+
+        mean_true = r_true.mean() if len(r_true) > 0 else np.nan
+        mean_false = r_false.mean() if len(r_false) > 0 else np.nan
+        effect = mean_true - mean_false if pd.notna(mean_true) and pd.notna(mean_false) else np.nan
+        if len(r_true) >= 2 and len(r_false) >= 2:
+            t_stat, p_val = sp_stats.ttest_ind(r_true, r_false, equal_var=False)
+        else:
+            t_stat, p_val = (np.nan, np.nan)
+
+        if 'entry_date' in trades.columns and sig_type in ('bool', 'numeric'):
+            sig_numeric = (trades[sig].astype(str).map({'True': 1, 'False': 0}).astype(float)
+                            if sig_type == 'bool' else trades[sig].astype(float))
+            ic_5_mean, ic_5_std = _compute_ic_monthly(
+                sig_numeric, trades.get('forward_return_5d', pd.Series()),
+                trades['entry_date'])
+            ic_20_mean, _ = _compute_ic_monthly(
+                sig_numeric, trades.get('forward_return_20d', pd.Series()),
+                trades['entry_date'])
+            ic_60_mean, ic_60_std = _compute_ic_monthly(
+                sig_numeric, trades.get('forward_return_60d', pd.Series()),
+                trades['entry_date'])
+            ic_ir_60 = ic_60_mean / ic_60_std if (pd.notna(ic_60_std) and ic_60_std > 0) else np.nan
+        else:
+            ic_5_mean = ic_20_mean = ic_60_mean = ic_ir_60 = np.nan
+
+        rows.append({
+            'signal_name': sig, 'signal_type': sig_type, 'n': int(n),
+            'mean_return_when_true': mean_true, 'mean_return_when_false': mean_false,
+            'effect_size': effect, 't_stat': t_stat, 'p_value': p_val,
+            'ic_mean_5d': ic_5_mean, 'ic_mean_20d': ic_20_mean,
+            'ic_mean_60d': ic_60_mean, 'ic_ir_60d': ic_ir_60,
+        })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+
+    df['rank_by_effect_size'] = df['effect_size'].abs().rank(method='dense', ascending=False).astype('Int64')
+    df['rank_by_ic'] = df['ic_mean_60d'].abs().rank(method='dense', ascending=False).astype('Int64')
+    df['rank_combined'] = (
+        (df['effect_size'].abs().rank(method='dense', ascending=False) * 0.5)
+        + (df['ic_mean_60d'].abs().rank(method='dense', ascending=False) * 0.5)
+    ).rank(method='dense').astype('Int64')
+    return df.sort_values('rank_combined').reset_index(drop=True)
+
+
 # 模块入口
 def run(trades: pd.DataFrame, out_dir: Path, signals_whitelist: list, combos: list) -> None:
     out_dir = Path(out_dir)
@@ -248,4 +353,7 @@ def run(trades: pd.DataFrame, out_dir: Path, signals_whitelist: list, combos: li
     compute_signal_stability(trades, signals_whitelist).to_csv(out_dir / 'signal_stability.csv', index=False)
     compute_signal_correlation_matrix(trades, signals_whitelist).to_csv(out_dir / 'signal_correlation_matrix.csv', index=False)
     compute_multi_factor_combo_stats(trades, combos).to_csv(out_dir / 'multi_factor_combo_stats.csv', index=False)
+    compute_significance_summary(trades).to_csv(out_dir / 'significance_summary.csv', index=False)
+    compute_signal_importance_ranking(trades, signals_whitelist).to_csv(
+        out_dir / 'signal_importance_ranking.csv', index=False)
     compute_significance_summary(trades).to_csv(out_dir / 'significance_summary.csv', index=False)

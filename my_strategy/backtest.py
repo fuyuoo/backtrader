@@ -554,6 +554,40 @@ def _add_trade_summary_metrics(
     return out
 
 
+def _add_forward_returns(
+    summary: pd.DataFrame,
+    daily_lookup: dict,  # ts_code -> DataFrame[trade_date, close]
+    windows: tuple = (5, 20, 60),
+) -> pd.DataFrame:
+    """给每笔交易加 forward_return_<N>d 列（百分比）：
+    入场后 N 个交易日的累计收益 = (close[entry+N] - close[entry]) / close[entry] * 100
+    数据不足或 ts_code 缺失则 NaN。
+    """
+    out = summary.copy()
+    for w in windows:
+        out[f'forward_return_{w}d'] = pd.NA
+
+    for idx, r in out.iterrows():
+        ts = r['ts_code']
+        ed = pd.to_datetime(r['entry_date'], errors='coerce')
+        if pd.isna(ed) or ts not in daily_lookup:
+            continue
+        d = daily_lookup[ts].copy()
+        d['trade_date'] = pd.to_datetime(d['trade_date'])
+        d = d.sort_values('trade_date').reset_index(drop=True)
+        mask_entry = d['trade_date'] >= ed
+        if not mask_entry.any():
+            continue
+        entry_pos = mask_entry.idxmax()
+        entry_close = d.iloc[entry_pos]['close']
+        for w in windows:
+            forward_pos = entry_pos + w
+            if forward_pos < len(d):
+                fc = d.iloc[forward_pos]['close']
+                out.at[idx, f'forward_return_{w}d'] = (fc - entry_close) / entry_close * 100.0
+    return out
+
+
 def _compute_benchmarks_returns(cfg):
     """从 data_dir 加载多个基准指数 CSV。
 
@@ -947,6 +981,12 @@ def print_results(result, cfg):
         hs300_daily_path = Path(cfg['data_dir']) / 'daily' / '000300.SH.csv'
         hs300_daily = pd.read_csv(hs300_daily_path) if hs300_daily_path.exists() else None
         summary_df = _add_trade_summary_metrics(summary_df, hs300_daily=hs300_daily)
+        daily_lookup = {}
+        for ts in summary_df['ts_code'].unique():
+            p = Path(cfg['data_dir']) / 'daily' / f"{ts}.csv"
+            if p.exists():
+                daily_lookup[ts] = pd.read_csv(p)
+        summary_df = _add_forward_returns(summary_df, daily_lookup)
         summary_df.to_csv(results_dir / 'trade_summary.csv', index=False)
         print(f"完整交易汇总已保存到 {results_dir / 'trade_summary.csv'}")
 

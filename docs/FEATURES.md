@@ -27,7 +27,7 @@ my_strategy/
 │   ├── verify_trades.py                # 逐 episode 信号合规校验
 │   ├── stats_helpers.py                # 统计工具（置信区间、t 检验、分桶统计）
 │   ├── rebuild_position_history.py     # 重建逐日持仓 PnL + 组合快照
-│   ├── trade_attribution_extra.py      # 扩展归因报告（5 张：payoff/signal_stability/...）
+│   ├── trade_attribution_extra.py      # 扩展归因报告（6 张：payoff/signal_stability/.../signal_importance_ranking）
 │   ├── portfolio_attribution.py        # 组合层归因（5 张：sharpe/sortino/drawdown_periods/...）
 │   ├── position_curve_attribution.py   # 持仓曲线归因（4 张：holding_curve/mfe_timing/...）
 │   ├── attribution_runner.py           # Phase A 顶层编排（统一驱动 14 张报告 + 2 个中间文件）
@@ -151,7 +151,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 ### 5.4 产物
 
 - `results/trade_list.csv`：逐笔（每次买卖）明细；
-- `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；新增列 `mfe_pct` / `mae_pct`（持仓期相对首买入价的最高浮盈 / 最深浮亏，单位百分点）、`dea_neg_distance_days`（首买时距上次 DEA<0 的 bar 数）；这些字段为只读观测，不参与买卖判定；新增 4 个入场环境布尔快照列 `entry_hs300_dif_above_zero` / `entry_hs300_bull_align` / `entry_stock_bull_align` / `entry_stock_above_ma25`，分别表示进场当日 HS300 MACD DIF 是否水上、HS300 是否完整多头排列（ma25>ma60>ma144>ma180）、个股是否完整多头排列、个股是否站上 MA25；新增 4 个交易质量指标列：`mfe_minus_realized`（mfe_pct - return_pct，衡量潜在盈利未实现部分）、`exit_efficiency`（return_pct / mfe_pct，mfe=0 时为 NaN，衡量出场时机效率）、`benchmark_return_during_holding`（持仓期 HS300 同期累计收益 %，数据来自 `data/daily/000300.SH.csv`）、`per_trade_alpha`（return_pct 减去同期 HS300 收益，即单笔超额）；未平仓行（exit_date 为 NaT）的 4 列均为 NaN；
+- `results/trade_summary.csv`：以 episode（一次完整开仓→平仓）为单位的汇总；新增列 `mfe_pct` / `mae_pct`（持仓期相对首买入价的最高浮盈 / 最深浮亏，单位百分点）、`dea_neg_distance_days`（首买时距上次 DEA<0 的 bar 数）；这些字段为只读观测，不参与买卖判定；新增 4 个入场环境布尔快照列 `entry_hs300_dif_above_zero` / `entry_hs300_bull_align` / `entry_stock_bull_align` / `entry_stock_above_ma25`，分别表示进场当日 HS300 MACD DIF 是否水上、HS300 是否完整多头排列（ma25>ma60>ma144>ma180）、个股是否完整多头排列、个股是否站上 MA25；新增 4 个交易质量指标列：`mfe_minus_realized`（mfe_pct - return_pct，衡量潜在盈利未实现部分）、`exit_efficiency`（return_pct / mfe_pct，mfe=0 时为 NaN，衡量出场时机效率）、`benchmark_return_during_holding`（持仓期 HS300 同期累计收益 %，数据来自 `data/daily/000300.SH.csv`）、`per_trade_alpha`（return_pct 减去同期 HS300 收益，即单笔超额）；未平仓行（exit_date 为 NaT）的 4 列均为 NaN；新增 3 个前瞻收益列：`forward_return_5d` / `forward_return_20d` / `forward_return_60d`（入场后 N 个交易日的累计收益 %，从 `data/daily/<ts_code>.csv` 读取，数据不足或股票缺失则 NaN）；
 - `results/equity_curve.png`：净值曲线；
 - `results/skipped_signals.csv`：被涨跌停过滤的信号明细（列：date / ts_code / skip_reason / close）；仅当有跳过信号时生成；
 - `data/signals_log.csv`：每次入场信号当时的因子快照（供归因使用）；
@@ -211,7 +211,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 
 ## 8. 扩展归因报告（tools/trade_attribution_extra.py）
 
-**职责**：Phase A 统计分析框架扩展模块，从 `trade_summary.csv` 计算多维度 payoff 指标。共 5 张报告，通过 `run()` 模块入口统一写出。
+**职责**：Phase A 统计分析框架扩展模块，从 `trade_summary.csv` 计算多维度 payoff 指标。共 6 张报告，通过 `run()` 模块入口统一写出。
 
 ### 公开函数
 
@@ -222,7 +222,8 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 | `compute_signal_correlation_matrix(trades, signals_whitelist)` | trade_summary DataFrame + 信号列名列表 | `signal_correlation_matrix.csv` |
 | `compute_multi_factor_combo_stats(trades, combos, min_sample)` | trade_summary DataFrame + `[(name_a, name_b, name_c), ...]` 三元组列表 | `multi_factor_combo_stats.csv` |
 | `compute_significance_summary(trades)` | trade_summary DataFrame | `significance_summary.csv` |
-| `run(trades, out_dir, signals_whitelist, combos)` | 上述所有参数 + 输出目录路径 | 写出以上 5 个 CSV |
+| `compute_signal_importance_ranking(trades, signals)` | trade_summary DataFrame + 信号列名列表 | `signal_importance_ranking.csv` |
+| `run(trades, out_dir, signals_whitelist, combos)` | 上述所有参数 + 输出目录路径 | 写出以上 6 个 CSV |
 
 `compute_payoff_metrics` 按 overall / exit_reason / year / sector / regime 五个维度各产一组行，列含 `n` / `win_rate` / `avg_win` / `avg_loss` / `payoff_ratio` / `profit_factor` / `expectancy` / `max_win` / `max_loss`。
 
@@ -233,6 +234,8 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 `compute_multi_factor_combo_stats` 对 `combos` 中每个三元组 (a, b, c)，按 `trades.groupby([a, b, c])` 遍历所有组合格，计算每格的 win_rate / avg_return 及与全样本的 Welch t 检验；`min_sample` 控制 `low_sample_warning` 阈值（默认 100）。
 
 `compute_significance_summary` 对 `_SIGNIFICANCE_TARGETS`（11 类报告：exit_reason / hs300_dif / hs300_bull_align / stock_bull_align / stock_above_ma25 / sector_bull_align / sector_above_ma25 / sector_dif / sector_week_macd / sector_month_macd / yearly）逐类调用 `bucket_stats_with_significance`，输出统一 long format，列含 `report_name` / `bucket_field` / `bucket_value` / `n` / `mean_return` / `std_return` / `std_err` / `ci_low_95` / `ci_high_95` / `t_stat_vs_zero` / `p_value_vs_zero` / `t_stat_vs_overall` / `p_value_vs_overall` / `low_sample_warning` / `significant_flag`；对应列不存在时该目标组自动跳过（返回空行），不做静默降级。
+
+`compute_signal_importance_ranking` 对 `signals` 列表中每个信号综合计算 effect_size（True/False 或上/下半各组平均收益之差）、Welch t 检验、以及月度 Spearman IC（分别对 forward_return_5d/20d/60d），输出含 `signal_name` / `signal_type` / `n` / `mean_return_when_true` / `mean_return_when_false` / `effect_size` / `t_stat` / `p_value` / `ic_mean_5d` / `ic_mean_20d` / `ic_mean_60d` / `ic_ir_60d` / `rank_by_effect_size` / `rank_by_ic` / `rank_combined` 的宽表，按 `rank_combined`（effect_size 排名 × 0.5 + IC 排名 × 0.5）升序排列；信号不在 trades 列中时自动跳过；依赖 trade_summary 中的 `forward_return_5d/20d/60d` 列（Task 6 新增）。
 
 ## 9. 交易验证（tools/verify_trades.py）
 
@@ -377,7 +380,7 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 
 1. `rebuild_position_history.build()` — 重建 `daily_position_pnl.csv` / `daily_portfolio_snapshot.csv`
 2. `old_attribution.run()` — 旧归因报告（27 张，保持原行为）
-3. `trade_attribution_extra.run()` — trade-level 扩展（5 张）
+3. `trade_attribution_extra.run()` — trade-level 扩展（6 张）
 4. `portfolio_attribution.run()` — 组合层风险指标（5 张）
 5. `position_curve_attribution.run()` — 持仓曲线归因（4 张）
 

@@ -13,6 +13,11 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-05-08 — Phase B-prep Task 6: signal_importance_ranking + forward_return_5d/20d/60d
+- 需求：给 trade_summary 增加 forward_return_5d/20d/60d 列；新建 signal_importance_ranking.csv 报告
+- 改动：`my_strategy/backtest.py` 新增 `_add_forward_returns()`，在写入 trade_summary.csv 前调用；`my_strategy/tools/trade_attribution_extra.py` 新增 `compute_signal_importance_ranking()` + `_compute_ic_monthly()` + `_classify_signal_type()` 三个函数，`run()` 追加调用；新增 `my_strategy/tests/test_forward_return_enrichment.py`（3 个测试）和 `my_strategy/tests/test_signal_importance_ranking.py`（4 个测试）
+- 影响：trade_summary.csv 末尾新增 3 列；reports/ 新增 signal_importance_ranking.csv；同时补全了 run() 中缺失的 compute_significance_summary 调用
+
 ---
 
 ## 2026-05-08 — Phase B-prep Task 5: trade_summary 新增 4 个交易质量指标列
