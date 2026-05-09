@@ -1,3 +1,4 @@
+import argparse
 import json
 import sys
 import datetime
@@ -119,6 +120,12 @@ def load_feeds(cfg):
             skip_insufficient.append(ts_code)
             continue
 
+        # 将 zone 字符串编码为整数，便于 backtrader LineBuffer 存储
+        _zone_map = {'区间0': 0, '区间1': 1, '区间2': 2, '区间3': 3}
+        for _col in ('week_macd_zone', 'month_macd_zone'):
+            if _col in df.columns:
+                df[_col] = df[_col].map(_zone_map)
+
         feed = StockData(dataname=df, fromdate=fromdate, todate=todate)
         feeds.append((ts_code, feed))
 
@@ -182,6 +189,11 @@ def setup_cerebro(cfg, feeds, sector_map=None):
         atr_multiplier=cfg.get('atr_multiplier', 1.5),
         take_profit_min_pct=cfg.get('take_profit_min_pct', 0.03),
         take_profit_max_pct=cfg.get('take_profit_max_pct', 0.12),
+        min_ma60_dist_pct=cfg.get('min_ma60_dist_pct', 0.05),
+        max_add_count=cfg.get('max_add_count', 0),
+        require_stock_ma_bull=cfg.get('require_stock_ma_bull', False),
+        require_week_macd_above_zero=cfg.get('require_week_macd_above_zero', False),
+        require_month_macd_above_zero=cfg.get('require_month_macd_above_zero', False),
         sector_map=sector_map,
     )
 
@@ -671,6 +683,11 @@ def run_index_strategy(cfg, index_code):
         atr_multiplier=cfg.get('atr_multiplier', 1.5),
         take_profit_min_pct=cfg.get('take_profit_min_pct', 0.03),
         take_profit_max_pct=cfg.get('take_profit_max_pct', 0.12),
+        min_ma60_dist_pct=cfg.get('min_ma60_dist_pct', 0.05),
+        max_add_count=cfg.get('max_add_count', 0),
+        require_stock_ma_bull=cfg.get('require_stock_ma_bull', False),
+        require_week_macd_above_zero=cfg.get('require_week_macd_above_zero', False),
+        require_month_macd_above_zero=cfg.get('require_month_macd_above_zero', False),
     )
     cerebro.addanalyzer(bt.analyzers.Returns, _name='_Returns', tann=252)
     cerebro.addanalyzer(bt.analyzers.TimeReturn, _name='_TimeReturn')
@@ -1099,7 +1116,24 @@ def _merge_factors(sig_df, indicators_by_code):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--tag', default='', help='回测标签，结果输出到 results/<tag>/ 和 reports/<tag>/')
+    parser.add_argument('--stock-ma-bull', action='store_true', help='要求 MA25 > MA60 才入场')
+    parser.add_argument('--week-macd-above-zero', action='store_true', help='要求周线 MACD 不在区间0')
+    parser.add_argument('--month-macd-above-zero', action='store_true', help='要求月线 MACD 不在区间0')
+    args = parser.parse_args()
+
     cfg = load_config()
+    if args.tag:
+        cfg['results_dir'] = f'results/{args.tag}/'
+        cfg['attribution_report_dir'] = f'reports/{args.tag}'
+    if args.stock_ma_bull:
+        cfg['require_stock_ma_bull'] = True
+    if args.week_macd_above_zero:
+        cfg['require_week_macd_above_zero'] = True
+    if args.month_macd_above_zero:
+        cfg['require_month_macd_above_zero'] = True
+
     feeds = load_feeds(cfg)
     if not feeds:
         print("没有可用的数据文件，请先运行 downloader.py 和 calc_indicators.py")

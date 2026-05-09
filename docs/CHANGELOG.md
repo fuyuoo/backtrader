@@ -13,6 +13,26 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-05-09 — 新增 3 个可选入场过滤开关（个股均线多头 + 周线/月线 MACD 区间）
+
+- 需求：探索个股均线多空、周/月线 MACD 区间对入场质量的影响，需将这些条件参数化以便对比回测。
+- 改动：
+  - `my_strategy/src/strategy.py`：StockData 新增 `ma144 / week_macd_zone / month_macd_zone` 三条 lines；MyStrategy.params 新增 `require_stock_ma_bull / require_week_macd_above_zero / require_month_macd_above_zero`（默认均为 False）；next() 入场区在 min_ma60_dist_pct 过滤之后新增 3 个可选过滤块；
+  - `my_strategy/backtest.py`：load_feeds() 将 `week_macd_zone / month_macd_zone` 字符串编码为整数（区间0→0…区间3→3）；两处 addstrategy 均透传新参数；
+  - `my_strategy/config.json`：新增 `require_stock_ma_bull / require_week_macd_above_zero / require_month_macd_above_zero`，默认 false；
+  - `docs/FEATURES.md`：§5.1 新增"可选过滤"章节，配置参数表新增 3 行。
+- 影响：默认 false，不影响既有回测结果；开启后入场数量会减少，可通过 --tag 对比不同组合。
+
+## 2026-05-09 — 新增入场 MA60 最小距离过滤 + 禁用加仓配置
+
+- 需求：归因发现 57% 交易入场时距 MA60 ≤ 5%，命中率极低；加仓逻辑加重亏损；需过滤假突破并禁止加仓。
+- 改动：
+  - `my_strategy/src/strategy.py`：新增 `min_ma60_dist_pct`（默认 0.05）和 `max_add_count`（默认 0）两个参数；入场条件从 5 条增至 6 条（新增距离≥5% 过滤）；加仓上限由硬编码 2 改为 `self.p.max_add_count`；
+  - `my_strategy/config.json`：写入 `"min_ma60_dist_pct": 0.05`、`"max_add_count": 0`；
+  - `my_strategy/backtest.py`：两处 `addstrategy` 调用均透传新参数（`cfg.get` 带默认值）；
+  - `docs/FEATURES.md`：§5.1 条件数 5→6，§5.3 参数表新增两行。
+- 影响：回测入场信号大幅减少（过滤近 MA60 假突破）；加仓逻辑对 `max_add_count=0` 时完全跳过，无额外买单。
+
 ## 2026-05-09 — 新增三张入场条件观察报告（分布 / 集中度 / 年度交叉）
 
 - 需求：在调参前把统计数据补全，增加 return_pct 分布形态、PnL 集中度、年度×条件交叉三个维度。

@@ -22,11 +22,14 @@ def _scan_dea_neg_distance(d, max_lookback=200):
 
 class StockData(bt.feeds.PandasData):
     """自定义数据 feed，读取预计算好的指标列。"""
-    lines = ('ma25', 'ma60', 'dea')
+    lines = ('ma25', 'ma60', 'dea', 'ma144', 'week_macd_zone', 'month_macd_zone')
     params = (
         ('ma25', -1),
         ('ma60', -1),
         ('dea', -1),
+        ('ma144', -1),
+        ('week_macd_zone', -1),
+        ('month_macd_zone', -1),
     )
 
 
@@ -61,6 +64,11 @@ class MyStrategy(bt.Strategy):
         ('take_profit_max_pct', 0.12),
         ('factor_lookup', None),  # deprecated — retained for backwards compat, ignored
         ('sector_map', None),     # dict: {ts_code: sw_index_code}
+        ('min_ma60_dist_pct', 0.05),           # 入场最小 MA60 距离，低于此值不入场
+        ('max_add_count', 0),                  # 每笔最多加仓次数，0 = 禁止加仓
+        ('require_stock_ma_bull', False),      # True = 要求 MA25 > MA60 才入场
+        ('require_week_macd_above_zero', False),   # True = 要求周线 MACD 不在区间0
+        ('require_month_macd_above_zero', False),  # True = 要求月线 MACD 不在区间0
     )
 
     def __init__(self):
@@ -400,8 +408,8 @@ class MyStrategy(bt.Strategy):
                             self.orders[d] = o
                         continue
 
-                # 加仓（最多2次，满足与买入相同条件，且未出现大阳线）
-                if state['add_count'] < 2 and state['max_bullish_candle_pct'] <= 0.01:
+                # 加仓（满足与买入相同条件，且未出现大阳线）
+                if state['add_count'] < self.p.max_add_count and state['max_bullish_candle_pct'] <= 0.01:
                     prev_close = d.close[-1]
                     dea = d.dea[0]
                     if (
@@ -433,6 +441,23 @@ class MyStrategy(bt.Strategy):
 
                 if close <= ma60:
                     continue
+
+                if (close - ma60) / ma60 < self.p.min_ma60_dist_pct:
+                    continue
+
+                if self.p.require_stock_ma_bull:
+                    if _isnan(ma25) or ma25 <= ma60:
+                        continue
+
+                if self.p.require_week_macd_above_zero:
+                    wz = d.week_macd_zone[0]
+                    if _isnan(wz) or int(wz) == 0:
+                        continue
+
+                if self.p.require_month_macd_above_zero:
+                    mz = d.month_macd_zone[0]
+                    if _isnan(mz) or int(mz) == 0:
+                        continue
 
                 if dea <= 0:
                     continue

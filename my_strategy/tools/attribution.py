@@ -930,7 +930,7 @@ def run(project_root, cfg):
     """根据 cfg 执行全部归因分析并写出报告。供 backtest.py 直接调用。"""
     project_root = Path(project_root)
     sig_path = project_root / cfg['signals_log_path']
-    trade_path = project_root / 'results' / 'trade_summary.csv'
+    trade_path = project_root / cfg.get('results_dir', 'results/') / 'trade_summary.csv'
     out_dir = project_root / cfg['attribution_report_dir']
 
     if not sig_path.exists():
