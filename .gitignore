@@ -79,3 +79,4 @@ datas/*.py
 /my_strategy/stock_list_backup*.csv
 /my_strategy/results
 /my_strategy/reports
+learn_backtrader/
