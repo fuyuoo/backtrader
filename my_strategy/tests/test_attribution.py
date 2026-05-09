@@ -14,6 +14,9 @@ from my_strategy.tools.attribution import (
     compute_dea_lookback_stats,
     compute_monthly_stats,
     compute_sector_stock_combo_stats,
+    compute_return_distribution_by_condition,
+    compute_pnl_concentration,
+    compute_yearly_condition_stats,
 )
 
 
@@ -806,4 +809,119 @@ def test_sector_stock_combo_stats_empty_returns_empty_frame():
     """空 trades 返回空 DataFrame，列名固定。"""
     out = compute_sector_stock_combo_stats(pd.DataFrame())
     assert list(out.columns) == ['combo', 'count', 'win_rate', 'avg_return', 'avg_holding_days']
+    assert len(out) == 0
+
+
+# ---------------------------------------------------------------------------
+# compute_return_distribution_by_condition
+# ---------------------------------------------------------------------------
+
+def _make_trades_with_ma60():
+    """含 entry_ma60_dist_pct + ma_alignment 的最小样本（覆盖数值桶和类别桶）。"""
+    return pd.DataFrame({
+        'entry_ma60_dist_pct': [2.0, 2.5, 7.0, 7.5, 15.0],
+        'ma_alignment': ['全多头', '全多头', '局部多头', '局部多头', '全空头'],
+        'return_pct': [-5.0, 3.0, 8.0, -2.0, 12.0],
+        'holding_days': [10, 20, 30, 15, 25],
+    })
+
+
+def test_return_distribution_by_condition_columns():
+    out = compute_return_distribution_by_condition(_make_trades_with_ma60())
+    assert list(out.columns) == ['condition_field', 'bucket', 'count', 'p10', 'p25', 'p50', 'p75', 'p90']
+
+
+def test_return_distribution_by_condition_percentile_order():
+    out = compute_return_distribution_by_condition(_make_trades_with_ma60())
+    for _, row in out.iterrows():
+        assert row['p10'] <= row['p25'] <= row['p50'] <= row['p75'] <= row['p90'], (
+            f"percentile order violated for {row['condition_field']}={row['bucket']}")
+
+
+def test_return_distribution_by_condition_empty_returns_empty():
+    out = compute_return_distribution_by_condition(pd.DataFrame())
+    assert list(out.columns) == ['condition_field', 'bucket', 'count', 'p10', 'p25', 'p50', 'p75', 'p90']
+    assert len(out) == 0
+
+
+# ---------------------------------------------------------------------------
+# compute_pnl_concentration
+# ---------------------------------------------------------------------------
+
+def _make_trades_pnl():
+    return pd.DataFrame({
+        'ts_code': ['A.SZ', 'B.SZ', 'C.SZ', 'D.SZ', 'E.SZ',
+                    'F.SZ', 'G.SZ', 'H.SZ', 'I.SZ', 'J.SZ'],
+        'gross_pnl': [50000.0, 30000.0, 20000.0, 10000.0, 5000.0,
+                      -1000.0, -2000.0, -3000.0, -4000.0, -5000.0],
+        'return_pct': [15.0, 10.0, 8.0, 5.0, 3.0, -1.0, -2.0, -3.0, -4.0, -5.0],
+    })
+
+
+def test_pnl_concentration_trade_pct_rows():
+    out = compute_pnl_concentration(_make_trades_pnl())
+    trade_rows = out[out['dimension'] == 'trade_pct']
+    assert set(trade_rows['key']) == {'top_1pct', 'top_5pct', 'top_10pct', 'top_20pct'}
+
+
+def test_pnl_concentration_stock_rows():
+    out = compute_pnl_concentration(_make_trades_pnl())
+    stock_rows = out[out['dimension'] == 'stock']
+    # 10 笔各不同股票，全部出现（上限 20）
+    assert len(stock_rows) == 10
+    assert set(stock_rows['key']) == {
+        'A.SZ', 'B.SZ', 'C.SZ', 'D.SZ', 'E.SZ',
+        'F.SZ', 'G.SZ', 'H.SZ', 'I.SZ', 'J.SZ'}
+
+
+def test_pnl_concentration_top1_is_highest_pnl_trade():
+    out = compute_pnl_concentration(_make_trades_pnl())
+    top1 = out[(out['dimension'] == 'trade_pct') & (out['key'] == 'top_1pct')].iloc[0]
+    # 10 笔中 1% = ceil(0.1) = 1 笔，即 gross_pnl 最大的 50000
+    assert top1['pnl_sum'] == 50000.0
+
+
+def test_pnl_concentration_empty_returns_empty():
+    out = compute_pnl_concentration(pd.DataFrame())
+    assert list(out.columns) == ['dimension', 'key', 'n_trades', 'pnl_sum', 'pnl_share']
+    assert len(out) == 0
+
+
+# ---------------------------------------------------------------------------
+# compute_yearly_condition_stats
+# ---------------------------------------------------------------------------
+
+def _make_trades_yearly_cond():
+    return pd.DataFrame({
+        'entry_ma60_dist_pct': [2.0, 7.0, 2.5, 15.0],
+        'ma_alignment': ['全多头', '局部多头', '全空头', '全多头'],
+        'return_pct': [10.0, -3.0, 5.0, -8.0],
+        'holding_days': [20, 15, 30, 10],
+        'entry_date': pd.to_datetime(['2022-03-01', '2022-06-01', '2023-03-01', '2023-06-01']),
+    })
+
+
+def test_yearly_condition_stats_columns():
+    out = compute_yearly_condition_stats(_make_trades_yearly_cond())
+    assert list(out.columns) == ['year', 'condition_field', 'bucket', 'count',
+                                  'win_rate', 'avg_return', 'avg_holding_days']
+
+
+def test_yearly_condition_stats_year_split():
+    out = compute_yearly_condition_stats(_make_trades_yearly_cond())
+    assert set(out['year']) == {2022, 2023}
+    # 每年都要有 entry_ma60_dist_pct 的桶
+    assert 'entry_ma60_dist_pct' in out['condition_field'].values
+
+
+def test_yearly_condition_stats_win_rate_range():
+    out = compute_yearly_condition_stats(_make_trades_yearly_cond())
+    for wr in out['win_rate'].dropna():
+        assert 0.0 <= wr <= 1.0, f"win_rate out of range: {wr}"
+
+
+def test_yearly_condition_stats_empty_returns_empty():
+    out = compute_yearly_condition_stats(pd.DataFrame())
+    assert list(out.columns) == ['year', 'condition_field', 'bucket', 'count',
+                                  'win_rate', 'avg_return', 'avg_holding_days']
     assert len(out) == 0

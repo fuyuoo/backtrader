@@ -13,6 +13,15 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-05-09 — 新增三张入场条件观察报告（分布 / 集中度 / 年度交叉）
+
+- 需求：在调参前把统计数据补全，增加 return_pct 分布形态、PnL 集中度、年度×条件交叉三个维度。
+- 改动：
+  - `tools/attribution.py`：新增 `compute_return_distribution_by_condition` / `compute_pnl_concentration` / `compute_yearly_condition_stats` 三个函数，并在 `run()` 中接入；
+  - `tests/test_attribution.py`：新增 11 个测试覆盖三个新函数（空输入/列名/数值约束）；
+  - `docs/FEATURES.md`：§6 追加第 28/29/30 条报告说明。
+- 影响：reports/ 下报告数 27 → 30；全套测试 197 → 208。
+
 ## 2026-05-08 — Phase B-prep 统计基础与数据可信度建设（9 项）
 
 - 需求：调参（Phase B）启动前先把现有报告做对、做完整。

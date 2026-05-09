@@ -773,6 +773,159 @@ def compute_factor_alpha(signals, top_n=3, factors=None,
     return pd.DataFrame(rows).sort_values('alpha', ascending=False)
 
 
+def compute_return_distribution_by_condition(trades):
+    """每个入场条件桶的 return_pct 分布（P10/P25/P50/P75/P90）。"""
+    cols = ['condition_field', 'bucket', 'count', 'p10', 'p25', 'p50', 'p75', 'p90']
+    if trades.empty or 'return_pct' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+
+    def _dist(field, bucket, sub):
+        ret = sub['return_pct'].dropna()
+        if ret.empty:
+            return None
+        return {
+            'condition_field': field,
+            'bucket': str(bucket),
+            'count': len(ret),
+            'p10': round(float(ret.quantile(0.10)), 4),
+            'p25': round(float(ret.quantile(0.25)), 4),
+            'p50': round(float(ret.quantile(0.50)), 4),
+            'p75': round(float(ret.quantile(0.75)), 4),
+            'p90': round(float(ret.quantile(0.90)), 4),
+        }
+
+    rows = []
+
+    for field, (bins, labels) in _NUMERIC_BUCKETS.items():
+        if field not in trades.columns:
+            continue
+        sub = trades.dropna(subset=[field]).copy()
+        if sub.empty:
+            continue
+        sub['_bucket'] = pd.cut(sub[field], bins=bins, labels=labels,
+                                 right=False, include_lowest=False)
+        for bucket in labels:
+            row = _dist(field, bucket, sub[sub['_bucket'] == bucket])
+            if row:
+                rows.append(row)
+
+    for field in _CATEGORICAL_FIELDS:
+        if field not in trades.columns:
+            continue
+        sub = trades.dropna(subset=[field])
+        if sub.empty:
+            continue
+        for bucket, chunk in sub.groupby(field):
+            row = _dist(field, bucket, chunk)
+            if row:
+                rows.append(row)
+
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
+
+
+def compute_pnl_concentration(trades):
+    """PnL 集中度：头部交易/个股各贡献多少总盈亏。
+
+    trade_pct 行：按 gross_pnl 排序后，头部 1%/5%/10%/20% 交易的 PnL 占比。
+    stock 行：按个股汇总 gross_pnl，前 20 支个股各自占比。
+    """
+    cols = ['dimension', 'key', 'n_trades', 'pnl_sum', 'pnl_share']
+    if trades.empty or 'gross_pnl' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+
+    t = trades.copy()
+    t['gross_pnl'] = pd.to_numeric(t['gross_pnl'], errors='coerce')
+    valid = t.dropna(subset=['gross_pnl'])
+    if valid.empty:
+        return pd.DataFrame(columns=cols)
+
+    total_pnl = valid['gross_pnl'].sum()
+    n_total = len(valid)
+    sorted_desc = valid.sort_values('gross_pnl', ascending=False)
+
+    rows = []
+    for label, pct in [('top_1pct', 0.01), ('top_5pct', 0.05),
+                        ('top_10pct', 0.10), ('top_20pct', 0.20)]:
+        n = max(1, int(np.ceil(n_total * pct)))
+        top = sorted_desc.head(n)
+        pnl_s = top['gross_pnl'].sum()
+        rows.append({
+            'dimension': 'trade_pct',
+            'key': label,
+            'n_trades': n,
+            'pnl_sum': round(pnl_s, 2),
+            'pnl_share': round(pnl_s / total_pnl, 4) if total_pnl != 0 else float('nan'),
+        })
+
+    if 'ts_code' in valid.columns:
+        stock_grp = (valid.groupby('ts_code')['gross_pnl']
+                     .agg(n_trades='count', pnl_sum='sum')
+                     .sort_values('pnl_sum', ascending=False)
+                     .head(20).reset_index())
+        for _, r in stock_grp.iterrows():
+            rows.append({
+                'dimension': 'stock',
+                'key': r['ts_code'],
+                'n_trades': int(r['n_trades']),
+                'pnl_sum': round(r['pnl_sum'], 2),
+                'pnl_share': round(r['pnl_sum'] / total_pnl, 4) if total_pnl != 0 else float('nan'),
+            })
+
+    return pd.DataFrame(rows, columns=cols).reset_index(drop=True)
+
+
+def compute_yearly_condition_stats(trades):
+    """年度 × 入场条件交叉表：每年每个条件桶的 count/win_rate/avg_return/avg_holding_days。"""
+    cols = ['year', 'condition_field', 'bucket', 'count', 'win_rate',
+            'avg_return', 'avg_holding_days']
+    if trades.empty or 'entry_date' not in trades.columns:
+        return pd.DataFrame(columns=cols)
+
+    t = trades.copy()
+    t['entry_date'] = pd.to_datetime(t['entry_date'], errors='coerce')
+    t = t.dropna(subset=['entry_date'])
+    if t.empty:
+        return pd.DataFrame(columns=cols)
+    t['year'] = t['entry_date'].dt.year
+
+    rows = []
+    for year, year_trades in t.groupby('year'):
+        for field, (bins, labels) in _NUMERIC_BUCKETS.items():
+            if field not in year_trades.columns:
+                continue
+            sub = year_trades.dropna(subset=[field]).copy()
+            if sub.empty:
+                continue
+            sub['_bucket'] = pd.cut(sub[field], bins=bins, labels=labels,
+                                     right=False, include_lowest=False)
+            for bucket in labels:
+                chunk = sub[sub['_bucket'] == bucket]
+                if chunk.empty:
+                    continue
+                row = {'year': int(year), 'condition_field': field, 'bucket': str(bucket)}
+                row.update(_bucket_aggregate(field, chunk))
+                rows.append(row)
+
+        for field in _CATEGORICAL_FIELDS:
+            if field not in year_trades.columns:
+                continue
+            sub = year_trades.dropna(subset=[field])
+            if sub.empty:
+                continue
+            for bucket, chunk in sub.groupby(field):
+                row = {'year': int(year), 'condition_field': field, 'bucket': str(bucket)}
+                row.update(_bucket_aggregate(field, chunk))
+                rows.append(row)
+
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    return (pd.DataFrame(rows, columns=cols)
+            .sort_values(['year', 'condition_field', 'bucket'])
+            .reset_index(drop=True))
+
+
 def run(project_root, cfg):
     """根据 cfg 执行全部归因分析并写出报告。供 backtest.py 直接调用。"""
     project_root = Path(project_root)
@@ -874,6 +1027,15 @@ def run(project_root, cfg):
     compute_sector_industry_stats(trades, sector_map_industry).to_csv(
         out_dir / 'sector_industry_stats.csv', index=False)
     compute_sector_stock_combo_stats(trades).to_csv(out_dir / 'sector_stock_combo_stats.csv', index=False)
+
+    ret_dist = compute_return_distribution_by_condition(trades)
+    ret_dist.to_csv(out_dir / 'return_distribution_by_condition.csv', index=False)
+
+    pnl_conc = compute_pnl_concentration(trades)
+    pnl_conc.to_csv(out_dir / 'pnl_concentration.csv', index=False)
+
+    yearly_cond = compute_yearly_condition_stats(trades)
+    yearly_cond.to_csv(out_dir / 'yearly_condition_stats.csv', index=False)
 
     factor_alpha = compute_factor_alpha(signals)
     factor_alpha.to_csv(out_dir / 'factor_alpha.csv', index=False)

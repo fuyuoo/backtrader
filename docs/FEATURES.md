@@ -192,6 +192,9 @@ python my_strategy/src/calc_indicators.py --mode sector  # 行业指数模式
 25. **sector_momentum_60d_stats**：按行业 60 日动量五分桶（Q1～Q5）统计；
 26. **sector_industry_stats**：按 ts_code → sw_index_code 映射后，按 SW 一级行业分桶聚合（count / win_rate / avg_return / avg_holding_days），按交易笔数降序排列；未映射股票自动跳过。
 27. **sector_stock_combo_stats**：行业多头排列 × 个股多头排列 2×2 共振表（≤4 行，空桶跳过）；列含 combo / count / win_rate / avg_return / avg_holding_days。
+28. **return_distribution_by_condition**：每个入场条件桶的 return_pct 分布（P10/P25/P50/P75/P90），桶划分与 entry_condition_stats 一致；揭示分布形态（厚尾 / 左偏等），补充 avg_return 无法表达的信息；列含 condition_field / bucket / count / p10 / p25 / p50 / p75 / p90。
+29. **pnl_concentration**：PnL 集中度；trade_pct 行（top 1%/5%/10%/20% 的交易贡献多少总盈亏）+ stock 行（前 20 只股票各自的盈亏贡献）；列含 dimension / key / n_trades / pnl_sum / pnl_share。
+30. **yearly_condition_stats**：年度 × 入场条件交叉表；同一套分桶逻辑（_NUMERIC_BUCKETS + _CATEGORICAL_FIELDS）按 entry_date.year 细分，可直接看 2022/2023 熊市期间各桶表现是否整体崩塌或仍有分化；列含 year / condition_field / bucket / count / win_rate / avg_return / avg_holding_days。
 
 输出目录由 `config.attribution_report_dir` 控制。
 
