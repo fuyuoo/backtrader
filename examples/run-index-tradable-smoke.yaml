@@ -1,0 +1,56 @@
+run:
+  id: index-tradable-smoke-2024q1
+  from_date: "2024-01-01"
+  to_date: "2024-03-31"
+
+data:
+  snapshot_root: data/snapshots
+  provider: tushare
+  refresh_snapshots: true
+  tradable_series:
+    - symbol: "000001.SH"
+      asset_type: index
+    - symbol: "000300.SH"
+      asset_type: index
+  benchmark_series:
+    indexes:
+      - "000001.SH"
+      - "000300.SH"
+
+strategy:
+  template: trend_template_v1
+  entry_method: kdj_oversold_entry
+  profit_taking_method: kdj_overheated_exit
+  stop_loss_method: fixed_percent_stop
+  sizing_rule: equal_weight
+
+constraints:
+  ashare:
+    enabled: false
+
+broker:
+  initial_cash: 1000000
+  commission_rate: 0.0003
+  stamp_tax_rate: 0.001
+  transfer_fee_rate: 0.00001
+  slippage:
+    type: percent
+    value: 0.0005
+
+execution:
+  engine: backtrader
+  stake: 100
+
+output:
+  persist: true
+  report_root: reports
+
+analysis:
+  industry_attribution:
+    enabled: false
+  market_regime:
+    enabled: true
+    timeframes: ["D", "W", "M"]
+  scenario_fit:
+    enabled: true
+    min_trades: 3

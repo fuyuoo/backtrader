@@ -69,3 +69,8 @@ samples2/
 datas/*.py
 
 .idea/
+.codegraph/
+.secrets/
+.venv/
+data/snapshots/
+/reports/

@@ -1,0 +1,141 @@
+"""Run the curated ATTbacktrader MVP acceptance checks."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+BUSINESS_TESTS = (
+    "tests/test_indicator_snapshots.py",
+    "tests/test_indicator_frame.py",
+    "tests/test_backtrader_adapter.py",
+    "tests/test_strategy_methods.py",
+    "tests/test_trend_template_v1_golden.py",
+    "tests/test_backtest_report.py",
+    "tests/test_tushare_provider.py",
+    "tests/test_parquet_snapshots.py",
+    "tests/test_reference_snapshots.py",
+    "tests/test_bar_resampling.py",
+    "tests/test_market_regime.py",
+    "tests/test_scenario_fit.py",
+    "tests/test_portfolio_behavior.py",
+    "tests/test_execution_costs.py",
+    "tests/test_analysis_pipeline.py",
+    "tests/test_report_writer.py",
+    "tests/test_ashare_constraints.py",
+    "tests/test_attbacktrader_config.py",
+    "tests/test_prepared_run_data.py",
+    "tests/test_strategy_bindings.py",
+    "tests/test_run_plan_executor.py",
+)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    repo_root = Path(__file__).resolve().parents[1]
+    python = Path(args.python)
+
+    _run([str(python), "-m", "pytest", *BUSINESS_TESTS, "-q"], cwd=repo_root)
+
+    if args.with_tushare:
+        _run_tushare_smoke(
+            python=python,
+            repo_root=repo_root,
+            config_path=Path(args.tushare_config),
+            token_file=Path(args.token_file),
+        )
+
+    print("\nAcceptance smoke passed.", flush=True)
+    return 0
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run ATTbacktrader acceptance checks")
+    parser.add_argument(
+        "--with-tushare",
+        action="store_true",
+        help="Also run examples/run-tushare-smoke.yaml against the real Tushare provider",
+    )
+    parser.add_argument("--token-file", default=".secrets/tushare_token.txt")
+    parser.add_argument("--tushare-config", default="examples/run-tushare-smoke.yaml")
+    parser.add_argument("--python", default=sys.executable, help="Python executable used for subprocesses")
+    return parser.parse_args(argv)
+
+
+def _run_tushare_smoke(
+    *,
+    python: Path,
+    repo_root: Path,
+    config_path: Path,
+    token_file: Path,
+) -> None:
+    token_path = _resolve(repo_root, token_file)
+    if not token_path.exists() or not token_path.read_text(encoding="utf-8").strip():
+        raise SystemExit(f"Tushare token file is missing or empty: {token_file}")
+
+    stdout = _run(
+        [
+            str(python),
+            "-m",
+            "attbacktrader.cli.run_plan",
+            "--config",
+            str(config_path),
+            "--token-file",
+            str(token_path),
+        ],
+        cwd=repo_root,
+        capture_stdout=True,
+    )
+    payload = json.loads(stdout)
+    artifacts = payload.get("artifacts", {})
+    report_markdown_path = _resolve(repo_root, Path(artifacts["report_markdown_path"]))
+    if not report_markdown_path.exists():
+        raise SystemExit(f"Expected Markdown report was not written: {report_markdown_path}")
+
+    print("\nTushare smoke summary", flush=True)
+    print(f"run_id: {payload['run_id']}", flush=True)
+    print(f"engine: {payload['engine']}", flush=True)
+    print(f"final_value: {payload['final_value']}", flush=True)
+    print(f"cumulative_return: {payload['report']['returns']['cumulative_return']}", flush=True)
+    print(f"completed_orders: {payload['report']['execution_costs']['completed_count']}", flush=True)
+    print(f"report_md: {artifacts['report_markdown_path']}", flush=True)
+
+
+def _run(
+    command: list[str],
+    *,
+    cwd: Path,
+    capture_stdout: bool = False,
+) -> str:
+    print(f"\n$ {' '.join(command)}", flush=True)
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        text=True,
+        capture_output=capture_stdout,
+    )
+    if completed.returncode != 0:
+        if capture_stdout:
+            if completed.stdout:
+                print(completed.stdout)
+            if completed.stderr:
+                print(completed.stderr, file=sys.stderr)
+        raise SystemExit(completed.returncode)
+
+    if capture_stdout:
+        return completed.stdout
+    return ""
+
+
+def _resolve(repo_root: Path, path: Path) -> Path:
+    if path.is_absolute():
+        return path
+    return repo_root / path
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

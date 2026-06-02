@@ -109,7 +109,13 @@ setuptools.setup(
     # project is installed. For an analysis of "install_requires" vs pip's
     # requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
-    # install_requires=['six'],
+    install_requires=[
+        'pandas>=2,<4',
+        'pyarrow>=15',
+        'pydantic>=2,<3',
+        'PyYAML>=6,<7',
+        'tushare>=1.4',
+    ],
 
     # List additional groups of dependencies here
     # (e.g. development dependencies).
@@ -134,7 +140,11 @@ setuptools.setup(
     # "scripts" keyword. Entry points provide cross-platform support and allow
     # pip to create the appropriate form of executable for the target platform.
     # entry_points={'console_scripts': ['sample=sample:main',],},
-    entry_points={'console_scripts': ['btrun=backtrader.btrun:btrun']},
+    entry_points={'console_scripts': [
+        'btrun=backtrader.btrun:btrun',
+        'att-run-plan=attbacktrader.cli.run_plan:main',
+        'att-tushare-backtest=attbacktrader.cli.tushare_backtest:main',
+    ]},
 
     scripts=['tools/bt-run.py'],
 )
