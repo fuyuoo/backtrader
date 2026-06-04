@@ -1,12 +1,24 @@
 from datetime import date, timedelta
 
-import pytest
-
-from attbacktrader.analysis import classify_market_regime
+from attbacktrader.analysis import classify_market_regime, summarize_market_regime_inputs
 from attbacktrader.data import IndexBar
 
 
-def test_classify_market_regime_hot_with_positive_benchmark_and_industry_diffusion() -> None:
+def test_summarize_market_regime_inputs_keeps_configured_values_without_calculation() -> None:
+    summary = summarize_market_regime_inputs(
+        benchmark_symbols=("000001.SH", "000300.SH"),
+        industry_index_symbols=("801780.SI", "801120.SI"),
+        timeframes=("D", "W", "M"),
+    )
+
+    assert summary.primary_label == "input_only"
+    assert summary.windows == ()
+    assert summary.benchmark_symbols == ("000001.SH", "000300.SH")
+    assert summary.industry_index_symbols == ("801780.SI", "801120.SI")
+    assert summary.timeframes == ("D", "W", "M")
+
+
+def test_classify_market_regime_keeps_legacy_api_as_input_summary() -> None:
     benchmark = _index_series("000001.SH", [100.0, 102.0, 106.0, 108.0])
     industry_a = _index_series("801780.SI", [100.0, 101.0, 102.0, 103.0])
     industry_b = _index_series("801120.SI", [100.0, 100.5, 101.0, 102.0])
@@ -17,38 +29,11 @@ def test_classify_market_regime_hot_with_positive_benchmark_and_industry_diffusi
         timeframes=("D", "W", "M"),
     )
 
-    assert regime.primary_label == "hot"
-    assert [window.timeframe for window in regime.windows] == ["D", "W", "M"]
-    assert regime.windows[0].benchmark_count == 1
-    assert regime.windows[0].benchmark_return == pytest.approx(0.08)
-    assert regime.windows[0].industry_positive_ratio == 1.0
-
-
-def test_classify_market_regime_cold_with_negative_benchmark() -> None:
-    benchmark = _index_series("000001.SH", [100.0, 97.0, 93.0, 90.0])
-    industry = _index_series("801780.SI", [100.0, 99.0, 98.0, 97.0])
-
-    regime = classify_market_regime(
-        benchmark_bars_by_symbol={"000001.SH": benchmark},
-        industry_index_bars_by_symbol={"801780.SI": industry},
-        timeframes=("D",),
-    )
-
-    assert regime.primary_label == "cold"
-    assert regime.windows[0].benchmark_return == pytest.approx(-0.10)
-    assert regime.windows[0].industry_positive_ratio == 0.0
-
-
-def test_classify_market_regime_requires_benchmark_evidence() -> None:
-    regime = classify_market_regime(
-        benchmark_bars_by_symbol={},
-        industry_index_bars_by_symbol={},
-        timeframes=("D",),
-    )
-
-    assert regime.primary_label == "insufficient_evidence"
-    assert regime.windows[0].benchmark_count == 0
-    assert regime.windows[0].industry_count == 0
+    assert regime.primary_label == "input_only"
+    assert regime.windows == ()
+    assert regime.benchmark_symbols == ("000001.SH",)
+    assert regime.industry_index_symbols == ("801780.SI", "801120.SI")
+    assert regime.timeframes == ("D", "W", "M")
 
 
 def _index_series(symbol: str, closes: list[float]) -> tuple[IndexBar, ...]:

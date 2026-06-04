@@ -218,6 +218,40 @@ def test_tushare_index_daily_frame_maps_to_sorted_index_bars() -> None:
     assert bars[1].amount == 3000.0
 
 
+def test_tushare_index_daily_frame_expands_high_low_to_cover_open_close() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "ts_code": "801780.SI",
+                "trade_date": "20151230",
+                "open": 3374.05,
+                "high": 3392.81,
+                "low": 3336.22,
+                "close": 3392.82,
+                "vol": 121589,
+                "amount": 1097753,
+            },
+            {
+                "ts_code": "801780.SI",
+                "trade_date": "20151231",
+                "open": 3335.00,
+                "high": 3370.00,
+                "low": 3335.01,
+                "close": 3350.00,
+                "vol": 121589,
+                "amount": 1097753,
+            },
+        ]
+    )
+
+    bars = _index_bars_from_frame(frame)
+
+    assert bars[0].high == 3392.82
+    assert bars[0].close == 3392.82
+    assert bars[1].low == 3335.00
+    assert bars[1].open == 3335.00
+
+
 def test_tushare_shenwan_classification_frame_maps_levels() -> None:
     frame = pd.DataFrame(
         [

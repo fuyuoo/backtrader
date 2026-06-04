@@ -1,0 +1,43 @@
+draft_id: add_on_sample_coverage
+status: draft_requires_manual_confirmation
+source_candidate_id: candidate.add_on.sample_coverage
+title_zh: 加仓样本覆盖验证
+purpose_zh: 确认真实加仓点的证据链完整性，并判断是否需要扩大样本来验证加仓框架。
+base_config_path: examples\run-tushare-expanded-add-on.yaml
+suggested_run_id: tushare-expanded-add-on-2023-2024__review__add_on_sample_coverage
+candidate_direction: add_on_framework_validation
+candidate_type: sample_size_probe
+suggested_change:
+  artifact_or_config: strategy.add_on_method / trade_review.add_on_entry_points
+  change_zh: 优先扩大可观测样本和归因维度，暂不调加仓参数。
+  not_allowed:
+  - 不要用单个加仓样本做策略结论
+validation_plan_zh: 反查每个 add_on sample_index 的 add_on_date、execution events、trade
+  lifecycle 和 follow_up。
+evidence_refs:
+- artifact: review_packet
+  section: add_on
+sample_refs:
+- kind: add_on
+  sample_index: 1
+  trade_index: 120
+  symbol: 600030.SH
+  trade_date: '2024-10-18'
+manual_steps:
+- 读取 source_candidate_id 对应的 candidate 和 sample_refs。
+- 用 review_sample 或 review_sample_batch 核对证据是否完整。
+- 人工决定是否需要新增 evidence producer、分组维度或配置变体。
+- 确认后再把 run_plan_patch 转成合法 RunPlan YAML 并执行回测。
+run_plan_patch:
+  run:
+    id: tushare-expanded-add-on-2023-2024__review__add_on_sample_coverage
+  review_candidate:
+    source_candidate_id: candidate.add_on.sample_coverage
+    manual_confirmation_required: true
+    validation_plan_zh: 反查每个 add_on sample_index 的 add_on_date、execution events、trade
+      lifecycle 和 follow_up。
+    inspect_artifacts:
+    - trade_review.json
+    - trade_lifecycle.json
+    - execution_audit.json
+not_runnable_until: 人工确认 run_plan_patch 并转成合法 RunPlan YAML

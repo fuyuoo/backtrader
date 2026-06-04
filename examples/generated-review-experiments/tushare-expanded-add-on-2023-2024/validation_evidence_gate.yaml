@@ -1,0 +1,31 @@
+draft_id: validation_evidence_gate
+status: draft_requires_manual_confirmation
+source_candidate_id: candidate.validation.evidence_gate
+title_zh: 复盘前证据门禁
+purpose_zh: 保持 evidence_validation 作为 AI 复盘前置门禁。
+base_config_path: examples\run-tushare-expanded-add-on.yaml
+suggested_run_id: tushare-expanded-add-on-2023-2024__review__validation_evidence_gate
+candidate_direction: evidence_validation
+candidate_type: quality_gate
+suggested_change:
+  artifact_or_config: evidence_validation.json
+  change_zh: 如果 status 不是 ok，先修正证据链，再生成 findings/brief。
+  not_allowed:
+  - 不要在证据失败时继续输出策略结论
+validation_plan_zh: 每次真实回测后先检查 validation finding，再进入其它复盘候选。
+evidence_refs:
+- artifact: review_packet
+  section: validation
+sample_refs: []
+manual_steps:
+- 先确认 evidence_validation.status == ok，再生成任何实验配置。
+run_plan_patch:
+  run:
+    id: tushare-expanded-add-on-2023-2024__review__validation_evidence_gate
+  review_candidate:
+    source_candidate_id: candidate.validation.evidence_gate
+    manual_confirmation_required: true
+    validation_plan_zh: 每次真实回测后先检查 validation finding，再进入其它复盘候选。
+    inspect_artifacts:
+    - evidence_validation.json
+not_runnable_until: 人工确认 run_plan_patch 并转成合法 RunPlan YAML

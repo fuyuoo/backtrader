@@ -62,6 +62,9 @@ class MarketRegimeWindowSummary:
 class MarketRegimeSummary:
     primary_label: str
     windows: tuple[MarketRegimeWindowSummary, ...]
+    benchmark_symbols: tuple[str, ...] = ()
+    industry_index_symbols: tuple[str, ...] = ()
+    timeframes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

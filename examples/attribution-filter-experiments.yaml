@@ -1,0 +1,44 @@
+base_config: run-tushare-attribution-filter.yaml
+
+variants:
+  - name: ma25-only
+    require_checks:
+      - "symbol.ma.price_above_ma25"
+    missing_policy: block
+
+  - name: hs300-only
+    require_checks:
+      - "market.hs300.bullish_trend"
+    missing_policy: block
+
+  - name: symbol-ma-bullish-only
+    require_checks:
+      - "symbol.ma.bullish_trend"
+    missing_policy: block
+
+  - name: price-above-ma60-only
+    require_checks:
+      - "symbol.ma.price_above_ma60"
+    missing_policy: block
+
+  - name: ma25-hs300-pass-missing
+    require_checks:
+      - "symbol.ma.price_above_ma25"
+      - "market.hs300.bullish_trend"
+    missing_policy: pass
+
+  - name: ma25-hs300-ma10-ma40
+    require_checks:
+      - "symbol.ma.price_above_ma25"
+      - "market.hs300.bullish_trend"
+    missing_policy: block
+    market_fast_period: 10
+    market_slow_period: 40
+
+  - name: ma25-ma60-symbol-hs300
+    require_checks:
+      - "symbol.ma.price_above_ma25"
+      - "symbol.ma.price_above_ma60"
+      - "symbol.ma.bullish_trend"
+      - "market.hs300.bullish_trend"
+    missing_policy: block

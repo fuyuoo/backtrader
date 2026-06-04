@@ -39,6 +39,7 @@ attbacktrader/
     indicators.py
     snapshots.py
   strategies/
+    attribution.py
     bindings.py
     intents.py
     templates/
@@ -63,7 +64,9 @@ attbacktrader/
     scenario_fit.py
   reports/
     assembly.py
+    diagnostics.py
     models.py
+    renderer.py
     writer.py
   runners/
     prepared_data.py
@@ -242,14 +245,22 @@ reports/{run_id}/
   result.json
   report.json
   report.md
+  report.zh.md
   trades.json
+  signal_audit.json
+  sizing_audit.json
+  result_diagnostics.json
+  trade_lifecycle.json
+  trade_lifecycle.zh.md
+  post_exit_analysis.json
+  post_exit_analysis.zh.md
   equity_curve.json
   positions.json
   execution_audit.json
   snapshots.json
 ```
 
-`run_plan.json` stores the resolved configuration, `result.json` stores the complete execution result, `report.json` stores the standard report, `report.md` stores a lightweight human-readable report, `trades.json` stores closed trades and open positions, `equity_curve.json` stores per-date account value, `positions.json` stores per-date holding snapshots, `execution_audit.json` stores submitted, accepted, completed, failed, and constraint-rejected order events, and `snapshots.json` stores the raw and indicator snapshot references used by the run. The root `reports/` directory is a local artifact and is ignored by Git.
+`run_plan.json` stores the resolved configuration, `result.json` stores the complete execution result, `report.json` stores the standard report, `report.md` and `report.zh.md` store lightweight human-readable reports, `trades.json` stores closed trades and open positions, `signal_audit.json` stores strategy decisions and decision-time evidence, `sizing_audit.json` extracts sizing decisions, `result_diagnostics.json` stores per-symbol PnL, exit, rejection, sizing-block, entry-attribution detail, exit-attribution detail, add-on lifecycle summaries, factor coverage, and winning-vs-losing attribution contrast, `trade_lifecycle.json` stores each completed trade's entry/add-on/exit timeline with linked execution events and filter indexes, `trade_lifecycle.zh.md` stores a concise Chinese lifecycle review, `post_exit_analysis.json` stores configured-window observations after completed trade exits plus matched exit-day evidence, `post_exit_analysis.zh.md` stores the Chinese sold-too-early review and exit-evidence grouping, `evidence_validation.json` checks cross-artifact evidence consistency including A-share rejection reason consistency, `equity_curve.json` stores per-date account value, `positions.json` stores per-date holding snapshots, `execution_audit.json` stores submitted, accepted, completed, failed, and constraint-rejected order events, and `snapshots.json` stores the raw and indicator snapshot references used by the run. The root `reports/` directory is a local artifact and is ignored by Git.
 
 ## Strategy Model
 
@@ -323,7 +334,7 @@ The adapter also emits an engine-neutral execution ledger. The current ledger in
 
 The first version produces a standard `Backtest Report`, not raw analyzer dictionaries.
 
-The first report slice assembles return, max drawdown, trade quality, portfolio behavior, execution costs, benchmark comparison, Shenwan industry attribution, market-regime evidence, and scenario fit scoring from completed trades, open positions, the execution ledger, broker state, and prepared index snapshots.
+The first report slice assembles return, max drawdown, trade quality, portfolio behavior, execution costs, benchmark comparison, Shenwan industry attribution, configured market inputs, and scenario fit scoring from completed trades, open positions, the execution ledger, broker state, and prepared index snapshots.
 
 Required report sections:
 
@@ -335,7 +346,7 @@ Required report sections:
 - execution costs: order count, submitted, accepted, completed, failed, rejected, fill rate, rejection rate, total and average commission, total and average slippage cost, and rejection reason distribution
 - industry attribution: Shenwan level 1, 2, and 3 contribution
 - benchmark comparison: SSE Composite, CSI 300, ChiNext, A500 where index history is available for the run window
-- market regime performance: deterministic water-temperature labels by daily, weekly, and monthly windows; later slices will add return, drawdown, win rate, and profit/loss ratio by regime
+- market inputs: configured benchmark indexes, Shenwan industry indexes, and timeframes are displayed for review without deriving hot/cold temperature labels
 - scenario fit: rule-based `fit`, `conditional_fit`, `not_fit`, or `insufficient_evidence`
 
 `Scenario Fit` is a structured judgment derived from report evidence. First-version labels:
@@ -345,9 +356,9 @@ Required report sections:
 - `not_fit`
 - `insufficient_evidence`
 
-The first version uses rule scoring for scenario fit. It requires at least `analysis.scenario_fit.min_trades` closed trades, then scores positive cumulative return, max drawdown within 12%, win rate at least 50%, profit/loss ratio at least 1, positive average benchmark excess return, and a `warm` or `hot` market regime. AI-generated explanation is not part of the core judgment.
+The first version uses rule scoring for scenario fit. It requires at least `analysis.scenario_fit.min_trades` closed trades, then scores positive cumulative return, max drawdown within 12%, win rate at least 50%, profit/loss ratio at least 1, and positive average benchmark excess return. AI-generated explanation is not part of the core judgment.
 
-Market regime labels are derived from configured benchmark indexes and Shenwan industry index series. The first version calculates benchmark return, benchmark max drawdown, benchmark volatility, and industry positive-return ratio for `D`, `W`, and `M` windows. Labels are `hot`, `warm`, `neutral`, `cold`, or `insufficient_evidence`.
+The market-temperature report section displays configured benchmark indexes, Shenwan industry index series, and `D`/`W`/`M` timeframes. It intentionally does not calculate benchmark return, drawdown, volatility, industry positive-return ratio, or hot/cold labels.
 
 ## Testing
 
@@ -370,5 +381,5 @@ The first golden backtest slice uses a CSV single-stock fixture to avoid binary 
 4. Implement China A-share constraint checks.
 5. Implement the backtrader engine adapter and strategy bridge.
 6. Implement `Backtest Report` models and report assembly.
-7. Implement industry attribution, benchmark comparison, market regime labels, and scenario fit scoring.
+7. Implement industry attribution, benchmark comparison, market input display, and scenario fit scoring.
 8. Add regression tests and one golden single-stock fixture.

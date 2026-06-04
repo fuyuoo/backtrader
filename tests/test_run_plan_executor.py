@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -113,22 +113,33 @@ def test_execute_run_plan_fetches_snapshots_indicators_and_runs_portfolio(tmp_pa
     assert len(result.symbol_results) == 2
     assert [symbol_result.asset_type for symbol_result in result.symbol_results] == ["stock", "stock"]
     assert len(result.closed_trades) == 4
+    assert result.signal_audit
+    assert result.symbol_results[0].intents
+    assert result.signal_audit[0].signal_values
     assert result.report.trade_quality.trade_count == 4
+    assert result.post_exit_analysis.trade_count == 4
+    assert result.post_exit_analysis.window_days == 5
     assert len(result.report.benchmark_comparison) == 1
     assert result.report.benchmark_comparison[0].benchmark_symbol == "000001.SH"
     assert result.report.benchmark_comparison[0].benchmark_return == pytest.approx(0.1)
     assert len(result.report.industry_attribution) == 3
     assert {summary.level for summary in result.report.industry_attribution} == {1, 2, 3}
     assert result.report.market_regime is not None
-    assert result.report.market_regime.primary_label == "hot"
-    assert [window.timeframe for window in result.report.market_regime.windows] == ["D", "W", "M"]
+    assert result.report.market_regime.primary_label == "input_only"
+    assert result.report.market_regime.windows == ()
+    assert result.report.market_regime.benchmark_symbols == ("000001.SH",)
+    assert result.report.market_regime.industry_index_symbols == ("801780.SI",)
+    assert result.report.market_regime.timeframes == ("D", "W", "M")
     assert result.report.scenario_fit is not None
-    assert result.report.scenario_fit.label == "fit"
-    assert result.report.scenario_fit.score >= 5
+    assert result.report.scenario_fit.label == "conditional_fit"
+    assert result.report.scenario_fit.score == 4
     assert result.report.portfolio_behavior is not None
     assert result.report.portfolio_behavior.open_position_count == 0
     assert result.report.portfolio_behavior.closed_symbol_count == 2
-    assert result.report.portfolio_behavior.cash_ratio is None
+    assert result.final_cash is not None
+    assert result.final_value is not None
+    assert result.equity_curve
+    assert result.report.portfolio_behavior.cash_ratio == pytest.approx(1.0)
     assert result.report.portfolio_behavior.max_symbol_trade_share == pytest.approx(0.5)
     assert result.benchmark_results[0].snapshot_path.exists()
     assert result.industry_index_results[0].snapshot_path.exists()
@@ -193,6 +204,7 @@ def test_execute_run_plan_backtrader_returns_equity_curve_and_account_value_repo
     assert len(result.position_snapshots) == 8
     assert any(event.event_type == "completed" for event in result.execution_audit)
     assert all(event.order_ref is not None for event in result.execution_audit if event.event_type == "completed")
+    assert any("sizing" in intent.signal_values for intent in result.signal_audit)
     assert result.report.returns.starting_equity == pytest.approx(run_plan.broker.initial_cash)
     assert result.report.returns.final_equity == pytest.approx(result.final_value)
     assert result.report.returns.cumulative_return == pytest.approx(
@@ -204,6 +216,97 @@ def test_execute_run_plan_backtrader_returns_equity_curve_and_account_value_repo
     assert result.report.execution_costs.completed_count > 0
     assert result.report.execution_costs.total_commission > 0
     assert result.report.execution_costs.total_slippage_cost > 0
+
+
+def test_execute_run_plan_backtrader_applies_max_holding_count_sizing(tmp_path: Path) -> None:
+    first_symbol_bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    second_symbol_bars = tuple(replace(bar, symbol="000002.SZ") for bar in first_symbol_bars)
+    provider = FakeRunDataProvider(
+        {
+            "000001.SZ": first_symbol_bars,
+            "000002.SZ": second_symbol_bars,
+        }
+    )
+    run_plan = _run_plan(tmp_path, refresh_snapshots=True)
+    run_plan = run_plan.model_copy(
+        update={
+            "strategy": run_plan.strategy.model_copy(
+                update={"sizing_params": {"max_holding_count": 1}}
+            ),
+            "execution": run_plan.execution.model_copy(
+                update={
+                    "engine": "backtrader",
+                    "stake": 100,
+                }
+            ),
+        }
+    )
+
+    result = execute_run_plan(run_plan, provider=provider)
+    blocked_intents = tuple(intent for intent in result.signal_audit if intent.blocked_by == "MAX_HOLDING_COUNT")
+
+    assert blocked_intents
+    assert all(intent.signal_values["sizing"]["max_holding_count"] == 1 for intent in blocked_intents)
+
+
+def test_execute_run_plan_backtrader_can_use_macd_strategy_methods(tmp_path: Path) -> None:
+    bars = _macd_fixture_bars("000001.SZ")
+    provider = FakeRunDataProvider({"000001.SZ": bars})
+    run_plan = _macd_run_plan(tmp_path)
+
+    result = execute_run_plan(run_plan, provider=provider)
+    audit_reason_codes = {event.reason_code for event in result.execution_audit}
+
+    assert result.engine == "backtrader"
+    assert result.symbol_results[0].indicator_snapshot_path.parts[-3:-1] == ("macd", "qfq")
+    assert "MACD_BULLISH_CROSSOVER" in audit_reason_codes
+    assert any(trade.exit_reason == "MACD_BEARISH_CROSSOVER" for trade in result.closed_trades)
+    assert result.report.trade_quality.trade_count >= 1
+
+
+def test_execute_run_plan_backtrader_can_use_weekly_macd_strategy_methods(tmp_path: Path) -> None:
+    bars = _macd_fixture_bars("000001.SZ")
+    provider = FakeRunDataProvider({"000001.SZ": bars})
+    run_plan = _macd_run_plan(tmp_path)
+    run_plan = run_plan.model_copy(
+        update={
+            "strategy": run_plan.strategy.model_copy(
+                update={
+                    "entry_method": "macd_weekly_bullish_crossover_entry",
+                    "profit_taking_method": "macd_weekly_bearish_crossover_exit",
+                }
+            )
+        }
+    )
+
+    result = execute_run_plan(run_plan, provider=provider)
+
+    assert result.engine == "backtrader"
+    assert result.symbol_results[0].indicator_snapshot_path.parts[-4:-1] == ("macd", "W", "qfq")
+    assert result.symbol_results[0].indicator_snapshot_paths == (result.symbol_results[0].indicator_snapshot_path,)
+    assert result.symbol_results[0].indicator_snapshot_path.exists()
+    assert len(result.equity_curve) == len(bars)
+
+
+def test_execute_run_plan_signal_audit_records_combo_method_checks(tmp_path: Path) -> None:
+    bars = _combo_fixture_bars("000001.SZ")
+    provider = FakeRunDataProvider({"000001.SZ": bars})
+    run_plan = _combo_run_plan(tmp_path)
+
+    result = execute_run_plan(run_plan, provider=provider)
+    combo_intents = tuple(
+        intent
+        for intent in result.signal_audit
+        if intent.method_name == "ma_macd_bullish_confirmation_entry"
+    )
+
+    assert combo_intents
+    assert any(intent.signal_values["checks"]["required_values_available"] for intent in combo_intents)
+    assert any(
+        intent.reason_code == "MA_MACD_BULLISH_CONFIRMATION"
+        for intent in combo_intents
+    )
+    assert result.symbol_results[0].indicator_snapshot_path.parts[-3:-1] == ("ma20_ma60_macd", "qfq")
 
 
 def test_execute_run_plan_can_trade_index_series_without_stock_coupling(tmp_path: Path) -> None:
@@ -331,6 +434,139 @@ def _index_run_plan(snapshot_root: Path) -> RunPlan:
                 },
             },
         }
+    )
+
+
+def _macd_run_plan(snapshot_root: Path) -> RunPlan:
+    return RunPlan.from_mapping(
+        {
+            "run": {
+                "id": "macd-executor-test",
+                "from_date": "2024-01-02",
+                "to_date": "2024-01-31",
+            },
+            "data": {
+                "snapshot_root": snapshot_root,
+                "provider": "tushare",
+                "price_adjustment": "qfq",
+                "refresh_snapshots": True,
+                "symbols": ["000001.SZ"],
+            },
+            "strategy": {
+                "template": "trend_template_v1",
+                "entry_method": "macd_bullish_crossover_entry",
+                "profit_taking_method": "macd_bearish_crossover_exit",
+                "stop_loss_method": "fixed_percent_stop",
+                "sizing_rule": "equal_weight",
+            },
+            "broker": {
+                "initial_cash": 1000000,
+                "commission_rate": 0.0003,
+                "stamp_tax_rate": 0.001,
+                "transfer_fee_rate": 0.00001,
+                "slippage": {"type": "percent", "value": 0.0005},
+            },
+            "constraints": {
+                "ashare": {
+                    "enabled": False,
+                },
+            },
+            "execution": {
+                "engine": "backtrader",
+                "stake": 100,
+            },
+            "analysis": {
+                "industry_attribution": {"enabled": False},
+                "market_regime": {"enabled": False},
+                "scenario_fit": {"enabled": False},
+            },
+        }
+    )
+
+
+def _combo_run_plan(snapshot_root: Path) -> RunPlan:
+    return RunPlan.from_mapping(
+        {
+            "run": {
+                "id": "combo-executor-test",
+                "from_date": "2024-01-01",
+                "to_date": "2024-03-30",
+            },
+            "data": {
+                "snapshot_root": snapshot_root,
+                "provider": "tushare",
+                "price_adjustment": "qfq",
+                "refresh_snapshots": True,
+                "symbols": ["000001.SZ"],
+            },
+            "strategy": {
+                "template": "trend_template_v1",
+                "entry_method": "ma_macd_bullish_confirmation_entry",
+                "profit_taking_method": "ma_macd_weakening_exit",
+                "stop_loss_method": "fixed_percent_stop",
+                "sizing_rule": "equal_weight",
+            },
+            "broker": {
+                "initial_cash": 1000000,
+                "commission_rate": 0.0003,
+                "stamp_tax_rate": 0.001,
+                "transfer_fee_rate": 0.00001,
+                "slippage": {"type": "percent", "value": 0.0005},
+            },
+            "constraints": {
+                "ashare": {
+                    "enabled": False,
+                },
+            },
+            "execution": {
+                "engine": "business",
+                "stake": 100,
+            },
+            "analysis": {
+                "industry_attribution": {"enabled": False},
+                "market_regime": {"enabled": False},
+                "scenario_fit": {"enabled": False},
+            },
+        }
+    )
+
+
+def _macd_fixture_bars(symbol: str) -> tuple[DailyBar, ...]:
+    closes = (
+        [10.0] * 10
+        + [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0]
+        + [17.0, 16.0, 15.0, 14.0, 13.0, 12.0, 11.0, 10.0]
+        + [11.0, 12.0, 13.0, 14.0]
+    )
+    start_date = date(2024, 1, 2)
+    return tuple(
+        DailyBar(
+            symbol=symbol,
+            trade_date=start_date + timedelta(days=index),
+            open=close,
+            high=close + 0.5,
+            low=close - 0.5,
+            close=close,
+            volume=1000,
+        )
+        for index, close in enumerate(closes)
+    )
+
+
+def _combo_fixture_bars(symbol: str) -> tuple[DailyBar, ...]:
+    start_date = date(2024, 1, 1)
+    closes = [10.0 + index * 0.4 for index in range(90)]
+    return tuple(
+        DailyBar(
+            symbol=symbol,
+            trade_date=start_date + timedelta(days=index),
+            open=close,
+            high=close + 0.5,
+            low=close - 0.5,
+            close=close,
+            volume=1000,
+        )
+        for index, close in enumerate(closes)
     )
 
 

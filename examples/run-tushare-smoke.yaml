@@ -22,7 +22,6 @@ data:
       - "000001.SH"
       - "000300.SH"
       - "399006.SZ"
-      - "000510.SH"
   industry_series:
     source: SW2021
     indexes:
@@ -72,3 +71,8 @@ analysis:
   scenario_fit:
     enabled: true
     min_trades: 3
+  post_exit:
+    window_days: [3, 5, 10, 20]
+    primary_window_days: 5
+    sold_too_early_threshold: 0.0
+    rebound_thresholds: [0.0, 0.02, 0.05, 0.10]

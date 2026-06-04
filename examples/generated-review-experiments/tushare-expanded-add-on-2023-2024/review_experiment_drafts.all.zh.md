@@ -1,0 +1,506 @@
+# 复盘实验 YAML 草案
+
+- schema: `attbacktrader.review_experiment_drafts.v1`
+- run_id: `tushare-expanded-add-on-2023-2024`
+- focus: `all`
+- draft_count: `6`
+
+## 规则
+- 这些 YAML 是实验草案，不是可直接采用的策略配置。
+- 必须人工确认 run_plan_patch 后，才允许生成可执行 RunPlan。
+- 新增归因维度必须先进入 decision-time evidence。
+- 不得把候选中的后验观察直接写成买卖规则。
+
+## 扩展卖飞复盘维度
+
+- draft_id: `post_exit_sold_too_early_dimensions`
+- source_candidate_id: `candidate.post_exit.sold_too_early_dimensions`
+- suggested_run_id: `tushare-expanded-add-on-2023-2024__review__post_exit_sold_too_early_dimensions`
+- validation: 对 top 卖飞 trade_index 生成 sample drill-down，核对 exit_checks、entry_checks 和后续窗口完整性。
+
+```yaml
+draft_id: post_exit_sold_too_early_dimensions
+status: draft_requires_manual_confirmation
+source_candidate_id: candidate.post_exit.sold_too_early_dimensions
+title_zh: 扩展卖飞复盘维度
+purpose_zh: 围绕最大反弹样本补充退出日证据分组，判断是否缺少可解释维度。
+base_config_path: examples\run-tushare-expanded-add-on.yaml
+suggested_run_id: tushare-expanded-add-on-2023-2024__review__post_exit_sold_too_early_dimensions
+candidate_direction: post_exit_framework
+candidate_type: review_dimension
+suggested_change:
+  artifact_or_config: analysis.post_exit / exit attribution evidence
+  change_zh: 优先检查 symbol/industry/market 退出证据覆盖，再决定是否新增退出归因因子。
+  not_allowed:
+  - 不要直接把卖飞样本变成持仓规则
+  - 不要把反弹幅度作为调参目标
+validation_plan_zh: 对 top 卖飞 trade_index 生成 sample drill-down，核对 exit_checks、entry_checks
+  和后续窗口完整性。
+evidence_refs:
+- artifact: review_packet
+  section: sold_too_early
+sample_refs:
+- kind: trade
+  trade_index: 117
+  symbol: 000858.SZ
+  entry_date: '2024-09-18'
+  exit_date: '2024-09-25'
+- kind: trade
+  trade_index: 116
+  symbol: 600030.SH
+  entry_date: '2024-09-12'
+  exit_date: '2024-09-24'
+- kind: trade
+  trade_index: 75
+  symbol: 600276.SH
+  entry_date: '2024-01-30'
+  exit_date: '2024-02-02'
+- kind: trade
+  trade_index: 110
+  symbol: 600276.SH
+  entry_date: '2024-08-20'
+  exit_date: '2024-09-27'
+- kind: trade
+  trade_index: 72
+  symbol: 300750.SZ
+  entry_date: '2024-01-08'
+  exit_date: '2024-01-30'
+- kind: trade
+  trade_index: 115
+  symbol: 000333.SZ
+  entry_date: '2024-09-10'
+  exit_date: '2024-09-19'
+- kind: trade
+  trade_index: 125
+  symbol: 002475.SZ
+  entry_date: '2024-11-15'
+  exit_date: '2024-11-25'
+- kind: trade
+  trade_index: 111
+  symbol: 000858.SZ
+  entry_date: '2024-08-27'
+  exit_date: '2024-09-13'
+- kind: trade
+  trade_index: 35
+  symbol: 600030.SH
+  entry_date: '2023-06-26'
+  exit_date: '2023-07-28'
+- kind: trade
+  trade_index: 112
+  symbol: 002475.SZ
+  entry_date: '2024-08-28'
+  exit_date: '2024-09-30'
+manual_steps:
+- 读取 source_candidate_id 对应的 candidate 和 sample_refs。
+- 用 review_sample 或 review_sample_batch 核对证据是否完整。
+- 人工决定是否需要新增 evidence producer、分组维度或配置变体。
+- 确认后再把 run_plan_patch 转成合法 RunPlan YAML 并执行回测。
+run_plan_patch:
+  run:
+    id: tushare-expanded-add-on-2023-2024__review__post_exit_sold_too_early_dimensions
+  review_candidate:
+    source_candidate_id: candidate.post_exit.sold_too_early_dimensions
+    manual_confirmation_required: true
+    validation_plan_zh: 对 top 卖飞 trade_index 生成 sample drill-down，核对 exit_checks、entry_checks
+      和后续窗口完整性。
+  analysis:
+    post_exit:
+      enabled: true
+      review_note: 人工确认是否新增退出证据分组；不要直接修改止损参数。
+not_runnable_until: 人工确认 run_plan_patch 并转成合法 RunPlan YAML
+```
+
+## 止损后反弹分组验证
+
+- draft_id: `post_exit_stop_loss_rebound_groups`
+- source_candidate_id: `candidate.post_exit.stop_loss_rebound_groups`
+- suggested_run_id: `tushare-expanded-add-on-2023-2024__review__post_exit_stop_loss_rebound_groups`
+- validation: 批量展开 top 止损反弹样本，比较 exit_checks 与 rebound threshold summaries。
+
+```yaml
+draft_id: post_exit_stop_loss_rebound_groups
+status: draft_requires_manual_confirmation
+source_candidate_id: candidate.post_exit.stop_loss_rebound_groups
+title_zh: 止损后反弹分组验证
+purpose_zh: 按止损样本的退出证据分组，检查反弹是否集中在特定市场/行业/个股上下文。
+base_config_path: examples\run-tushare-expanded-add-on.yaml
+suggested_run_id: tushare-expanded-add-on-2023-2024__review__post_exit_stop_loss_rebound_groups
+candidate_direction: post_exit_framework
+candidate_type: grouping_probe
+suggested_change:
+  artifact_or_config: post_exit_analysis.factor_group_summaries
+  change_zh: 新增或检查退出证据分组，而不是直接改变止损参数。
+  not_allowed:
+  - 不要用后验反弹证明止损错误
+validation_plan_zh: 批量展开 top 止损反弹样本，比较 exit_checks 与 rebound threshold summaries。
+evidence_refs:
+- artifact: review_packet
+  section: stop_loss_rebound
+sample_refs:
+- kind: trade
+  trade_index: 75
+  symbol: 600276.SH
+  entry_date: '2024-01-30'
+  exit_date: '2024-02-02'
+- kind: trade
+  trade_index: 72
+  symbol: 300750.SZ
+  entry_date: '2024-01-08'
+  exit_date: '2024-01-30'
+- kind: trade
+  trade_index: 125
+  symbol: 002475.SZ
+  entry_date: '2024-11-15'
+  exit_date: '2024-11-25'
+- kind: trade
+  trade_index: 111
+  symbol: 000858.SZ
+  entry_date: '2024-08-27'
+  exit_date: '2024-09-13'
+- kind: trade
+  trade_index: 51
+  symbol: 300750.SZ
+  entry_date: '2023-10-17'
+  exit_date: '2023-10-25'
+- kind: trade
+  trade_index: 66
+  symbol: 300750.SZ
+  entry_date: '2023-12-15'
+  exit_date: '2023-12-18'
+- kind: trade
+  trade_index: 119
+  symbol: 600276.SH
+  entry_date: '2024-10-17'
+  exit_date: '2024-10-31'
+- kind: trade
+  trade_index: 104
+  symbol: 002475.SZ
+  entry_date: '2024-07-23'
+  exit_date: '2024-08-05'
+- kind: trade
+  trade_index: 23
+  symbol: 002475.SZ
+  entry_date: '2023-04-24'
+  exit_date: '2023-04-27'
+- kind: trade
+  trade_index: 26
+  symbol: 600036.SH
+  entry_date: '2023-04-26'
+  exit_date: '2023-06-01'
+manual_steps:
+- 读取 source_candidate_id 对应的 candidate 和 sample_refs。
+- 用 review_sample 或 review_sample_batch 核对证据是否完整。
+- 人工决定是否需要新增 evidence producer、分组维度或配置变体。
+- 确认后再把 run_plan_patch 转成合法 RunPlan YAML 并执行回测。
+run_plan_patch:
+  run:
+    id: tushare-expanded-add-on-2023-2024__review__post_exit_stop_loss_rebound_groups
+  review_candidate:
+    source_candidate_id: candidate.post_exit.stop_loss_rebound_groups
+    manual_confirmation_required: true
+    validation_plan_zh: 批量展开 top 止损反弹样本，比较 exit_checks 与 rebound threshold summaries。
+  analysis:
+    post_exit:
+      enabled: true
+      review_note: 人工确认是否新增退出证据分组；不要直接修改止损参数。
+not_runnable_until: 人工确认 run_plan_patch 并转成合法 RunPlan YAML
+```
+
+## 机会成本阻断原因验证
+
+- draft_id: `execution_opportunity_cost_blocks`
+- source_candidate_id: `candidate.execution.opportunity_cost_blocks`
+- suggested_run_id: `tushare-expanded-add-on-2023-2024__review__execution_opportunity_cost_blocks`
+- validation: 展开 top opportunity sample_index，核对 signal_audit、execution_audit 和 blocked_by 是否一致。
+
+```yaml
+draft_id: execution_opportunity_cost_blocks
+status: draft_requires_manual_confirmation
+source_candidate_id: candidate.execution.opportunity_cost_blocks
+title_zh: 机会成本阻断原因验证
+purpose_zh: 检查机会成本样本是否集中在特定阻断原因、价格区间或一手约束上。
+base_config_path: examples\run-tushare-expanded-add-on.yaml
+suggested_run_id: tushare-expanded-add-on-2023-2024__review__execution_opportunity_cost_blocks
+candidate_direction: execution_constraint_review
+candidate_type: block_reason_probe
+suggested_change:
+  artifact_or_config: sizing/execution review artifacts
+  change_zh: 把高影响 blocked_by 样本作为 sizing 和执行约束复盘入口。
+  not_allowed:
+  - 不要把被阻断后的上涨写成当时应该买入
+validation_plan_zh: 展开 top opportunity sample_index，核对 signal_audit、execution_audit
+  和 blocked_by 是否一致。
+evidence_refs:
+- artifact: review_packet
+  section: opportunity_cost
+sample_refs:
+- kind: opportunity
+  sample_index: 12
+  trade_index: null
+  symbol: 600519.SH
+  trade_date: '2024-09-23'
+- kind: opportunity
+  sample_index: 11
+  trade_index: null
+  symbol: 600519.SH
+  trade_date: '2024-09-20'
+- kind: opportunity
+  sample_index: 437
+  trade_index: null
+  symbol: 600519.SH
+  trade_date: '2024-09-19'
+- kind: opportunity
+  sample_index: 88
+  trade_index: null
+  symbol: 601318.SH
+  trade_date: '2023-04-26'
+- kind: opportunity
+  sample_index: 17
+  trade_index: null
+  symbol: 600276.SH
+  trade_date: '2023-01-12'
+- kind: opportunity
+  sample_index: 326
+  trade_index: null
+  symbol: 600276.SH
+  trade_date: '2024-03-08'
+- kind: opportunity
+  sample_index: 178
+  trade_index: null
+  symbol: 600030.SH
+  trade_date: '2023-08-23'
+- kind: opportunity
+  sample_index: 168
+  trade_index: null
+  symbol: 600030.SH
+  trade_date: '2023-08-21'
+- kind: opportunity
+  sample_index: 173
+  trade_index: null
+  symbol: 600030.SH
+  trade_date: '2023-08-22'
+- kind: opportunity
+  sample_index: 436
+  trade_index: null
+  symbol: 600519.SH
+  trade_date: '2024-09-18'
+manual_steps:
+- 读取 source_candidate_id 对应的 candidate 和 sample_refs。
+- 用 review_sample 或 review_sample_batch 核对证据是否完整。
+- 人工决定是否需要新增 evidence producer、分组维度或配置变体。
+- 确认后再把 run_plan_patch 转成合法 RunPlan YAML 并执行回测。
+run_plan_patch:
+  run:
+    id: tushare-expanded-add-on-2023-2024__review__execution_opportunity_cost_blocks
+  review_candidate:
+    source_candidate_id: candidate.execution.opportunity_cost_blocks
+    manual_confirmation_required: true
+    validation_plan_zh: 展开 top opportunity sample_index，核对 signal_audit、execution_audit
+      和 blocked_by 是否一致。
+    inspect_artifacts:
+    - signal_audit.json
+    - execution_audit.json
+    - sizing_audit.json
+not_runnable_until: 人工确认 run_plan_patch 并转成合法 RunPlan YAML
+```
+
+## 加仓样本覆盖验证
+
+- draft_id: `add_on_sample_coverage`
+- source_candidate_id: `candidate.add_on.sample_coverage`
+- suggested_run_id: `tushare-expanded-add-on-2023-2024__review__add_on_sample_coverage`
+- validation: 反查每个 add_on sample_index 的 add_on_date、execution events、trade lifecycle 和 follow_up。
+
+```yaml
+draft_id: add_on_sample_coverage
+status: draft_requires_manual_confirmation
+source_candidate_id: candidate.add_on.sample_coverage
+title_zh: 加仓样本覆盖验证
+purpose_zh: 确认真实加仓点的证据链完整性，并判断是否需要扩大样本来验证加仓框架。
+base_config_path: examples\run-tushare-expanded-add-on.yaml
+suggested_run_id: tushare-expanded-add-on-2023-2024__review__add_on_sample_coverage
+candidate_direction: add_on_framework_validation
+candidate_type: sample_size_probe
+suggested_change:
+  artifact_or_config: strategy.add_on_method / trade_review.add_on_entry_points
+  change_zh: 优先扩大可观测样本和归因维度，暂不调加仓参数。
+  not_allowed:
+  - 不要用单个加仓样本做策略结论
+validation_plan_zh: 反查每个 add_on sample_index 的 add_on_date、execution events、trade
+  lifecycle 和 follow_up。
+evidence_refs:
+- artifact: review_packet
+  section: add_on
+sample_refs:
+- kind: add_on
+  sample_index: 1
+  trade_index: 120
+  symbol: 600030.SH
+  trade_date: '2024-10-18'
+manual_steps:
+- 读取 source_candidate_id 对应的 candidate 和 sample_refs。
+- 用 review_sample 或 review_sample_batch 核对证据是否完整。
+- 人工决定是否需要新增 evidence producer、分组维度或配置变体。
+- 确认后再把 run_plan_patch 转成合法 RunPlan YAML 并执行回测。
+run_plan_patch:
+  run:
+    id: tushare-expanded-add-on-2023-2024__review__add_on_sample_coverage
+  review_candidate:
+    source_candidate_id: candidate.add_on.sample_coverage
+    manual_confirmation_required: true
+    validation_plan_zh: 反查每个 add_on sample_index 的 add_on_date、execution events、trade
+      lifecycle 和 follow_up。
+    inspect_artifacts:
+    - trade_review.json
+    - trade_lifecycle.json
+    - execution_audit.json
+not_runnable_until: 人工确认 run_plan_patch 并转成合法 RunPlan YAML
+```
+
+## 环境适配稳定性验证
+
+- draft_id: `environment_fit_sample_stability`
+- source_candidate_id: `candidate.environment_fit.sample_stability`
+- suggested_run_id: `tushare-expanded-add-on-2023-2024__review__environment_fit_sample_stability`
+- validation: 用相同策略在更大样本生成 environment_fit，对比 best_by_net_pnl、best_by_return_on_entry_value、low_sample_combination_count 和代表 trade_index 是否仍集中。
+
+```yaml
+draft_id: environment_fit_sample_stability
+status: draft_requires_manual_confirmation
+source_candidate_id: candidate.environment_fit.sample_stability
+title_zh: 环境适配稳定性验证
+purpose_zh: 验证当前 environment_fit 中表现突出的入场环境是否能在更大股票池或更长年份中保持稳定。
+base_config_path: examples\run-tushare-expanded-add-on.yaml
+suggested_run_id: tushare-expanded-add-on-2023-2024__review__environment_fit_sample_stability
+candidate_direction: environment_fit_validation
+candidate_type: sample_stability_probe
+suggested_change:
+  artifact_or_config: environment_fit.json / environment_fit_comparison.json
+  change_zh: 扩大股票池或年份后重跑同一策略，再用 att-compare-environment-fit 比较最佳环境、资金收益率和低样本组合数量。
+  not_allowed:
+  - 不要直接把环境统计结论转成买卖规则
+  - 不要基于低样本组合调参
+validation_plan_zh: 用相同策略在更大样本生成 environment_fit，对比 best_by_net_pnl、best_by_return_on_entry_value、low_sample_combination_count
+  和代表 trade_index 是否仍集中。
+evidence_refs:
+- artifact: review_packet
+  section: environment_fit
+sample_refs:
+- kind: trade
+  trade_index: 120
+  symbol: 600030.SH
+  entry_date: '2024-10-17'
+  exit_date: '2024-11-07'
+- kind: trade
+  trade_index: 35
+  symbol: 600030.SH
+  entry_date: '2023-06-26'
+  exit_date: '2023-07-28'
+- kind: trade
+  trade_index: 112
+  symbol: 002475.SZ
+  entry_date: '2024-08-28'
+  exit_date: '2024-09-30'
+- kind: trade
+  trade_index: 110
+  symbol: 600276.SH
+  entry_date: '2024-08-20'
+  exit_date: '2024-09-27'
+- kind: trade
+  trade_index: 117
+  symbol: 000858.SZ
+  entry_date: '2024-09-18'
+  exit_date: '2024-09-25'
+- kind: trade
+  trade_index: 34
+  symbol: 000858.SZ
+  entry_date: '2023-06-26'
+  exit_date: '2023-07-28'
+- kind: trade
+  trade_index: 77
+  symbol: 000858.SZ
+  entry_date: '2024-02-01'
+  exit_date: '2024-02-22'
+- kind: trade
+  trade_index: 100
+  symbol: 600276.SH
+  entry_date: '2024-07-02'
+  exit_date: '2024-07-12'
+- kind: trade
+  trade_index: 116
+  symbol: 600030.SH
+  entry_date: '2024-09-12'
+  exit_date: '2024-09-24'
+- kind: trade
+  trade_index: 25
+  symbol: 000001.SZ
+  entry_date: '2023-04-25'
+  exit_date: '2023-05-08'
+manual_steps:
+- 读取 source_candidate_id 对应的 environment_fit candidate 和 sample_refs。
+- 扩大股票池或年份后重跑相同策略；不要修改买入、卖出、加仓或仓位参数。
+- 比较新旧 environment_fit.json 的最佳环境、资金收益率、低样本组合数量和代表 trade_index。
+- 如果需要新增环境维度，先补 decision-time evidence producer，再重新生成报告和 review packet。
+run_plan_patch:
+  run:
+    id: tushare-expanded-add-on-2023-2024__review__environment_fit_sample_stability
+  review_candidate:
+    source_candidate_id: candidate.environment_fit.sample_stability
+    manual_confirmation_required: true
+    validation_plan_zh: 用相同策略在更大样本生成 environment_fit，对比 best_by_net_pnl、best_by_return_on_entry_value、low_sample_combination_count
+      和代表 trade_index 是否仍集中。
+    inspect_artifacts:
+    - environment_fit.json
+    - environment_fit_comparison.json
+    - environment_fit_comparison.zh.md
+    - review_packet.all.json
+    - review_findings.all.json
+    comparison_dimensions:
+    - best_by_net_pnl
+    - best_by_return_on_entry_value
+    - low_sample_combination_count
+    - trade_contributions
+    validation_note: 扩大样本验证环境适配稳定性，不直接修改策略参数。
+not_runnable_until: 人工确认 run_plan_patch 并转成合法 RunPlan YAML
+```
+
+## 复盘前证据门禁
+
+- draft_id: `validation_evidence_gate`
+- source_candidate_id: `candidate.validation.evidence_gate`
+- suggested_run_id: `tushare-expanded-add-on-2023-2024__review__validation_evidence_gate`
+- validation: 每次真实回测后先检查 validation finding，再进入其它复盘候选。
+
+```yaml
+draft_id: validation_evidence_gate
+status: draft_requires_manual_confirmation
+source_candidate_id: candidate.validation.evidence_gate
+title_zh: 复盘前证据门禁
+purpose_zh: 保持 evidence_validation 作为 AI 复盘前置门禁。
+base_config_path: examples\run-tushare-expanded-add-on.yaml
+suggested_run_id: tushare-expanded-add-on-2023-2024__review__validation_evidence_gate
+candidate_direction: evidence_validation
+candidate_type: quality_gate
+suggested_change:
+  artifact_or_config: evidence_validation.json
+  change_zh: 如果 status 不是 ok，先修正证据链，再生成 findings/brief。
+  not_allowed:
+  - 不要在证据失败时继续输出策略结论
+validation_plan_zh: 每次真实回测后先检查 validation finding，再进入其它复盘候选。
+evidence_refs:
+- artifact: review_packet
+  section: validation
+sample_refs: []
+manual_steps:
+- 先确认 evidence_validation.status == ok，再生成任何实验配置。
+run_plan_patch:
+  run:
+    id: tushare-expanded-add-on-2023-2024__review__validation_evidence_gate
+  review_candidate:
+    source_candidate_id: candidate.validation.evidence_gate
+    manual_confirmation_required: true
+    validation_plan_zh: 每次真实回测后先检查 validation finding，再进入其它复盘候选。
+    inspect_artifacts:
+    - evidence_validation.json
+not_runnable_until: 人工确认 run_plan_patch 并转成合法 RunPlan YAML
+```

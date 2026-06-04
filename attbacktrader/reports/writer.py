@@ -4,12 +4,29 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
+
+from attbacktrader.data.snapshots import read_daily_bars_parquet
+from attbacktrader.reports.diagnostics import build_result_diagnostics
+from attbacktrader.reports.environment_fit import (
+    build_environment_fit_report_from_artifacts,
+    render_environment_fit_markdown_zh,
+)
+from attbacktrader.reports.evidence_validation import build_evidence_validation
+from attbacktrader.reports.lifecycle import build_trade_lifecycle_report, render_trade_lifecycle_markdown_zh
+from attbacktrader.reports.post_exit import render_post_exit_analysis_markdown_zh
+from attbacktrader.reports.renderer import render_backtest_report_markdown, render_backtest_report_markdown_zh
+from attbacktrader.reports.strategy_environment_profile import (
+    build_strategy_environment_profile_from_artifacts,
+    render_strategy_environment_profile_markdown_zh,
+)
+from attbacktrader.reports.trade_review import build_trade_review_report, render_trade_review_markdown_zh
 
 if TYPE_CHECKING:
     from attbacktrader.config import RunPlan
@@ -23,7 +40,22 @@ class RunArtifactPaths:
     result_path: Path
     report_path: Path
     report_markdown_path: Path
+    report_chinese_markdown_path: Path
     trades_path: Path
+    signal_audit_path: Path
+    sizing_audit_path: Path
+    result_diagnostics_path: Path
+    trade_lifecycle_path: Path
+    trade_lifecycle_chinese_markdown_path: Path
+    trade_review_path: Path
+    trade_review_chinese_markdown_path: Path
+    environment_fit_path: Path
+    environment_fit_chinese_markdown_path: Path
+    strategy_environment_profile_path: Path
+    strategy_environment_profile_chinese_markdown_path: Path
+    post_exit_analysis_path: Path
+    post_exit_analysis_chinese_markdown_path: Path
+    evidence_validation_path: Path
     equity_curve_path: Path
     positions_path: Path
     execution_audit_path: Path
@@ -45,7 +77,22 @@ def write_run_artifacts(
         result_path=output_dir / "result.json",
         report_path=output_dir / "report.json",
         report_markdown_path=output_dir / "report.md",
+        report_chinese_markdown_path=output_dir / "report.zh.md",
         trades_path=output_dir / "trades.json",
+        signal_audit_path=output_dir / "signal_audit.json",
+        sizing_audit_path=output_dir / "sizing_audit.json",
+        result_diagnostics_path=output_dir / "result_diagnostics.json",
+        trade_lifecycle_path=output_dir / "trade_lifecycle.json",
+        trade_lifecycle_chinese_markdown_path=output_dir / "trade_lifecycle.zh.md",
+        trade_review_path=output_dir / "trade_review.json",
+        trade_review_chinese_markdown_path=output_dir / "trade_review.zh.md",
+        environment_fit_path=output_dir / "environment_fit.json",
+        environment_fit_chinese_markdown_path=output_dir / "environment_fit.zh.md",
+        strategy_environment_profile_path=output_dir / "strategy_environment_profile.json",
+        strategy_environment_profile_chinese_markdown_path=output_dir / "strategy_environment_profile.zh.md",
+        post_exit_analysis_path=output_dir / "post_exit_analysis.json",
+        post_exit_analysis_chinese_markdown_path=output_dir / "post_exit_analysis.zh.md",
+        evidence_validation_path=output_dir / "evidence_validation.json",
         equity_curve_path=output_dir / "equity_curve.json",
         positions_path=output_dir / "positions.json",
         execution_audit_path=output_dir / "execution_audit.json",
@@ -59,6 +106,10 @@ def write_run_artifacts(
         render_backtest_report_markdown(run_plan, result),
         encoding="utf-8",
     )
+    artifact_paths.report_chinese_markdown_path.write_text(
+        render_backtest_report_markdown_zh(run_plan, result),
+        encoding="utf-8",
+    )
     _write_json(
         artifact_paths.trades_path,
         {
@@ -66,196 +117,53 @@ def write_run_artifacts(
             "open_positions": result.open_positions,
         },
     )
+    _write_json(artifact_paths.signal_audit_path, result.signal_audit)
+    _write_json(artifact_paths.sizing_audit_path, _sizing_audit(result))
+    _write_json(artifact_paths.result_diagnostics_path, _result_diagnostics(result))
+    trade_lifecycle = _trade_lifecycle(result)
+    _write_json(artifact_paths.trade_lifecycle_path, trade_lifecycle)
+    artifact_paths.trade_lifecycle_chinese_markdown_path.write_text(
+        render_trade_lifecycle_markdown_zh(trade_lifecycle),
+        encoding="utf-8",
+    )
+    trade_review = _trade_review(result, trade_lifecycle)
+    _write_json(artifact_paths.trade_review_path, trade_review)
+    artifact_paths.trade_review_chinese_markdown_path.write_text(
+        render_trade_review_markdown_zh(trade_review),
+        encoding="utf-8",
+    )
+    environment_fit = _environment_fit(
+        result.run_id,
+        output_dir=output_dir,
+        trade_lifecycle=trade_lifecycle,
+        trade_review=trade_review,
+    )
+    _write_json(artifact_paths.environment_fit_path, environment_fit)
+    artifact_paths.environment_fit_chinese_markdown_path.write_text(
+        render_environment_fit_markdown_zh(environment_fit),
+        encoding="utf-8",
+    )
+    strategy_environment_profile = _strategy_environment_profile(
+        output_dir=output_dir,
+        environment_fit=environment_fit,
+    )
+    _write_json(artifact_paths.strategy_environment_profile_path, strategy_environment_profile)
+    artifact_paths.strategy_environment_profile_chinese_markdown_path.write_text(
+        render_strategy_environment_profile_markdown_zh(strategy_environment_profile),
+        encoding="utf-8",
+    )
+    _write_json(artifact_paths.post_exit_analysis_path, result.post_exit_analysis)
+    artifact_paths.post_exit_analysis_chinese_markdown_path.write_text(
+        render_post_exit_analysis_markdown_zh(result.post_exit_analysis),
+        encoding="utf-8",
+    )
+    _write_json(artifact_paths.evidence_validation_path, _evidence_validation(result))
     _write_json(artifact_paths.equity_curve_path, result.equity_curve)
     _write_json(artifact_paths.positions_path, result.position_snapshots)
     _write_json(artifact_paths.execution_audit_path, result.execution_audit)
     _write_json(artifact_paths.snapshots_path, _snapshot_index(result))
 
     return artifact_paths
-
-
-def render_backtest_report_markdown(run_plan: "RunPlan", result: "RunPlanExecutionResult") -> str:
-    report = result.report
-    lines = [
-        f"# Backtest Report: {report.report_id}",
-        "",
-        "## Run",
-        "",
-        "| Field | Value |",
-        "|---|---:|",
-        f"| Window | {run_plan.run.from_date} to {run_plan.run.to_date} |",
-        f"| Engine | {result.engine} |",
-        f"| Adjustment | {result.adjustment} |",
-        f"| Symbols | {', '.join(result.symbols)} |",
-        f"| Final cash | {_format_optional_number(result.final_cash)} |",
-        f"| Final value | {_format_optional_number(result.final_value)} |",
-        "",
-        "## Returns",
-        "",
-        "| Metric | Value |",
-        "|---|---:|",
-        f"| Starting equity | {_format_number(report.returns.starting_equity)} |",
-        f"| Final equity | {_format_number(report.returns.final_equity)} |",
-        f"| Cumulative return | {_format_percent(report.returns.cumulative_return)} |",
-        f"| Max drawdown | {_format_percent(report.risk.max_drawdown)} |",
-        "",
-        "## Trade Quality",
-        "",
-        "| Metric | Value |",
-        "|---|---:|",
-        f"| Trades | {report.trade_quality.trade_count} |",
-        f"| Wins | {report.trade_quality.win_count} |",
-        f"| Losses | {report.trade_quality.loss_count} |",
-        f"| Win rate | {_format_optional_percent(report.trade_quality.win_rate)} |",
-        f"| Average win | {_format_optional_percent(report.trade_quality.average_win)} |",
-        f"| Average loss | {_format_optional_percent(report.trade_quality.average_loss)} |",
-        f"| Profit/loss ratio | {_format_optional_number(report.trade_quality.profit_loss_ratio)} |",
-        "",
-    ]
-
-    if report.portfolio_behavior is not None:
-        portfolio = report.portfolio_behavior
-        lines.extend(
-            [
-                "## Portfolio Behavior",
-                "",
-                "| Metric | Value |",
-                "|---|---:|",
-                f"| Open positions | {portfolio.open_position_count} |",
-                f"| Open symbols | {', '.join(portfolio.open_symbols) if portfolio.open_symbols else '-'} |",
-                f"| Closed symbols | {portfolio.closed_symbol_count} |",
-                f"| Max symbol trade share | {_format_optional_percent(portfolio.max_symbol_trade_share)} |",
-                f"| Cash ratio | {_format_optional_percent(portfolio.cash_ratio)} |",
-                "",
-            ]
-        )
-        if portfolio.symbol_contributions:
-            lines.extend(
-                [
-                    "| Symbol | Trades | Cumulative return | Average return |",
-                    "|---|---:|---:|---:|",
-                ]
-            )
-            for contribution in portfolio.symbol_contributions:
-                lines.append(
-                    "| "
-                    f"{contribution.symbol} | "
-                    f"{contribution.trade_count} | "
-                    f"{_format_percent(contribution.cumulative_return)} | "
-                    f"{_format_percent(contribution.average_return)} |"
-                )
-            lines.append("")
-
-    if report.execution_costs is not None:
-        execution = report.execution_costs
-        lines.extend(
-            [
-                "## Execution Costs",
-                "",
-                "| Metric | Value |",
-                "|---|---:|",
-                f"| Orders | {execution.order_count} |",
-                f"| Submitted | {execution.submitted_count} |",
-                f"| Accepted | {execution.accepted_count} |",
-                f"| Completed | {execution.completed_count} |",
-                f"| Failed | {execution.failed_count} |",
-                f"| Rejected | {execution.rejected_count} |",
-                f"| Fill rate | {_format_optional_percent(execution.fill_rate)} |",
-                f"| Rejection rate | {_format_optional_percent(execution.rejection_rate)} |",
-                f"| Total commission | {_format_number(execution.total_commission)} |",
-                f"| Average commission | {_format_optional_number(execution.average_commission)} |",
-                f"| Total slippage cost | {_format_number(execution.total_slippage_cost)} |",
-                f"| Average slippage cost | {_format_optional_number(execution.average_slippage_cost)} |",
-                "",
-            ]
-        )
-        if execution.rejections:
-            lines.extend(["| Rejection reason | Count |", "|---|---:|"])
-            for rejection in execution.rejections:
-                lines.append(f"| {rejection.blocked_by} | {rejection.count} |")
-            lines.append("")
-
-    if report.benchmark_comparison:
-        lines.extend(
-            [
-                "## Benchmark Comparison",
-                "",
-                "| Benchmark | Strategy return | Benchmark return | Excess return |",
-                "|---|---:|---:|---:|",
-            ]
-        )
-        for comparison in report.benchmark_comparison:
-            lines.append(
-                "| "
-                f"{comparison.benchmark_symbol} | "
-                f"{_format_percent(comparison.strategy_return)} | "
-                f"{_format_percent(comparison.benchmark_return)} | "
-                f"{_format_percent(comparison.excess_return)} |"
-            )
-        lines.append("")
-
-    if report.industry_attribution:
-        lines.extend(
-            [
-                "## Industry Attribution",
-                "",
-                "| Level | Code | Name | Trades | Average return | Contribution |",
-                "|---:|---|---|---:|---:|---:|",
-            ]
-        )
-        for attribution in report.industry_attribution:
-            lines.append(
-                "| "
-                f"{attribution.level} | "
-                f"{attribution.industry_code} | "
-                f"{attribution.industry_name} | "
-                f"{attribution.trade_count} | "
-                f"{_format_percent(attribution.average_return)} | "
-                f"{_format_percent(attribution.contribution_return)} |"
-            )
-        lines.append("")
-
-    if report.market_regime is not None:
-        regime = report.market_regime
-        lines.extend(
-            [
-                "## Market Regime",
-                "",
-                f"Primary label: `{regime.primary_label}`",
-                "",
-                "| Timeframe | Label | Benchmark return | Drawdown | Volatility | Industry positive ratio |",
-                "|---|---|---:|---:|---:|---:|",
-            ]
-        )
-        for window in regime.windows:
-            lines.append(
-                "| "
-                f"{window.timeframe} | "
-                f"{window.label} | "
-                f"{_format_optional_percent(window.benchmark_return)} | "
-                f"{_format_optional_percent(window.benchmark_max_drawdown)} | "
-                f"{_format_optional_percent(window.benchmark_volatility)} | "
-                f"{_format_optional_percent(window.industry_positive_ratio)} |"
-            )
-        lines.append("")
-
-    if report.scenario_fit is not None:
-        scenario = report.scenario_fit
-        lines.extend(
-            [
-                "## Scenario Fit",
-                "",
-                f"- Label: `{scenario.label}`",
-                f"- Score: {scenario.score}",
-            ]
-        )
-        if scenario.reasons:
-            lines.append(f"- Reasons: {'; '.join(scenario.reasons)}")
-        if scenario.warnings:
-            lines.append(f"- Warnings: {'; '.join(scenario.warnings)}")
-        lines.append("")
-
-    return "\n".join(lines).rstrip() + "\n"
 
 
 def _snapshot_index(result: RunPlanExecutionResult) -> dict[str, Any]:
@@ -267,7 +175,12 @@ def _snapshot_index(result: RunPlanExecutionResult) -> dict[str, Any]:
                 "adjustment": symbol_result.adjustment,
                 "snapshot_path": symbol_result.snapshot_path,
                 "indicator_snapshot_path": symbol_result.indicator_snapshot_path,
+                "indicator_snapshot_paths": symbol_result.indicator_snapshot_paths,
+                "snapshot_provenance": symbol_result.snapshot_provenance,
+                "indicator_snapshot_provenance": symbol_result.indicator_snapshot_provenance,
                 "tradability_snapshot_path": symbol_result.tradability_snapshot_path,
+                "tradability_snapshot_provenance": symbol_result.tradability_snapshot_provenance,
+                "data_quality_issues": symbol_result.data_quality_issues,
             }
             for symbol_result in result.symbol_results
         ],
@@ -279,20 +192,99 @@ def _snapshot_index(result: RunPlanExecutionResult) -> dict[str, Any]:
     }
 
 
+def _sizing_audit(result: RunPlanExecutionResult) -> tuple[dict[str, Any], ...]:
+    records: list[dict[str, Any]] = []
+    for intent in result.signal_audit:
+        sizing_values = intent.signal_values.get("sizing")
+        if not isinstance(sizing_values, Mapping):
+            continue
+        records.append(
+            {
+                "symbol": intent.symbol,
+                "trade_date": intent.trade_date,
+                "intent_method_name": intent.method_name,
+                "intent_reason_code": intent.reason_code,
+                "intent_type": intent.intent_type.value,
+                "blocked_by": intent.blocked_by,
+                "sizing": dict(sizing_values),
+            }
+        )
+    return tuple(records)
+
+
+def _result_diagnostics(result: RunPlanExecutionResult):
+    return build_result_diagnostics(
+        symbols=result.symbols,
+        closed_trades=result.closed_trades,
+        signal_audit=result.signal_audit,
+        execution_audit=result.execution_audit,
+        open_positions=result.open_positions,
+    )
+
+
+def _trade_lifecycle(result: RunPlanExecutionResult):
+    return build_trade_lifecycle_report(
+        closed_trades=result.closed_trades,
+        signal_audit=result.signal_audit,
+        execution_audit=result.execution_audit,
+    )
+
+
+def _trade_review(result: RunPlanExecutionResult, trade_lifecycle):
+    return build_trade_review_report(
+        closed_trades=result.closed_trades,
+        signal_audit=result.signal_audit,
+        execution_audit=result.execution_audit,
+        post_exit_analysis=result.post_exit_analysis,
+        trade_lifecycle=trade_lifecycle,
+        bars_by_symbol=_bars_by_symbol(result),
+    )
+
+
+def _environment_fit(run_id: str, *, output_dir: Path, trade_lifecycle, trade_review):
+    return build_environment_fit_report_from_artifacts(
+        run_id=run_id,
+        source_dir=str(output_dir),
+        trade_review=to_jsonable(trade_review),
+        trade_lifecycle=to_jsonable(trade_lifecycle),
+    )
+
+
+def _strategy_environment_profile(*, output_dir: Path, environment_fit):
+    return build_strategy_environment_profile_from_artifacts(
+        environment_fit=to_jsonable(environment_fit),
+        source_dir=str(output_dir),
+        environment_fit_path=str(output_dir / "environment_fit.json"),
+    )
+
+
+def _evidence_validation(result: RunPlanExecutionResult):
+    return build_evidence_validation(result)
+
+
+def _bars_by_symbol(result: RunPlanExecutionResult):
+    bars_by_symbol = {}
+    for symbol_result in result.symbol_results:
+        if not symbol_result.snapshot_path.exists():
+            continue
+        bars_by_symbol[symbol_result.symbol] = read_daily_bars_parquet(symbol_result.snapshot_path)
+    return bars_by_symbol
+
+
 def _write_json(path: Path, payload: Any) -> None:
     path.write_text(
-        json.dumps(_to_jsonable(payload), ensure_ascii=False, indent=2),
+        json.dumps(to_jsonable(payload), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
 
-def _to_jsonable(value: Any) -> Any:
+def to_jsonable(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
 
     if is_dataclass(value) and not isinstance(value, type):
         return {
-            field.name: _to_jsonable(getattr(value, field.name))
+            field.name: to_jsonable(getattr(value, field.name))
             for field in fields(value)
         }
 
@@ -303,32 +295,12 @@ def _to_jsonable(value: Any) -> Any:
         return value.isoformat()
 
     if isinstance(value, (tuple, list)):
-        return [_to_jsonable(item) for item in value]
+        return [to_jsonable(item) for item in value]
 
-    if isinstance(value, dict):
-        return {str(key): _to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, Mapping):
+        return {str(key): to_jsonable(item) for key, item in value.items()}
 
     return value
-
-
-def _format_number(value: float) -> str:
-    return f"{value:.6f}".rstrip("0").rstrip(".")
-
-
-def _format_optional_number(value: float | None) -> str:
-    if value is None:
-        return "-"
-    return _format_number(value)
-
-
-def _format_percent(value: float) -> str:
-    return f"{value * 100:.2f}%"
-
-
-def _format_optional_percent(value: float | None) -> str:
-    if value is None:
-        return "-"
-    return _format_percent(value)
 
 
 def _safe_path_name(value: str) -> str:

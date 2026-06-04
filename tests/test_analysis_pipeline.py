@@ -56,10 +56,13 @@ def test_enrich_backtest_report_adds_configured_analysis_sections() -> None:
     assert report.benchmark_comparison[0].benchmark_symbol == "000001.SH"
     assert len(report.industry_attribution) == 3
     assert report.market_regime is not None
-    assert report.market_regime.primary_label == "hot"
+    assert report.market_regime.primary_label == "input_only"
+    assert report.market_regime.benchmark_symbols == ("000001.SH",)
+    assert report.market_regime.industry_index_symbols == ("801780.SI",)
+    assert report.market_regime.timeframes == ("D",)
     assert report.scenario_fit is not None
-    assert report.scenario_fit.label == "fit"
-    assert report.scenario_fit.score >= 5
+    assert report.scenario_fit.label == "conditional_fit"
+    assert report.scenario_fit.score == 4
     assert report.portfolio_behavior is not None
     assert report.portfolio_behavior.open_position_count == 1
     assert report.portfolio_behavior.open_symbols == ("000001.SZ",)

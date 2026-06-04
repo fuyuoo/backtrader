@@ -3,7 +3,6 @@ from attbacktrader.reports import (
     BacktestReport,
     BenchmarkComparisonSummary,
     MarketRegimeSummary,
-    MarketRegimeWindowSummary,
     ReturnSummary,
     RiskSummary,
     TradeQualitySummary,
@@ -18,15 +17,14 @@ def test_evaluate_scenario_fit_labels_fit_when_evidence_is_strong() -> None:
         win_rate=0.6,
         profit_loss_ratio=1.4,
         excess_return=0.03,
-        market_label="warm",
     )
 
     fit = evaluate_scenario_fit(report, min_trades=3)
 
     assert fit.label == "fit"
-    assert fit.score == 6
+    assert fit.score == 5
     assert "positive cumulative return" in fit.reasons
-    assert "market regime is warm" in fit.reasons
+    assert not any(reason.startswith("market regime is") for reason in fit.reasons)
 
 
 def test_evaluate_scenario_fit_labels_not_fit_when_evidence_is_weak() -> None:
@@ -37,14 +35,13 @@ def test_evaluate_scenario_fit_labels_not_fit_when_evidence_is_weak() -> None:
         win_rate=0.25,
         profit_loss_ratio=0.7,
         excess_return=-0.02,
-        market_label="cold",
     )
 
     fit = evaluate_scenario_fit(report, min_trades=3)
 
     assert fit.label == "not_fit"
     assert fit.score == 0
-    assert "market regime is cold" in fit.warnings
+    assert not any(warning.startswith("market regime is") for warning in fit.warnings)
 
 
 def test_evaluate_scenario_fit_requires_minimum_trade_count() -> None:
@@ -55,7 +52,6 @@ def test_evaluate_scenario_fit_requires_minimum_trade_count() -> None:
         win_rate=1.0,
         profit_loss_ratio=None,
         excess_return=0.05,
-        market_label="hot",
     )
 
     fit = evaluate_scenario_fit(report, min_trades=3)
@@ -74,7 +70,6 @@ def _report(
     win_rate: float | None,
     profit_loss_ratio: float | None,
     excess_return: float,
-    market_label: str,
 ) -> BacktestReport:
     return BacktestReport(
         report_id="scenario-fit-test",
@@ -102,18 +97,10 @@ def _report(
             ),
         ),
         market_regime=MarketRegimeSummary(
-            primary_label=market_label,
-            windows=(
-                MarketRegimeWindowSummary(
-                    timeframe="D",
-                    label=market_label,
-                    benchmark_count=1,
-                    benchmark_return=0.03,
-                    benchmark_max_drawdown=0.04,
-                    benchmark_volatility=0.01,
-                    industry_count=1,
-                    industry_positive_ratio=1.0,
-                ),
-            ),
+            primary_label="input_only",
+            windows=(),
+            benchmark_symbols=("000001.SH",),
+            industry_index_symbols=("801780.SI",),
+            timeframes=("D",),
         ),
     )

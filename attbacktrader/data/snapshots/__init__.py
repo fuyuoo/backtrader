@@ -15,7 +15,17 @@ from .industry_store import (
     write_shenwan_classifications_parquet,
     write_stock_industry_memberships_parquet,
 )
-from .parquet_store import daily_bars_snapshot_path, read_daily_bars_parquet, tradable_bars_snapshot_path, write_daily_bars_parquet
+from .parquet_store import (
+    DailyBarsSnapshotCandidate,
+    daily_bars_snapshot_path,
+    discover_tradable_bars_snapshot_paths,
+    merge_daily_bars,
+    read_daily_bars_parquet,
+    tradable_bars_snapshot_path,
+    write_daily_bars_parquet,
+    write_merged_daily_bars_parquet,
+)
+from .provenance import SnapshotProvenance
 from .tradability_store import (
     read_tradability_statuses_parquet,
     tradability_status_snapshot_path,
@@ -23,9 +33,13 @@ from .tradability_store import (
 )
 
 __all__ = [
+    "DailyBarsSnapshotCandidate",
+    "SnapshotProvenance",
     "daily_bars_snapshot_path",
+    "discover_tradable_bars_snapshot_paths",
     "index_bars_snapshot_path",
     "industry_index_bars_snapshot_path",
+    "merge_daily_bars",
     "read_daily_bars_csv",
     "read_daily_bars_parquet",
     "read_index_bars_parquet",
@@ -38,6 +52,7 @@ __all__ = [
     "tradability_status_snapshot_path",
     "write_daily_bars_parquet",
     "write_index_bars_parquet",
+    "write_merged_daily_bars_parquet",
     "write_shenwan_classifications_parquet",
     "write_stock_industry_memberships_parquet",
     "write_tradability_statuses_parquet",

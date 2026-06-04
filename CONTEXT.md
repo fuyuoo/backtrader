@@ -180,6 +180,130 @@ _Avoid_: Stop-loss setting
 A standardized decision emitted by an entry, profit-taking, or stop-loss method before sizing and execution, such as enter, exit profit, exit loss, hold, or avoid. It includes explanatory evidence such as the method name, reason code, signal values, risk price, target price, confidence, and any blocking constraint.
 _Avoid_: Order, buy/sell command
 
+**Entry Attribution**:
+A post-run explanation that links a completed trade back to its entry date and the entry decision evidence that was visible on that date.
+_Avoid_: Report recalculation, hindsight indicator calculation
+
+**Entry Attribution Configuration**:
+The run-plan section that selects which declared entry attribution factors are retained, configures market and industry attribution parameters, and optionally enables decision-layer entry filters before sizing.
+_Avoid_: Indicator config, report-only option
+
+**Entry Attribution Factor**:
+A structured piece of entry-time evidence used by entry attribution, such as a boolean condition check or numeric market feature value observed on the trade's entry date. Each factor is scoped by what it describes, such as the traded symbol, its industry, the broader market, or sizing context.
+_Avoid_: Calculated-after-the-fact metric, default-filled indicator
+
+**Entry Attribution Factor Declaration**:
+An explicit declaration of an entry attribution factor's key, type, human label, scope, dependencies, and missing-data behavior.
+_Avoid_: Ad hoc signal key, implicit report field
+
+**Entry Attribution Evidence**:
+The structured evidence captured with an entry decision so completed trades can later be explained by the conditions, values, and categories visible at entry time.
+_Avoid_: Free-form signal dump, report-only evidence
+
+**Entry Attribution Evidence Producer**:
+The strategy method or shared evidence builder that captures entry attribution evidence at decision time and owns the declarations for the factors it emits.
+_Avoid_: Report owner, implicit statistics owner
+
+**Entry Attribution Filter**:
+A decision-layer rule that requires selected attribution check factors to be true before an entry intent can reach sizing. Missing checks follow an explicit policy and remain missing in statistics.
+_Avoid_: Indicator, report filter, default false check
+
+**Entry Attribution Scope**:
+The source domain described by an entry attribution factor, such as symbol, industry, market, or sizing.
+_Avoid_: Flat factor bucket, unlabeled evidence
+
+**Entry Attribution Sample**:
+A completed trade used as one observation in entry attribution statistics. Rejected, blocked, or unfilled entry intents are execution or opportunity evidence, not profit/loss attribution samples.
+_Avoid_: Entry signal sample, rejected-trade attribution sample
+
+**Primary Entry Attribution**:
+Entry attribution based on the initial successful entry that opens a completed trade's position. Add-on entries are separate position-lifecycle evidence, not blended into the primary entry sample.
+_Avoid_: Blended entry attribution
+
+**Entry Attribution Summary**:
+A post-run aggregation of entry attribution samples, grouped by outcome and optionally by symbol or portfolio-wide scope.
+_Avoid_: Raw trade list, ungrouped signal count
+
+**Entry Attribution Coverage**:
+The proportion of entry attribution samples where a factor is present. Missing evidence is measured separately and is never treated as false, zero, neutral, or a report-time default.
+_Avoid_: Default-filled coverage, implicit false evidence
+
+**Entry Attribution Contrast**:
+A comparison between winning and losing entry attribution samples that ranks factors by differences such as true-rate gap, average-value gap, or category-rate gap.
+_Avoid_: Predictive signal proof, statistical causality claim
+
+**Exit Attribution**:
+A post-run explanation that links a completed trade back to the exit intent that closed it and summarizes the decision evidence visible at exit time.
+_Avoid_: Entry attribution, report-time exit calculation
+
+**Add-On Attribution Output**:
+The lifecycle-attribution output that links successful add-on intents to the completed trade that was open after primary entry and before exit. It keeps primary entry attribution separate while summarizing add-on evidence by winning and losing trade outcomes.
+_Avoid_: Blended entry attribution, hidden scale-in evidence
+
+**Trade Lifecycle Artifact**:
+A run artifact that stores each completed trade's entry, successful add-on, and exit timeline with linked signal evidence and execution audit events.
+_Avoid_: Recalculated trade explanation, report-only timeline
+
+**Trade Lifecycle Index**:
+A navigation index inside the trade lifecycle artifact, grouping completed trades by evidence fields such as outcome, add-on count, entry checks, categories, and rejection reasons without creating new analysis facts.
+_Avoid_: New strategy metric, inferred trade state
+
+**Trade Review Artifact**:
+A consolidated downstream run artifact that joins completed-trade lifecycle, post-exit sold-too-early labels, stop-loss rebound profiles, opportunity/block samples, and add-on entry-point follow-up without rerunning strategy logic.
+_Avoid_: New strategy source, report-time trade inference
+
+**Environment Fit Report**:
+A downstream artifact that groups completed trades by decision-time entry environment and summarizes win rate, return, completed-order net PnL, and return on entry value. It consumes persisted trade review and lifecycle evidence only.
+_Avoid_: Indicator calculation, causal environment proof, auto filter recommendation
+
+**Environment Fit Comparison**:
+A cross-run review artifact that compares existing `environment_fit.json` files for best-environment stability, low-sample risk, common-environment deltas, and representative `trade_index` drill-down refs.
+_Avoid_: Strategy tuning result, rerun trigger, parameter leaderboard
+
+**AI Review Packet**:
+A focus-specific, AI/Skill-friendly view generated from persisted run artifacts. It includes source artifact pointers, an evidence-use contract, summaries, and capped samples with `trade_index` or `sample_index` for backtracking.
+_Avoid_: AI-generated evidence, recalculated analysis layer
+
+**AI Review Findings**:
+A structured finding draft generated from an AI review packet. It carries citation-ready finding IDs, evidence references, sample references, caveats, and next checks for an AI reviewer.
+_Avoid_: Final strategy judgment, unsupported AI conclusion
+
+**Review Sample Drill-Down**:
+A focused evidence packet for one trade, opportunity, or add-on sample, built from persisted artifacts using `trade_index` or `sample_index`.
+_Avoid_: Whole-run report, recalculated sample evidence
+
+**Review Sample Batch**:
+A downstream artifact that expands sample references from AI review findings into a compact batch of sample evidence summaries and optional individual sample packet paths.
+_Avoid_: New metric table, strategy sample generator
+
+**AI Review Brief**:
+A Skill-ready artifact that combines AI review findings, expanded sample summaries, evidence-use rules, a first-page environment-fit summary, and an expected output schema.
+_Avoid_: Free-form AI prompt, final strategy report
+
+**AI Review Result**:
+A persisted structured review output derived from an AI review brief, optionally enriched with environment-fit comparison evidence, keeping claims, evidence references, sample references, risks, and next checks.
+_Avoid_: Uncited AI summary, strategy tuning result
+
+**Review Experiment Candidate**:
+A validation idea derived from review findings and sample evidence, such as an evidence grouping probe or blocked-reason investigation. It is not a parameter change by itself.
+_Avoid_: Tuning recommendation, strategy change request
+
+**Review Experiment Draft**:
+A manually confirmable YAML planning artifact generated from a review experiment candidate. It is not an executable RunPlan until reviewed and converted.
+_Avoid_: Auto-generated strategy config, accepted experiment
+
+**Confirmed Review Experiment RunPlan**:
+A validated RunPlan YAML generated from exactly one manually confirmed review experiment draft. Review metadata is stripped from the executable YAML and kept in the confirmation manifest.
+_Avoid_: Automatic tuning, unreviewed draft execution, mixed evidence/config YAML
+
+**Post-Exit Follow-Up**:
+A downstream evidence view that starts from completed trades, matched exit intents, and prepared market bars, then observes configured windows after an exit to review what happened after stop-loss or profit-taking. It does not rerun strategy methods or recalculate indicators.
+_Avoid_: Exit signal calculation, post-hoc strategy rule
+
+**Sold Too Early**:
+An explanatory post-exit review label applied when price rebounds above the exit price within the configured follow-up window after sale. It is a review aid, not proof that the strategy should have held or a causality claim.
+_Avoid_: Optimization target, hindsight sell rule
+
 **Sizing Rule**:
 A rule that converts a signal and portfolio state into target exposure or order size.
 _Avoid_: Position sizing function
@@ -199,6 +323,10 @@ _Avoid_: A-share mode
 **Backtest Report**:
 A standard result model for a completed strategy run, covering return, risk, trade quality, portfolio behavior, execution costs, industry attribution, benchmark comparison, and market regime fit.
 _Avoid_: Analyzer output, result dict
+
+**Real-Run Regression Baseline**:
+An accepted metric snapshot for persisted real Tushare run artifacts, used to detect framework drift without rerunning strategy search or treating the numbers as optimization targets.
+_Avoid_: Parameter tuning objective, performance leaderboard
 
 **Portfolio Behavior**:
 A post-run summary of how the portfolio behaved across symbols, including open holding count, open symbols, cash ratio when broker state is available, closed-symbol count, and per-symbol trade contribution.

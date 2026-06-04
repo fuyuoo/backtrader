@@ -9,7 +9,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, field_validator, model_validator
 
 from attbacktrader.data.adjustments import DEFAULT_PRICE_ADJUSTMENT
-from attbacktrader.strategies.bindings import allowed_strategy_component_values, strategy_component_binding_fields
+from attbacktrader.strategies.bindings import (
+    allowed_strategy_component_values,
+    strategy_component_binding_fields,
+    validate_strategy_component_params,
+)
+from attbacktrader.strategies.attribution import entry_attribution_declaration_by_key
 
 
 class FrozenModel(BaseModel):
@@ -97,7 +102,13 @@ class StrategyConfig(FrozenModel):
     entry_method: str = Field(min_length=1)
     profit_taking_method: str = Field(min_length=1)
     stop_loss_method: str = Field(min_length=1)
+    add_on_method: str = "none"
     sizing_rule: str = Field(min_length=1)
+    entry_params: dict[str, Any] = Field(default_factory=dict)
+    profit_taking_params: dict[str, Any] = Field(default_factory=dict)
+    stop_loss_params: dict[str, Any] = Field(default_factory=dict)
+    add_on_params: dict[str, Any] = Field(default_factory=dict)
+    sizing_params: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_component_bindings(self) -> "StrategyConfig":
@@ -110,7 +121,23 @@ class StrategyConfig(FrozenModel):
                     f"strategy.{field_name}={value!r} is not bound to "
                     f"template {self.template!r}; allowed values: {allowed}"
                 )
+            validate_strategy_component_params(
+                self.template,
+                field_name,
+                value,
+                getattr(self, _strategy_params_field_name(field_name), {}),
+            )
         return self
+
+
+def _strategy_params_field_name(field_name: str) -> str:
+    return {
+        "entry_method": "entry_params",
+        "profit_taking_method": "profit_taking_params",
+        "stop_loss_method": "stop_loss_params",
+        "add_on_method": "add_on_params",
+        "sizing_rule": "sizing_params",
+    }.get(field_name, f"{field_name}_params")
 
 
 class AShareConstraintConfig(FrozenModel):
@@ -191,10 +218,127 @@ class ScenarioFitConfig(FrozenModel):
     min_trades: PositiveInt = 3
 
 
+class EntryAttributionFilterConfig(FrozenModel):
+    enabled: bool = False
+    require_checks: tuple[str, ...] = ()
+    missing_policy: Literal["block", "pass"] = "block"
+    reason_code: str = "ENTRY_ATTRIBUTION_FILTERED"
+    blocked_by: str = "ENTRY_ATTRIBUTION_FILTER"
+
+    @field_validator("require_checks")
+    @classmethod
+    def validate_require_checks(cls, require_checks: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(require_checks)) != len(require_checks):
+            raise ValueError("analysis.entry_attribution.entry_filter.require_checks cannot contain duplicates")
+
+        declarations = entry_attribution_declaration_by_key()
+        invalid = sorted(key for key in require_checks if key not in declarations)
+        if invalid:
+            raise ValueError(f"unknown entry attribution filter checks: {invalid}")
+
+        non_checks = sorted(
+            key
+            for key in require_checks
+            if declarations[key].factor_type != "check"
+        )
+        if non_checks:
+            raise ValueError(f"entry attribution filter can only require check factors: {non_checks}")
+
+        return require_checks
+
+
+class EntryAttributionConfig(FrozenModel):
+    enabled: bool = True
+    factors: tuple[str, ...] = ()
+    market_symbol: str = "000300.SH"
+    market_fast_period: PositiveInt = 20
+    market_slow_period: PositiveInt = 60
+    industry_kdj_threshold: float = 13.0
+    entry_filter: EntryAttributionFilterConfig = Field(default_factory=EntryAttributionFilterConfig)
+
+    @field_validator("factors")
+    @classmethod
+    def validate_factors(cls, factors: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(factors)) != len(factors):
+            raise ValueError("analysis.entry_attribution.factors cannot contain duplicates")
+
+        declarations = entry_attribution_declaration_by_key()
+        invalid = sorted(key for key in factors if key not in declarations)
+        if invalid:
+            raise ValueError(f"unknown entry attribution factors: {invalid}")
+
+        return factors
+
+    @model_validator(mode="after")
+    def validate_entry_attribution(self) -> "EntryAttributionConfig":
+        if self.market_fast_period >= self.market_slow_period:
+            raise ValueError("analysis.entry_attribution.market_fast_period must be less than market_slow_period")
+
+        if self.entry_filter.enabled and not self.entry_filter.require_checks:
+            raise ValueError("analysis.entry_attribution.entry_filter.require_checks cannot be empty when enabled")
+
+        if self.factors:
+            missing_filter_factors = sorted(set(self.entry_filter.require_checks) - set(self.factors))
+            if missing_filter_factors:
+                raise ValueError(
+                    "analysis.entry_attribution.entry_filter.require_checks must be included in "
+                    f"analysis.entry_attribution.factors: {missing_filter_factors}"
+                )
+
+        return self
+
+    @property
+    def resolved_factors(self) -> tuple[str, ...]:
+        if self.factors:
+            return self.factors
+        return tuple(entry_attribution_declaration_by_key())
+
+
+class PostExitAnalysisConfig(FrozenModel):
+    enabled: bool = True
+    window_days: tuple[PositiveInt, ...] = (5,)
+    primary_window_days: PositiveInt = 5
+    sold_too_early_threshold: float = Field(default=0.0, ge=0)
+    rebound_thresholds: tuple[float, ...] = (0.0, 0.02, 0.05, 0.10)
+
+    @field_validator("window_days")
+    @classmethod
+    def validate_window_days(cls, window_days: tuple[int, ...]) -> tuple[int, ...]:
+        if not window_days:
+            raise ValueError("analysis.post_exit.window_days cannot be empty")
+
+        if len(set(window_days)) != len(window_days):
+            raise ValueError("analysis.post_exit.window_days cannot contain duplicates")
+
+        return tuple(sorted(window_days))
+
+    @field_validator("rebound_thresholds")
+    @classmethod
+    def validate_rebound_thresholds(cls, rebound_thresholds: tuple[float, ...]) -> tuple[float, ...]:
+        if not rebound_thresholds:
+            raise ValueError("analysis.post_exit.rebound_thresholds cannot be empty")
+
+        if any(threshold < 0 for threshold in rebound_thresholds):
+            raise ValueError("analysis.post_exit.rebound_thresholds must be non-negative")
+
+        if len(set(rebound_thresholds)) != len(rebound_thresholds):
+            raise ValueError("analysis.post_exit.rebound_thresholds cannot contain duplicates")
+
+        return tuple(sorted(rebound_thresholds))
+
+    @model_validator(mode="after")
+    def validate_primary_window(self) -> "PostExitAnalysisConfig":
+        if self.primary_window_days not in self.window_days:
+            raise ValueError("analysis.post_exit.primary_window_days must be included in window_days")
+        return self
+
+
 class AnalysisConfig(FrozenModel):
     industry_attribution: IndustryAttributionConfig = Field(default_factory=IndustryAttributionConfig)
     market_regime: MarketRegimeConfig = Field(default_factory=MarketRegimeConfig)
     scenario_fit: ScenarioFitConfig = Field(default_factory=ScenarioFitConfig)
+    entry_attribution: EntryAttributionConfig = Field(default_factory=EntryAttributionConfig)
+    post_exit: PostExitAnalysisConfig = Field(default_factory=PostExitAnalysisConfig)
 
 
 class RunPlan(FrozenModel):

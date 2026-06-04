@@ -5,6 +5,8 @@ from pydantic import ValidationError
 
 from attbacktrader.config import RunPlan, load_run_plan
 from attbacktrader.config.loader import ConfigLoadError
+from attbacktrader.features import IndicatorRequirement
+from attbacktrader.strategies.bindings import bind_strategy_methods, required_indicators_for_strategy_config
 
 
 def minimal_config() -> dict:
@@ -57,15 +59,76 @@ def test_example_run_yaml_loads_to_immutable_run_plan() -> None:
     assert run_plan.analysis.industry_attribution.source == "SW2021"
     assert run_plan.analysis.market_regime.timeframes == ("D", "W", "M")
     assert run_plan.analysis.scenario_fit.min_trades == 3
+    assert run_plan.analysis.entry_attribution.enabled is True
+    assert run_plan.analysis.entry_attribution.market_symbol == "000300.SH"
+    assert run_plan.analysis.entry_attribution.entry_filter.enabled is False
     assert run_plan.data.benchmark_series.indexes == (
         "000001.SH",
         "000300.SH",
         "399006.SZ",
-        "000510.SH",
     )
 
     with pytest.raises(ValidationError, match="frozen"):
         run_plan.run.id = "changed"
+
+
+def test_expanded_baseline_example_loads_as_fixed_stake_comparison_run() -> None:
+    run_plan = load_run_plan(Path("examples/run-tushare-expanded-baseline.yaml"))
+
+    assert run_plan.run.id == "tushare-expanded-baseline-2023-2024"
+    assert run_plan.run.from_date.isoformat() == "2023-01-01"
+    assert run_plan.run.to_date.isoformat() == "2024-12-31"
+    assert len(run_plan.data.resolved_tradable_series) == 10
+    assert run_plan.data.benchmark_series.indexes == (
+        "000001.SH",
+        "000300.SH",
+        "399006.SZ",
+        "000905.SH",
+    )
+    assert run_plan.data.industry_series.indexes == (
+        "801780.SI",
+        "801120.SI",
+        "801110.SI",
+        "801150.SI",
+        "801730.SI",
+        "801080.SI",
+        "801790.SI",
+    )
+    assert run_plan.strategy.sizing_params == {}
+    assert run_plan.execution.stake == 100
+    assert run_plan.analysis.scenario_fit.min_trades == 10
+
+
+def test_expanded_sized_example_loads_practical_portfolio_controls() -> None:
+    run_plan = load_run_plan(Path("examples/run-tushare-expanded-sized.yaml"))
+    methods = bind_strategy_methods(run_plan.strategy)
+
+    assert run_plan.run.id == "tushare-expanded-sized-2023-2024"
+    assert len(run_plan.data.resolved_tradable_series) == 10
+    assert methods.sizing_method.max_holding_count == 5
+    assert methods.sizing_method.max_position_percent == 0.18
+    assert methods.sizing_method.max_total_exposure_percent == 0.9
+    assert methods.sizing_method.max_risk_group_exposure_percent == 0.3
+    assert methods.sizing_method.cash_reserve_percent == 0.05
+    assert methods.sizing_method.max_turnover_percent == 0.35
+    assert methods.sizing_method.risk_group_level == 1
+    assert methods.sizing_method.atr_risk_percent == 0.01
+    assert methods.sizing_method.atr_timeframe == "D"
+    assert IndicatorRequirement("kdj", "D") in required_indicators_for_strategy_config(run_plan.strategy)
+    assert IndicatorRequirement("atr14", "D") in required_indicators_for_strategy_config(run_plan.strategy)
+
+
+def test_attribution_filter_example_loads_configured_entry_filter() -> None:
+    run_plan = load_run_plan(Path("examples/run-tushare-attribution-filter.yaml"))
+
+    assert run_plan.run.id == "tushare-attribution-filter-2023-2024"
+    assert run_plan.analysis.entry_attribution.enabled is True
+    assert run_plan.analysis.entry_attribution.entry_filter.enabled is True
+    assert run_plan.analysis.entry_attribution.entry_filter.require_checks == (
+        "symbol.ma.price_above_ma25",
+        "market.hs300.bullish_trend",
+    )
+    assert "industry.kdj.j_below_threshold" in run_plan.analysis.entry_attribution.factors
 
 
 def test_minimal_valid_config_uses_default_analysis_and_constraints() -> None:
@@ -89,6 +152,10 @@ def test_minimal_valid_config_uses_default_analysis_and_constraints() -> None:
     assert run_plan.analysis.market_regime.timeframes == ("D", "W", "M")
     assert run_plan.analysis.scenario_fit.enabled is True
     assert run_plan.analysis.scenario_fit.min_trades == 3
+    assert "symbol.ma.price_above_ma25" in run_plan.analysis.entry_attribution.resolved_factors
+    assert run_plan.analysis.post_exit.window_days == (5,)
+    assert run_plan.analysis.post_exit.primary_window_days == 5
+    assert run_plan.analysis.post_exit.rebound_thresholds == (0.0, 0.02, 0.05, 0.10)
 
 
 def test_invalid_date_range_fails_before_execution() -> None:
@@ -131,6 +198,86 @@ def test_market_regime_timeframes_cannot_contain_duplicates() -> None:
     }
 
     with pytest.raises(ValidationError, match="timeframes"):
+        RunPlan.from_mapping(raw_config)
+
+
+def test_entry_attribution_config_validates_factors_and_filter_checks() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "entry_attribution": {
+            "enabled": True,
+            "factors": [
+                "symbol.ma.price_above_ma25",
+                "market.hs300.bullish_trend",
+            ],
+            "entry_filter": {
+                "enabled": True,
+                "require_checks": [
+                    "symbol.ma.price_above_ma25",
+                    "market.hs300.bullish_trend",
+                ],
+                "missing_policy": "block",
+            },
+        }
+    }
+
+    run_plan = RunPlan.from_mapping(raw_config)
+
+    assert run_plan.analysis.entry_attribution.factors == (
+        "symbol.ma.price_above_ma25",
+        "market.hs300.bullish_trend",
+    )
+    assert run_plan.analysis.entry_attribution.entry_filter.require_checks == (
+        "symbol.ma.price_above_ma25",
+        "market.hs300.bullish_trend",
+    )
+
+
+def test_entry_attribution_filter_checks_must_be_enabled_factors() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "entry_attribution": {
+            "factors": ["symbol.ma.price_above_ma25"],
+            "entry_filter": {
+                "enabled": True,
+                "require_checks": ["market.hs300.bullish_trend"],
+            },
+        }
+    }
+
+    with pytest.raises(ValidationError, match="must be included"):
+        RunPlan.from_mapping(raw_config)
+
+
+def test_post_exit_analysis_config_validates_windows() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "post_exit": {
+            "window_days": [10, 3, 5],
+            "primary_window_days": 5,
+            "sold_too_early_threshold": 0.01,
+            "rebound_thresholds": [0.05, 0.0, 0.02],
+        }
+    }
+
+    run_plan = RunPlan.from_mapping(raw_config)
+
+    assert run_plan.analysis.post_exit.window_days == (3, 5, 10)
+    assert run_plan.analysis.post_exit.primary_window_days == 5
+    assert run_plan.analysis.post_exit.sold_too_early_threshold == 0.01
+    assert run_plan.analysis.post_exit.rebound_thresholds == (0.0, 0.02, 0.05)
+
+
+def test_post_exit_primary_window_must_be_configured() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "post_exit": {
+            "window_days": [3, 10],
+            "primary_window_days": 5,
+        }
+    }
+
+    with pytest.raises(ValidationError, match="primary_window_days"):
         RunPlan.from_mapping(raw_config)
 
 

@@ -9,7 +9,7 @@ from attbacktrader.analysis.attribution import attribute_trades_by_shenwan_indus
 from attbacktrader.analysis.benchmarks import compare_strategy_to_benchmarks
 from attbacktrader.analysis.execution import summarize_execution_costs
 from attbacktrader.analysis.portfolio import summarize_portfolio_behavior
-from attbacktrader.analysis.regime import classify_market_regime
+from attbacktrader.analysis.regime import summarize_market_regime_inputs
 from attbacktrader.analysis.scenario_fit import evaluate_scenario_fit
 from attbacktrader.config import RunPlan
 from attbacktrader.data import IndexBar, StockIndustryMembership
@@ -51,9 +51,9 @@ def enrich_backtest_report(
 
     market_regime = None
     if run_plan.analysis.market_regime.enabled:
-        market_regime = classify_market_regime(
-            benchmark_bars_by_symbol=evidence.benchmark_bars_by_symbol,
-            industry_index_bars_by_symbol=evidence.industry_index_bars_by_symbol,
+        market_regime = summarize_market_regime_inputs(
+            benchmark_symbols=run_plan.data.benchmark_series.indexes,
+            industry_index_symbols=run_plan.data.industry_series.indexes,
             timeframes=run_plan.analysis.market_regime.timeframes,
         )
 

@@ -6,11 +6,12 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 from types import MappingProxyType
-from typing import Mapping
+from typing import Any, Mapping
 
 
 class TradeIntentType(str, Enum):
     ENTER = "enter"
+    ADD_ON = "add_on"
     EXIT_PROFIT = "exit_profit"
     EXIT_LOSS = "exit_loss"
     HOLD = "hold"
@@ -24,7 +25,7 @@ class TradeIntent:
     trade_date: date
     method_name: str
     reason_code: str
-    signal_values: Mapping[str, float] = field(default_factory=dict)
+    signal_values: Mapping[str, Any] = field(default_factory=dict)
     target_price: float | None = None
     risk_price: float | None = None
     confidence: float | None = None

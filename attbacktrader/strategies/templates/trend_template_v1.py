@@ -4,19 +4,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from attbacktrader.data import DailyBar
 from attbacktrader.features import (
     IndicatorFrame,
     MarketFeatureRow,
-    build_indicator_snapshots,
+    build_indicator_snapshots_for_requirements,
     indicator_frame_from_snapshots,
-    indicator_snapshots_from_frame,
+    indicator_snapshots_from_frame_for_requirements,
     join_bars_with_indicators,
 )
+from attbacktrader.sizing import EqualWeightSizing
 from attbacktrader.strategies import TradeIntent, TradeIntentType
-from attbacktrader.strategies.methods import FixedPercentStop, KdjOverheatedExit, KdjOversoldEntry
+from attbacktrader.strategies.methods import (
+    FixedPercentStop,
+    KdjOverheatedExit,
+    KdjOversoldEntry,
+    NoAddOn,
+    required_indicator_requirements,
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +31,8 @@ class Position:
     symbol: str
     entry_date: date
     entry_price: float
+    size: int = 0
+    add_on_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -58,7 +67,34 @@ class TrendTemplateV1PortfolioResult:
 class TrendTemplateV1:
     entry_method: KdjOversoldEntry = KdjOversoldEntry()
     profit_taking_method: KdjOverheatedExit = KdjOverheatedExit()
-    stop_loss_method: FixedPercentStop = FixedPercentStop(loss_percent=0.05)
+    stop_loss_method: Any = FixedPercentStop(loss_percent=0.05)
+    add_on_method: Any = NoAddOn()
+    sizing_method: Any = EqualWeightSizing()
+
+    @property
+    def required_indicators(self):
+        return tuple(
+            sorted(
+                required_indicator_requirements(
+                    self.entry_method,
+                    self.profit_taking_method,
+                    self.stop_loss_method,
+                    self.add_on_method,
+                    self.sizing_method,
+                )
+            )
+        )
+
+    @property
+    def required_indicator_names(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    requirement.name
+                    for requirement in self.required_indicators
+                }
+            )
+        )
 
     def run_single_symbol(
         self,
@@ -74,11 +110,24 @@ class TrendTemplateV1:
         if any(bar.symbol != symbol for bar in ordered_bars):
             raise ValueError("TrendTemplateV1.run_single_symbol requires one symbol")
 
-        indicator_frame = indicators or indicator_frame_from_snapshots(build_indicator_snapshots(ordered_bars))
+        indicator_frame = indicators or indicator_frame_from_snapshots(
+            build_indicator_snapshots_for_requirements(
+                ordered_bars,
+                indicator_requirements=self.required_indicators,
+            )
+        )
         if indicator_frame.symbol != symbol:
             raise ValueError("indicator frame symbol must match bars")
 
-        rows = join_bars_with_indicators(ordered_bars, indicator_snapshots_from_frame(indicator_frame, ordered_bars))
+        rows = join_bars_with_indicators(
+            ordered_bars,
+            indicator_snapshots_from_frame_for_requirements(
+                indicator_frame,
+                ordered_bars,
+                indicator_requirements=self.required_indicators,
+            ),
+            indicator_requirements=self.required_indicators,
+        )
         return self.run_single_symbol_rows(rows)
 
     def run_single_symbol_rows(self, rows: Sequence[MarketFeatureRow]) -> TrendTemplateV1Result:
@@ -94,19 +143,20 @@ class TrendTemplateV1:
         closed_trades: list[ClosedTrade] = []
         position: Position | None = None
 
-        for row in ordered_rows:
+        for index, row in enumerate(ordered_rows):
             bar = row.bar
-            kdj = row.indicators.kdj
+            previous_row = ordered_rows[index - 1] if index > 0 else None
             if position is None:
                 entry_intent = self.entry_method.evaluate(
                     symbol=symbol,
                     trade_date=bar.trade_date,
-                    kdj=kdj,
+                    row=row,
+                    previous_row=previous_row,
                 )
                 intents.append(entry_intent)
 
                 if entry_intent.intent_type == TradeIntentType.ENTER:
-                    position = Position(symbol=symbol, entry_date=bar.trade_date, entry_price=bar.close)
+                    position = Position(symbol=symbol, entry_date=bar.trade_date, entry_price=bar.close, size=1)
 
                 continue
 
@@ -115,6 +165,8 @@ class TrendTemplateV1:
                 trade_date=bar.trade_date,
                 entry_price=position.entry_price,
                 current_price=bar.close,
+                row=row,
+                previous_row=previous_row,
             )
             intents.append(stop_intent)
             if stop_intent.intent_type == TradeIntentType.EXIT_LOSS:
@@ -125,12 +177,38 @@ class TrendTemplateV1:
             profit_intent = self.profit_taking_method.evaluate(
                 symbol=symbol,
                 trade_date=bar.trade_date,
-                kdj=kdj,
+                row=row,
+                previous_row=previous_row,
             )
             intents.append(profit_intent)
             if profit_intent.intent_type == TradeIntentType.EXIT_PROFIT:
                 closed_trades.append(_close_trade(position, bar, profit_intent.reason_code))
                 position = None
+                continue
+
+            if not _add_on_enabled(self.add_on_method):
+                continue
+
+            add_on_intent = self.add_on_method.evaluate(
+                symbol=symbol,
+                trade_date=bar.trade_date,
+                current_quantity=position.size,
+                entry_price=position.entry_price,
+                current_price=bar.close,
+                add_on_count=position.add_on_count,
+                row=row,
+                previous_row=previous_row,
+            )
+            intents.append(add_on_intent)
+            if add_on_intent.intent_type == TradeIntentType.ADD_ON:
+                new_size = max(1, position.size) + 1
+                position = Position(
+                    symbol=position.symbol,
+                    entry_date=position.entry_date,
+                    entry_price=((position.entry_price * max(1, position.size)) + bar.close) / new_size,
+                    size=new_size,
+                    add_on_count=position.add_on_count + 1,
+                )
 
         return TrendTemplateV1Result(
             intents=tuple(intents),
@@ -184,3 +262,7 @@ def _close_trade(position: Position, exit_bar: DailyBar, exit_reason: str) -> Cl
         exit_price=exit_bar.close,
         exit_reason=exit_reason,
     )
+
+
+def _add_on_enabled(add_on_method: Any) -> bool:
+    return getattr(add_on_method, "method_name", None) != "none"

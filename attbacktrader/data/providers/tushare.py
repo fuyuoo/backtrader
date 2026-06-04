@@ -197,19 +197,28 @@ def _daily_bars_from_frame(frame: Any) -> tuple[DailyBar, ...]:
 
 
 def _index_bars_from_frame(frame: Any) -> tuple[IndexBar, ...]:
-    bars = [
-        IndexBar(
-            symbol=str(row.ts_code),
-            trade_date=_parse_tushare_date(str(row.trade_date)),
-            open=float(row.open),
-            high=float(row.high),
-            low=float(row.low),
-            close=float(row.close),
-            volume=float(row.vol),
-            amount=float(row.amount),
+    bars = []
+    for row in frame.itertuples(index=False):
+        open_price = float(row.open)
+        high_price = float(row.high)
+        low_price = float(row.low)
+        close_price = float(row.close)
+        # Tushare index feeds can report high/low that miss open/close by a
+        # small rounding amount; keep IndexBar OHLC internally consistent.
+        high_price = max(high_price, open_price, close_price)
+        low_price = min(low_price, open_price, close_price)
+        bars.append(
+            IndexBar(
+                symbol=str(row.ts_code),
+                trade_date=_parse_tushare_date(str(row.trade_date)),
+                open=open_price,
+                high=high_price,
+                low=low_price,
+                close=close_price,
+                volume=float(row.vol),
+                amount=float(row.amount),
+            )
         )
-        for row in frame.itertuples(index=False)
-    ]
 
     return tuple(sorted(bars, key=lambda bar: bar.trade_date))
 

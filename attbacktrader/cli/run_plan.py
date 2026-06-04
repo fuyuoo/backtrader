@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict
 
 from attbacktrader.config import load_run_plan
 from attbacktrader.data.providers import TushareProvider, read_tushare_token
-from attbacktrader.reports import write_run_artifacts
+from attbacktrader.reports import to_jsonable, write_run_artifacts
 from attbacktrader.runners import execute_run_plan
 
 
@@ -28,16 +27,16 @@ def main(argv: list[str] | None = None) -> int:
         provider = TushareProvider(read_tushare_token(args.token_file))
 
     result = execute_run_plan(run_plan, provider=provider)
-    payload = asdict(result)
+    payload = to_jsonable(result)
     if run_plan.output.persist and not args.no_persist:
         artifact_paths = write_run_artifacts(
             run_plan,
             result,
             output_root=args.output_root or run_plan.output.report_root,
         )
-        payload["artifacts"] = asdict(artifact_paths)
+        payload["artifacts"] = to_jsonable(artifact_paths)
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 

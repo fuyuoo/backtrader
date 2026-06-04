@@ -21,12 +21,16 @@ from attbacktrader.engines.backtrader.strategy_bridge import (
 )
 from attbacktrader.engines.ledger import EquityCurvePoint, ExecutionAuditEvent, PositionSnapshot
 from attbacktrader.features import (
+    DEFAULT_INDICATOR_NAMES,
     IndicatorFrame,
-    build_indicator_snapshots,
+    IndicatorRequirement,
+    build_indicator_snapshots_for_requirements,
     indicator_frame_from_snapshots,
-    indicator_snapshots_from_frame,
+    indicator_snapshots_from_frame_for_requirements,
     join_bars_with_indicators,
 )
+from attbacktrader.strategies.attribution import EntryAttributionContext
+from attbacktrader.strategies.methods import required_indicator_requirements
 from attbacktrader.strategies.templates import TrendTemplateV1PortfolioResult, TrendTemplateV1Result
 
 
@@ -57,9 +61,13 @@ def run_trend_template_v1_backtrader(
     stake: int = 100,
     indicators: IndicatorFrame | None = None,
     tradability_statuses: Sequence[TradabilityStatus] = (),
+    risk_group_by_symbol: Mapping[str, str] | None = None,
+    entry_attribution_context: EntryAttributionContext | None = None,
     entry_method: Any = None,
     profit_taking_method: Any = None,
     stop_loss_method: Any = None,
+    add_on_method: Any = None,
+    sizing_method: Any = None,
     broker_settings: BacktraderBrokerSettings | None = None,
     ashare_settings: BacktraderAShareSettings | None = None,
 ) -> BacktraderRunResult:
@@ -75,10 +83,30 @@ def run_trend_template_v1_backtrader(
     if any(bar.symbol != symbol for bar in ordered_bars):
         raise ValueError("run_trend_template_v1_backtrader requires one symbol")
 
-    indicator_frame = indicators or indicator_frame_from_snapshots(build_indicator_snapshots(ordered_bars))
+    indicator_requirements = _required_indicator_requirements(
+        entry_method,
+        profit_taking_method,
+        stop_loss_method,
+        add_on_method,
+        sizing_method,
+    )
+    indicator_frame = indicators or indicator_frame_from_snapshots(
+        build_indicator_snapshots_for_requirements(
+            ordered_bars,
+            indicator_requirements=indicator_requirements,
+        )
+    )
     if indicator_frame.symbol != symbol:
         raise ValueError("indicator frame symbol must match bars")
-    rows = join_bars_with_indicators(ordered_bars, indicator_snapshots_from_frame(indicator_frame, ordered_bars))
+    rows = join_bars_with_indicators(
+        ordered_bars,
+        indicator_snapshots_from_frame_for_requirements(
+            indicator_frame,
+            ordered_bars,
+            indicator_requirements=indicator_requirements,
+        ),
+        indicator_requirements=indicator_requirements,
+    )
 
     cerebro = bt.Cerebro(stdstats=False, quicknotify=True)
     configure_backtrader_broker(cerebro, initial_cash=initial_cash, broker_settings=broker_settings)
@@ -90,9 +118,13 @@ def run_trend_template_v1_backtrader(
         indicators=indicator_frame,
         rows=rows,
         tradability_by_symbol={symbol: tuple(tradability_statuses)},
+        risk_group_by_symbol=dict(risk_group_by_symbol or {}),
+        entry_attribution_context=entry_attribution_context,
         entry_method=entry_method,
         profit_taking_method=profit_taking_method,
         stop_loss_method=stop_loss_method,
+        add_on_method=add_on_method,
+        sizing_method=sizing_method,
         ashare_settings=ashare_settings,
     )
 
@@ -116,9 +148,13 @@ def run_trend_template_v1_portfolio_backtrader(
     stake: int = 100,
     indicators_by_symbol: Mapping[str, IndicatorFrame] | None = None,
     tradability_by_symbol: Mapping[str, Sequence[TradabilityStatus]] | None = None,
+    risk_group_by_symbol: Mapping[str, str] | None = None,
+    entry_attribution_context: EntryAttributionContext | None = None,
     entry_method: Any = None,
     profit_taking_method: Any = None,
     stop_loss_method: Any = None,
+    add_on_method: Any = None,
+    sizing_method: Any = None,
     broker_settings: BacktraderBrokerSettings | None = None,
     ashare_settings: BacktraderAShareSettings | None = None,
 ) -> BacktraderPortfolioRunResult:
@@ -144,17 +180,33 @@ def run_trend_template_v1_portfolio_backtrader(
         symbol: tuple(statuses)
         for symbol, statuses in dict(tradability_by_symbol or {}).items()
     }
+    risk_group_by_symbol = dict(risk_group_by_symbol or {})
     for symbol, indicator_frame in indicators_by_symbol.items():
         if indicator_frame.symbol != symbol:
             raise ValueError(f"indicator frame symbol must match bars for {symbol}")
 
+    indicator_requirements = _required_indicator_requirements(
+        entry_method,
+        profit_taking_method,
+        stop_loss_method,
+        add_on_method,
+        sizing_method,
+    )
     rows_by_symbol = {
         symbol: join_bars_with_indicators(
             bars,
-            indicator_snapshots_from_frame(
-                indicators_by_symbol.get(symbol) or indicator_frame_from_snapshots(build_indicator_snapshots(bars)),
+            indicator_snapshots_from_frame_for_requirements(
+                indicators_by_symbol.get(symbol)
+                or indicator_frame_from_snapshots(
+                    build_indicator_snapshots_for_requirements(
+                        bars,
+                        indicator_requirements=indicator_requirements,
+                    )
+                ),
                 bars,
+                indicator_requirements=indicator_requirements,
             ),
+            indicator_requirements=indicator_requirements,
         )
         for symbol, bars in ordered_bars_by_symbol.items()
     }
@@ -170,9 +222,13 @@ def run_trend_template_v1_portfolio_backtrader(
         indicators_by_symbol=indicators_by_symbol,
         rows_by_symbol=rows_by_symbol,
         tradability_by_symbol=tradability_by_symbol,
+        risk_group_by_symbol=risk_group_by_symbol,
+        entry_attribution_context=entry_attribution_context,
         entry_method=entry_method,
         profit_taking_method=profit_taking_method,
         stop_loss_method=stop_loss_method,
+        add_on_method=add_on_method,
+        sizing_method=sizing_method,
         ashare_settings=ashare_settings,
     )
 
@@ -187,6 +243,13 @@ def run_trend_template_v1_portfolio_backtrader(
         position_snapshots=strategy.position_snapshots(),
         execution_audit=strategy.execution_audit(),
     )
+
+
+def _required_indicator_requirements(*methods: Any) -> tuple[IndicatorRequirement, ...]:
+    requirements = required_indicator_requirements(*(method for method in methods if method is not None))
+    if requirements:
+        return tuple(sorted(requirements))
+    return tuple(IndicatorRequirement(name) for name in DEFAULT_INDICATOR_NAMES)
 
 
 def _daily_bars_data_feed(bars: Sequence[DailyBar]):

@@ -61,17 +61,6 @@ def evaluate_scenario_fit(report: BacktestReport, *, min_trades: int = 3) -> Sce
     else:
         warnings.append("average benchmark excess return is non-positive")
 
-    market_label = report.market_regime.primary_label if report.market_regime is not None else None
-    if market_label in {"warm", "hot"}:
-        score += 1
-        reasons.append(f"market regime is {market_label}")
-    elif market_label == "cold":
-        warnings.append("market regime is cold")
-    elif market_label is None:
-        warnings.append("market regime unavailable")
-    else:
-        warnings.append(f"market regime is {market_label}")
-
     return ScenarioFitSummary(
         label=_label_from_score(score),
         score=score,
