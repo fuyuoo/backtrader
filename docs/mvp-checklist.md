@@ -61,6 +61,7 @@ The MVP is ready when a user can:
 | Review sample batch | Done | `att-review-expand-samples` expands finding sample refs into `review_sample_batch.<focus>.json` plus optional individual sample packets for Skill-assisted review. |
 | AI review brief | Done | `att-review-brief` writes `review_brief.<focus>.json` plus `review_brief.<focus>.zh.md`, combining findings, sample summaries, evidence rules, environment-fit first-page summary, and an expected Skill output schema. |
 | AI review result | Done | `att-review-result` persists `ai_review_result.<focus>.json` plus `ai_review_result.<focus>.zh.md` from a review brief, preserving claim, evidence, sample, risk, and next-check fields. |
+| AI review golden check | Done | `att-review-golden-check` reads an AI review JSON or Markdown plus a golden fixture and writes `ai_review_golden_check.json` plus `ai_review_golden_check.zh.md`, failing when required sealed-stage claims, metrics, evidence refs, sample refs, or `must_not_claim` boundaries are violated. |
 | Review experiment candidates | Done | `att-review-experiment-candidates` writes validation candidates from findings and expanded samples, including environment-fit sample-stability validation, without mutating run plans or tuning parameters. |
 | Review experiment drafts | Done | `att-review-experiment-drafts` writes a draft manifest and individual YAML planning drafts, including environment-fit comparison drafts, that require manual confirmation before conversion into legal RunPlan YAML. |
 | Review experiment confirmation | Done | `att-review-experiment-confirm --confirm` converts exactly one manually accepted draft into a validated legal RunPlan YAML while keeping review metadata in a confirmation manifest. |
@@ -73,7 +74,11 @@ The MVP is ready when a user can:
 | Attribution filter experiments | Done | `att-generate-attribution-filter-experiments` expands a matrix into validated YAML variants for result-driven filter experiments, including symbol MA trend and MA60 filter variants. |
 | Manual market segment validation drafts | Done | `att-generate-market-segment-runs` consumes a manually sourced market-segment catalog and writes legal RunPlan YAMLs plus a manifest, without code-based market-state detection. |
 | Manual market type validation summary | Done | A manually sourced catalog groups bull, range, and bear market periods with at least three segments each; `att-market-type-summary` reads persisted artifacts and writes `market_type_summary.json` plus `market_type_summary.zh.md` without producing strategy-switching conclusions. |
-| Acceptance script | Done | `scripts/acceptance_smoke.py` runs the curated ATTbacktrader regression suite and optional real Tushare smoke. |
+| Strategy adaptation matrix | Done | `att-strategy-adaptation-matrix` consumes known market-type summaries and each segment's persisted trade lifecycle/post-exit artifacts, then writes `strategy_adaptation_matrix.json` plus `strategy_adaptation_matrix.zh.md` with market-type fit, winning entry factors, losing entry factors, sold-too-early entry factors, and `run_id`/`trade_index` sample refs without detecting market type or recalculating indicators. |
+| Strategy adaptation drill-down and variant drafts | Done | `att-strategy-adaptation-drilldown` expands one matrix factor into review sample packets, while `att-strategy-variant-drafts` writes manually confirmable bull/range/bear strategy-variant validation drafts without implementing market-type recognition or automatic strategy switching. |
+| Strategy variant execution validation | Done | `att-generate-strategy-variant-runs` converts confirmed matrix-derived drafts into legal segment RunPlan YAMLs, and `att-strategy-variant-validation` compares baseline versus variant `market_type_summary.json` artifacts by market type without automatic tuning or strategy switching. |
+| Strategy variant attribution drill-down | Done | `att-strategy-variant-attribution` compares paired baseline and variant segment artifacts for one market type, then reports exit-method shifts, holding-period compression, same-symbol re-entry density, average-win compression, and sample refs from `trade_lifecycle.json`. |
+| Acceptance script | Done | `scripts/acceptance_smoke.py` runs the curated ATTbacktrader regression suite, the sealed Strategy Adaptation V1 AI review golden check, and optional real Tushare smoke. |
 | Documentation | Done | `README.md`, `CONTEXT.md`, ADRs, architecture guide, blueprint, and this checklist define current behavior and boundaries. |
 
 ## Accepted MVP Limitations
@@ -116,7 +121,11 @@ Run the curated business regression suite:
 Expected result for current HEAD:
 
 ```text
-208 passed
+219 passed
+Strategy Adaptation V1 golden check summary
+status: ok
+check_count: 72
+failed_count: 0
 Acceptance smoke passed.
 ```
 
@@ -183,7 +192,21 @@ to 202 passed.
 Manual bull/range/bear market type validation, long-history validation stock
 universe, generated market-segment RunPlans, market-type summary artifacts,
 and Tushare index OHLC normalization increased the curated acceptance suite to
-208 passed. The full repository suite currently reports 292 passed.
+208 passed.
+The strategy adaptation matrix now reverse-looks up completed trades into
+entry-time evidence and post-exit follow-up across known market types, raising
+the curated acceptance suite to 210 passed.
+Strategy adaptation drill-down and strategy variant draft generation connect the
+matrix to AI review samples and bounded validation plans, raising the curated
+acceptance suite to 212 passed. Legal strategy-variant segment RunPlan
+generation and baseline-vs-variant market-type validation comparison increased
+the curated acceptance suite to 214 passed. Strategy-variant attribution
+drill-down for paired baseline/variant market segments increased the curated
+acceptance suite to 216 passed. AI review golden-check coverage for sealed V1
+reviews increased the curated acceptance suite to 218 passed. The acceptance
+script now runs the sealed Strategy Adaptation V1 golden check as a default
+closure gate, and its focused script test increased the curated suite to
+219 passed. The full repository suite currently reports 303 passed.
 
 Run the same suite plus real Tushare data:
 
@@ -270,15 +293,61 @@ The current accepted real Tushare smoke result is:
 38. `examples/run-tushare-market-type-add-on.yaml`
 39. `examples/generated-market-segment-runs/tushare-market-type-add-on/market_segment_run_manifest.zh.md`
 40. `reports/market-type-summary-tushare-market-type-add-on/market_type_summary.zh.md`
+41. `docs/strategy-adaptation-stage.md`
+42. `reports/strategy-adaptation-matrix-tushare-market-type-add-on/strategy_adaptation_matrix.zh.md`
+43. `reports/strategy-adaptation-drilldown-tushare-market-type-add-on-bull/strategy_adaptation_drilldown.zh.md`
+44. `reports/strategy-variant-drafts-tushare-market-type-add-on/strategy_variant_drafts.zh.md`
+45. `examples/generated-strategy-variant-runs/tushare-market-type-add-on/strategy_variant_run_manifest.zh.md`
+46. `reports/strategy-variant-validation-tushare-market-type-add-on/strategy_variant_validation.zh.md`
+47. `reports/strategy-variant-attribution-tushare-market-type-add-on-bull/strategy_variant_attribution.zh.md`
+48. `docs/strategy-adaptation-v1-closure.md`
+49. `examples/strategy-adaptation-v1-baseline.json`
+50. `docs/next-stage-exit-method-attribution.md`
+51. `docs/strategy-adaptation-v1-ai-review.md`
+52. `examples/strategy-adaptation-v1-ai-review-golden.json`
+53. `reports/strategy-adaptation-v1-ai-review-golden-check/ai_review_golden_check.zh.md`
 
 ## Current Post-MVP Direction
 
 The run-review workbench and manual market-type validation slice is now sealed.
-The next stage is strategy adaptation and switching-rule design: consume the
-persisted bull/range/bear market summaries, propose bounded strategy behavior
-experiments, and validate them with explicit RunPlans. Do not keep expanding
-the report framework, attribution dimensions, or market taxonomy in this
-stage unless a new stage document defines direction, role, and acceptance.
+Strategy Adaptation V1 is also sealed in
+`docs/strategy-adaptation-v1-closure.md`, with the accepted baseline captured in
+`examples/strategy-adaptation-v1-baseline.json`. The expected AI review
+boundary is captured in
+`examples/strategy-adaptation-v1-ai-review-golden.json`. Do not keep expanding
+the report framework, attribution dimensions, market taxonomy, or
+strategy-variant loop in this sealed stage.
+`att-review-golden-check` is the deterministic gate for this sealed review:
+it checks the review document against the golden fixture and writes the latest
+local result under
+`reports/strategy-adaptation-v1-ai-review-golden-check/`.
+The first strategy-adaptation artifact is
+`strategy_adaptation_matrix.json`: it starts from known market types, reverse
+looks up each completed trade's entry evidence from `trade_lifecycle.json`,
+joins post-exit follow-up by trade key, and summarizes winning, losing, and
+sold-too-early entry factors for AI drill-down.
+`att-strategy-adaptation-drilldown` turns one matrix factor into review-sample
+packets, and `att-strategy-variant-drafts` turns bull/range/bear matrix
+conclusions into manually confirmable validation drafts such as letting winners
+run in bull markets, disabling add-on in range markets, and defensive sizing in
+bear markets. `att-generate-strategy-variant-runs` converts those drafts into
+legal market-segment RunPlans, while `att-strategy-variant-validation` compares
+the baseline and variant `market_type_summary.json` outputs so AI review can
+judge whether a candidate improved a known market type before any switching
+rule is considered. `att-strategy-variant-attribution` is the next drill-down:
+it pairs baseline and variant segment artifacts for a selected market type and
+explains behavior changes through exit-method shifts, holding-period
+compression, same-symbol re-entry density, and sample refs from
+`trade_lifecycle.json`.
+
+The next active direction is Exit Method Attribution, defined in
+`docs/next-stage-exit-method-attribution.md`. It starts from the sealed V1
+baseline and investigates why `ma_macd_weakening_exit` exited too quickly in
+known bull-market segments before any new strategy variant or switching rule is
+generated.
+
+The notes below are historical implementation context for the sealed workbench
+and adaptation stack. They are not the active next-stage scope.
 
 Start upstream of reporting: let strategy methods declare their required
 indicators and timeframe, prepare only the matching indicator snapshot set,

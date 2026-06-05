@@ -1,0 +1,102 @@
+{
+  "schema": "attbacktrader.strategy_adaptation_v1_baseline.v1",
+  "sealed_on": "2026-06-05",
+  "objective": "Seal the Strategy Adaptation V1 framework baseline: known-market-type validation, bounded variant execution, and variant attribution from persisted artifacts.",
+  "source_branch": "autoBacktrader",
+  "mvp_base_commit": "d339bfc",
+  "verification": {
+    "acceptance_smoke": {
+      "command": "python scripts\\acceptance_smoke.py",
+      "expected": "216 passed"
+    },
+    "full_pytest": {
+      "command": "python -m pytest -q",
+      "expected": "300 passed"
+    }
+  },
+  "sealed_boundaries": [
+    "No automatic bull/range/bear market recognition.",
+    "No automatic parameter tuning.",
+    "No automatic strategy switching.",
+    "No report-layer indicator recalculation.",
+    "No default-filled missing evidence.",
+    "No new attribution dimensions inside this sealed V1 stage."
+  ],
+  "versioned_docs": {
+    "closure": "docs/strategy-adaptation-v1-closure.md",
+    "stage": "docs/strategy-adaptation-stage.md",
+    "next_stage": "docs/next-stage-exit-method-attribution.md",
+    "mvp_checklist": "docs/mvp-checklist.md"
+  },
+  "local_artifacts": {
+    "baseline_market_segment_manifest": "examples/generated-market-segment-runs/tushare-market-type-add-on/market_segment_run_manifest.json",
+    "baseline_market_type_summary": "reports/market-type-summary-tushare-market-type-add-on/market_type_summary.json",
+    "strategy_adaptation_matrix": "reports/strategy-adaptation-matrix-tushare-market-type-add-on/strategy_adaptation_matrix.json",
+    "bull_matrix_drilldown": "reports/strategy-adaptation-drilldown-tushare-market-type-add-on-bull/strategy_adaptation_drilldown.json",
+    "strategy_variant_drafts": "reports/strategy-variant-drafts-tushare-market-type-add-on/strategy_variant_drafts.json",
+    "strategy_variant_run_manifest": "examples/generated-strategy-variant-runs/tushare-market-type-add-on/strategy_variant_run_manifest.json",
+    "variant_market_type_summary": "reports/market-type-summary-strategy-variant-tushare-market-type-add-on/market_type_summary.json",
+    "strategy_variant_validation": "reports/strategy-variant-validation-tushare-market-type-add-on/strategy_variant_validation.json",
+    "bull_strategy_variant_attribution": "reports/strategy-variant-attribution-tushare-market-type-add-on-bull/strategy_variant_attribution.json"
+  },
+  "market_type_validation": {
+    "bear_market": {
+      "label_zh": "熊市",
+      "baseline_average_return_pct": -0.12172720483003445,
+      "variant_average_return_pct": -0.05773299806466455,
+      "delta_average_return_pct": 0.0639942067653699,
+      "baseline_average_max_drawdown": 0.15618414218762436,
+      "variant_average_max_drawdown": 0.07010516312254948,
+      "delta_average_max_drawdown": -0.08607897906507488,
+      "baseline_trade_count": 137,
+      "variant_trade_count": 83,
+      "direction_zh": "收益提升且回撤未扩大"
+    },
+    "bull_market": {
+      "label_zh": "牛市",
+      "baseline_average_return_pct": 0.2537250043269954,
+      "variant_average_return_pct": 0.09746525668494306,
+      "delta_average_return_pct": -0.15625974764205236,
+      "baseline_weighted_win_rate": 0.6704545454545454,
+      "variant_weighted_win_rate": 0.5305343511450382,
+      "delta_weighted_win_rate": -0.1399201943095072,
+      "baseline_trade_count": 88,
+      "variant_trade_count": 262,
+      "direction_zh": "收益和胜率下降"
+    },
+    "range_market": {
+      "label_zh": "震荡市",
+      "baseline_average_return_pct": 0.053164784338578706,
+      "variant_average_return_pct": 0.05606495525006516,
+      "delta_average_return_pct": 0.0029001709114864563,
+      "baseline_trade_count": 113,
+      "variant_trade_count": 113,
+      "direction_zh": "收益提升且回撤未扩大"
+    }
+  },
+  "bull_variant_attribution": {
+    "market_type_id": "bull_market",
+    "variant_draft_id": "bull_market_let_winners_run",
+    "changed_strategy_field": "strategy.profit_taking_method",
+    "baseline_profit_taking_method": "kdj_overheated_exit",
+    "variant_profit_taking_method": "ma_macd_weakening_exit",
+    "baseline_trade_count": 88,
+    "variant_trade_count": 262,
+    "delta_trade_count": 174,
+    "baseline_average_holding_days": 24.352272727272727,
+    "variant_average_holding_days": 4.064885496183206,
+    "delta_average_holding_days": -20.28738723108952,
+    "baseline_short_reentry_count_5d": 15,
+    "variant_short_reentry_count_5d": 132,
+    "delta_short_reentry_count_5d": 117,
+    "baseline_average_win": 0.1041118912362974,
+    "variant_average_win": 0.02548576263500267,
+    "delta_average_win": -0.07862612860129473,
+    "candidate_explanation_zh": "ma_macd_weakening_exit exits too quickly in bull-market segments, releases capital quickly, triggers frequent same-symbol re-entry, and cuts average winning trade size."
+  },
+  "next_stage": {
+    "name": "Exit Method Attribution",
+    "doc": "docs/next-stage-exit-method-attribution.md",
+    "first_question_zh": "为什么 ma_macd_weakening_exit 在牛市变体里过快退出，并导致快速重入和盈利被切薄？"
+  }
+}

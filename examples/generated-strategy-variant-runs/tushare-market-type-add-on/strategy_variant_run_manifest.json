@@ -1,0 +1,297 @@
+{
+  "schema": "attbacktrader.strategy_variant_run_manifest.v1",
+  "source_strategy_variant_drafts": "reports\\strategy-variant-drafts-tushare-market-type-add-on\\strategy_variant_drafts.json",
+  "source_market_segment_manifest": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\market_segment_run_manifest.json",
+  "base_run_id": "tushare-market-type-add-on-validation",
+  "reuse_snapshots": false,
+  "market_types": [
+    {
+      "market_type_id": "bull_market",
+      "label_zh": "牛市",
+      "strategy_switching_use_zh": "验证趋势持有、放宽止盈、顺势加仓是否比快进快出更有效。",
+      "selection_rule_zh": "指数中期趋势向上，回撤后仍能继续向上推进或创阶段高点。"
+    },
+    {
+      "market_type_id": "range_market",
+      "label_zh": "震荡市",
+      "strategy_switching_use_zh": "验证超卖反弹、快进快出、严格止盈是否更适合区间波动。",
+      "selection_rule_zh": "指数在较宽区间内反复波动，突破和跌破都缺少持续性。"
+    },
+    {
+      "market_type_id": "bear_market",
+      "label_zh": "熊市",
+      "strategy_switching_use_zh": "验证是否需要少做、降仓、暂停交易或只保留极强反弹信号。",
+      "selection_rule_zh": "指数中期趋势向下，反弹后难以创新高，阶段重心持续下移。"
+    }
+  ],
+  "generated_count": 9,
+  "segments": [
+    {
+      "segment_id": "2014_2015_bull_market",
+      "segment_label_zh": "2014-2015 年杠杆牛市主升",
+      "market_type_id": "bull_market",
+      "market_type_label_zh": "牛市",
+      "from_date": "2014-08-01",
+      "to_date": "2015-06-12",
+      "baseline_run_id": "tushare-market-type-add-on-market-segment-2014_2015_bull_market",
+      "baseline_run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2014_2015_bull_market.run.yaml",
+      "draft_id": "bull_market_let_winners_run",
+      "adaptation": "preferred",
+      "adaptation_label_zh": "优先适配",
+      "run_id": "tushare-market-type-add-on-market-segment-2014_2015_bull_market__variant__bull_market_let_winners_run",
+      "omitted_patch_keys": [
+        "review_candidate"
+      ],
+      "run_plan_patch": {
+        "run": {
+          "id": "tushare-market-type-add-on-validation__strategy_variant__bull_market_let_winners_run"
+        },
+        "strategy": {
+          "profit_taking_method": "ma_macd_weakening_exit"
+        }
+      },
+      "run_plan_path": "examples\\generated-strategy-variant-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2014_2015_bull_market__variant__bull_market_let_winners_run.run.yaml"
+    },
+    {
+      "segment_id": "2019_q1_bull_market",
+      "segment_label_zh": "2019 年一季度单边上攻",
+      "market_type_id": "bull_market",
+      "market_type_label_zh": "牛市",
+      "from_date": "2019-01-04",
+      "to_date": "2019-04-08",
+      "baseline_run_id": "tushare-market-type-add-on-market-segment-2019_q1_bull_market",
+      "baseline_run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2019_q1_bull_market.run.yaml",
+      "draft_id": "bull_market_let_winners_run",
+      "adaptation": "preferred",
+      "adaptation_label_zh": "优先适配",
+      "run_id": "tushare-market-type-add-on-market-segment-2019_q1_bull_market__variant__bull_market_let_winners_run",
+      "omitted_patch_keys": [
+        "review_candidate"
+      ],
+      "run_plan_patch": {
+        "run": {
+          "id": "tushare-market-type-add-on-validation__strategy_variant__bull_market_let_winners_run"
+        },
+        "strategy": {
+          "profit_taking_method": "ma_macd_weakening_exit"
+        }
+      },
+      "run_plan_path": "examples\\generated-strategy-variant-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2019_q1_bull_market__variant__bull_market_let_winners_run.run.yaml"
+    },
+    {
+      "segment_id": "2020_2021_structural_bull_market",
+      "segment_label_zh": "2020-2021 年结构性牛市推进",
+      "market_type_id": "bull_market",
+      "market_type_label_zh": "牛市",
+      "from_date": "2020-03-23",
+      "to_date": "2021-02-18",
+      "baseline_run_id": "tushare-market-type-add-on-market-segment-2020_2021_structural_bull_market",
+      "baseline_run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2020_2021_structural_bull_market.run.yaml",
+      "draft_id": "bull_market_let_winners_run",
+      "adaptation": "preferred",
+      "adaptation_label_zh": "优先适配",
+      "run_id": "tushare-market-type-add-on-market-segment-2020_2021_structural_bull_market__variant__bull_market_let_winners_run",
+      "omitted_patch_keys": [
+        "review_candidate"
+      ],
+      "run_plan_patch": {
+        "run": {
+          "id": "tushare-market-type-add-on-validation__strategy_variant__bull_market_let_winners_run"
+        },
+        "strategy": {
+          "profit_taking_method": "ma_macd_weakening_exit"
+        }
+      },
+      "run_plan_path": "examples\\generated-strategy-variant-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2020_2021_structural_bull_market__variant__bull_market_let_winners_run.run.yaml"
+    },
+    {
+      "segment_id": "2016_post_crash_range_market",
+      "segment_label_zh": "2016 年熔断后区间震荡",
+      "market_type_id": "range_market",
+      "market_type_label_zh": "震荡市",
+      "from_date": "2016-01-27",
+      "to_date": "2016-12-30",
+      "baseline_run_id": "tushare-market-type-add-on-market-segment-2016_post_crash_range_market",
+      "baseline_run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2016_post_crash_range_market.run.yaml",
+      "draft_id": "range_market_range_no_add_on_fast_review",
+      "adaptation": "conditional",
+      "adaptation_label_zh": "条件适配",
+      "run_id": "tushare-market-type-add-on-market-segment-2016_post_crash_range_market__variant__range_market_range_no_add_on_fast_review",
+      "omitted_patch_keys": [
+        "review_candidate"
+      ],
+      "run_plan_patch": {
+        "run": {
+          "id": "tushare-market-type-add-on-validation__strategy_variant__range_market_range_no_add_on_fast_review"
+        },
+        "strategy": {
+          "add_on_method": "none",
+          "add_on_params": {}
+        }
+      },
+      "run_plan_path": "examples\\generated-strategy-variant-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2016_post_crash_range_market__variant__range_market_range_no_add_on_fast_review.run.yaml"
+    },
+    {
+      "segment_id": "2020_h2_high_range_market",
+      "segment_label_zh": "2020 年下半年高位震荡",
+      "market_type_id": "range_market",
+      "market_type_label_zh": "震荡市",
+      "from_date": "2020-07-13",
+      "to_date": "2020-12-31",
+      "baseline_run_id": "tushare-market-type-add-on-market-segment-2020_h2_high_range_market",
+      "baseline_run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2020_h2_high_range_market.run.yaml",
+      "draft_id": "range_market_range_no_add_on_fast_review",
+      "adaptation": "conditional",
+      "adaptation_label_zh": "条件适配",
+      "run_id": "tushare-market-type-add-on-market-segment-2020_h2_high_range_market__variant__range_market_range_no_add_on_fast_review",
+      "omitted_patch_keys": [
+        "review_candidate"
+      ],
+      "run_plan_patch": {
+        "run": {
+          "id": "tushare-market-type-add-on-validation__strategy_variant__range_market_range_no_add_on_fast_review"
+        },
+        "strategy": {
+          "add_on_method": "none",
+          "add_on_params": {}
+        }
+      },
+      "run_plan_path": "examples\\generated-strategy-variant-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2020_h2_high_range_market__variant__range_market_range_no_add_on_fast_review.run.yaml"
+    },
+    {
+      "segment_id": "2021_box_range_market",
+      "segment_label_zh": "2021 年全年箱体震荡",
+      "market_type_id": "range_market",
+      "market_type_label_zh": "震荡市",
+      "from_date": "2021-01-04",
+      "to_date": "2021-12-31",
+      "baseline_run_id": "tushare-market-type-add-on-market-segment-2021_box_range_market",
+      "baseline_run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2021_box_range_market.run.yaml",
+      "draft_id": "range_market_range_no_add_on_fast_review",
+      "adaptation": "conditional",
+      "adaptation_label_zh": "条件适配",
+      "run_id": "tushare-market-type-add-on-market-segment-2021_box_range_market__variant__range_market_range_no_add_on_fast_review",
+      "omitted_patch_keys": [
+        "review_candidate"
+      ],
+      "run_plan_patch": {
+        "run": {
+          "id": "tushare-market-type-add-on-validation__strategy_variant__range_market_range_no_add_on_fast_review"
+        },
+        "strategy": {
+          "add_on_method": "none",
+          "add_on_params": {}
+        }
+      },
+      "run_plan_path": "examples\\generated-strategy-variant-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2021_box_range_market__variant__range_market_range_no_add_on_fast_review.run.yaml"
+    },
+    {
+      "segment_id": "2015_2016_bear_market",
+      "segment_label_zh": "2015 年高点后的股灾熊市",
+      "market_type_id": "bear_market",
+      "market_type_label_zh": "熊市",
+      "from_date": "2015-06-12",
+      "to_date": "2016-01-27",
+      "baseline_run_id": "tushare-market-type-add-on-market-segment-2015_2016_bear_market",
+      "baseline_run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2015_2016_bear_market.run.yaml",
+      "draft_id": "bear_market_defensive_sizing",
+      "adaptation": "avoid",
+      "adaptation_label_zh": "规避",
+      "run_id": "tushare-market-type-add-on-market-segment-2015_2016_bear_market__variant__bear_market_defensive_sizing",
+      "omitted_patch_keys": [
+        "review_candidate"
+      ],
+      "run_plan_patch": {
+        "run": {
+          "id": "tushare-market-type-add-on-validation__strategy_variant__bear_market_defensive_sizing"
+        },
+        "strategy": {
+          "add_on_method": "none",
+          "add_on_params": {},
+          "sizing_params": {
+            "max_holding_count": 3,
+            "max_position_percent": 0.08,
+            "max_total_exposure_percent": 0.3,
+            "max_risk_group_exposure_percent": 0.15,
+            "cash_reserve_percent": 0.5
+          }
+        }
+      },
+      "run_plan_path": "examples\\generated-strategy-variant-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2015_2016_bear_market__variant__bear_market_defensive_sizing.run.yaml"
+    },
+    {
+      "segment_id": "2018_bear_market",
+      "segment_label_zh": "2018 年单边熊市",
+      "market_type_id": "bear_market",
+      "market_type_label_zh": "熊市",
+      "from_date": "2018-01-29",
+      "to_date": "2019-01-04",
+      "baseline_run_id": "tushare-market-type-add-on-market-segment-2018_bear_market",
+      "baseline_run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2018_bear_market.run.yaml",
+      "draft_id": "bear_market_defensive_sizing",
+      "adaptation": "avoid",
+      "adaptation_label_zh": "规避",
+      "run_id": "tushare-market-type-add-on-market-segment-2018_bear_market__variant__bear_market_defensive_sizing",
+      "omitted_patch_keys": [
+        "review_candidate"
+      ],
+      "run_plan_patch": {
+        "run": {
+          "id": "tushare-market-type-add-on-validation__strategy_variant__bear_market_defensive_sizing"
+        },
+        "strategy": {
+          "add_on_method": "none",
+          "add_on_params": {},
+          "sizing_params": {
+            "max_holding_count": 3,
+            "max_position_percent": 0.08,
+            "max_total_exposure_percent": 0.3,
+            "max_risk_group_exposure_percent": 0.15,
+            "cash_reserve_percent": 0.5
+          }
+        }
+      },
+      "run_plan_path": "examples\\generated-strategy-variant-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2018_bear_market__variant__bear_market_defensive_sizing.run.yaml"
+    },
+    {
+      "segment_id": "2022_q1_q2_bear_market",
+      "segment_label_zh": "2022 年年初快速熊市",
+      "market_type_id": "bear_market",
+      "market_type_label_zh": "熊市",
+      "from_date": "2022-01-04",
+      "to_date": "2022-04-27",
+      "baseline_run_id": "tushare-market-type-add-on-market-segment-2022_q1_q2_bear_market",
+      "baseline_run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2022_q1_q2_bear_market.run.yaml",
+      "draft_id": "bear_market_defensive_sizing",
+      "adaptation": "avoid",
+      "adaptation_label_zh": "规避",
+      "run_id": "tushare-market-type-add-on-market-segment-2022_q1_q2_bear_market__variant__bear_market_defensive_sizing",
+      "omitted_patch_keys": [
+        "review_candidate"
+      ],
+      "run_plan_patch": {
+        "run": {
+          "id": "tushare-market-type-add-on-validation__strategy_variant__bear_market_defensive_sizing"
+        },
+        "strategy": {
+          "add_on_method": "none",
+          "add_on_params": {},
+          "sizing_params": {
+            "max_holding_count": 3,
+            "max_position_percent": 0.08,
+            "max_total_exposure_percent": 0.3,
+            "max_risk_group_exposure_percent": 0.15,
+            "cash_reserve_percent": 0.5
+          }
+        }
+      },
+      "run_plan_path": "examples\\generated-strategy-variant-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2022_q1_q2_bear_market__variant__bear_market_defensive_sizing.run.yaml"
+    }
+  ],
+  "rules": [
+    "每个 YAML 都由原始 market segment RunPlan 合并对应市场类型的 strategy variant patch 得到。",
+    "只合并合法 RunPlan 顶层字段；review_candidate 等元数据保留在 manifest，不写入可执行 YAML。",
+    "市场类型仍来自人工 manifest；本生成器不识别行情、不自动切换策略。",
+    "生成的 RunPlan 已通过 RunPlan.from_mapping 校验；执行前仍需人工确认样本范围。"
+  ]
+}

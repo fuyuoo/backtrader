@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -15,6 +16,7 @@ from attbacktrader.config import RunPlan
 AI_REVIEW_FINDINGS_SCHEMA = "attbacktrader.ai_review_findings.v1"
 AI_REVIEW_BRIEF_SCHEMA = "attbacktrader.ai_review_brief.v1"
 AI_REVIEW_RESULT_SCHEMA = "attbacktrader.ai_review_result.v1"
+AI_REVIEW_GOLDEN_CHECK_SCHEMA = "attbacktrader.ai_review_golden_check.v1"
 REVIEW_SAMPLE_BATCH_SCHEMA = "attbacktrader.review_sample_batch.v1"
 REVIEW_SAMPLE_SCHEMA = "attbacktrader.review_sample.v1"
 REVIEW_EXPERIMENT_CANDIDATES_SCHEMA = "attbacktrader.review_experiment_candidates.v1"
@@ -541,6 +543,203 @@ def write_ai_review_result(
     return json_path, markdown_path
 
 
+def build_ai_review_golden_check(
+    review_or_path: Mapping[str, Any] | str | Path,
+    golden_or_path: Mapping[str, Any] | str | Path,
+) -> dict[str, Any]:
+    """Check an AI review output against a versioned golden boundary."""
+
+    review, review_path, review_text = _load_review_for_golden_check(review_or_path)
+    golden, golden_path = _load_json_mapping(golden_or_path, label="golden")
+    checks: list[dict[str, Any]] = []
+
+    for source in _as_sequence(golden.get("required_sources")):
+        source_text = str(source)
+        checks.append(
+            _golden_check(
+                f"required-source:{source_text}",
+                _contains_path(review_text, source_text),
+                f"复盘必须引用来源 `{source_text}`。",
+                expected=source_text,
+            )
+        )
+
+    verdict = _as_mapping(golden.get("expected_verdict"))
+    for index, point in enumerate(_as_sequence(verdict.get("must_include_points")), start=1):
+        point_text = str(point)
+        checks.append(
+            _golden_check(
+                f"must-include:{index}",
+                _contains_phrase(review_text, point_text),
+                "复盘必须覆盖 sealed V1 的必要结论。",
+                expected=point_text,
+            )
+        )
+    for index, forbidden in enumerate(_as_sequence(verdict.get("must_not_claim")), start=1):
+        forbidden_text = str(forbidden)
+        checks.append(
+            _golden_check(
+                f"must-not-claim:{index}",
+                not _contains_phrase(review_text, forbidden_text),
+                "复盘不得写出 golden 禁止的结论。",
+                expected=forbidden_text,
+            )
+        )
+
+    for finding in _as_sequence(golden.get("expected_findings")):
+        finding_map = _as_mapping(finding)
+        finding_id = str(finding_map.get("finding_id"))
+        title_zh = str(finding_map.get("title_zh"))
+        finding_text = _finding_text_for_golden_check(review, review_text, finding_id=finding_id, title_zh=title_zh)
+        for evidence_ref in _as_sequence(finding_map.get("required_evidence_refs")):
+            evidence_text = str(evidence_ref)
+            checks.append(
+                _golden_check(
+                    f"{finding_id}:evidence:{evidence_text}",
+                    _contains_path(finding_text, evidence_text) or _contains_phrase(finding_text, evidence_text),
+                    f"{title_zh} 必须保留证据引用。",
+                    expected=evidence_text,
+                )
+            )
+        for metric_key, expected_value in _as_mapping(finding_map.get("required_metrics")).items():
+            checks.append(
+                _golden_check(
+                    f"{finding_id}:metric:{metric_key}",
+                    _contains_metric(review, finding_text, str(metric_key), expected_value),
+                    f"{title_zh} 必须保留指标 `{metric_key}`。",
+                    expected={str(metric_key): expected_value},
+                )
+            )
+        for sample_index, sample_ref in enumerate(_as_sequence(finding_map.get("required_sample_refs")), start=1):
+            sample_map = _as_mapping(sample_ref)
+            for sample_key, sample_value in sample_map.items():
+                checks.append(
+                    _golden_check(
+                        f"{finding_id}:sample:{sample_index}:{sample_key}",
+                        _contains_sample_value(finding_text, sample_value),
+                        f"{title_zh} 必须保留样本引用 `{sample_key}`。",
+                        expected={str(sample_key): sample_value},
+                    )
+                )
+        risk_zh = finding_map.get("required_risk_zh")
+        if risk_zh is not None:
+            checks.append(
+                _golden_check(
+                    f"{finding_id}:risk",
+                    _contains_phrase(finding_text, str(risk_zh)),
+                    f"{title_zh} 必须保留风险说明。",
+                    expected=str(risk_zh),
+                )
+            )
+        next_check_zh = finding_map.get("required_next_check_zh")
+        if next_check_zh is not None:
+            checks.append(
+                _golden_check(
+                    f"{finding_id}:next-check",
+                    _contains_phrase(finding_text, str(next_check_zh)),
+                    f"{title_zh} 必须保留下一个检查动作。",
+                    expected=str(next_check_zh),
+                )
+            )
+
+    final_recommendation = _as_mapping(golden.get("expected_final_recommendation"))
+    for index, required_text in enumerate(_as_sequence(final_recommendation.get("must_include")), start=1):
+        text = str(required_text)
+        checks.append(
+            _golden_check(
+                f"final-recommendation:{index}",
+                _contains_phrase(review_text, text),
+                "最终建议必须保留 golden 指定方向。",
+                expected=text,
+            )
+        )
+    first_question_zh = final_recommendation.get("first_question_zh")
+    if first_question_zh is not None:
+        checks.append(
+            _golden_check(
+                "final-recommendation:first-question",
+                _contains_phrase(review_text, str(first_question_zh)),
+                "最终建议必须保留第一刀问题。",
+                expected=str(first_question_zh),
+            )
+        )
+
+    failed_checks = [check for check in checks if check["status"] != "passed"]
+    return {
+        "schema": AI_REVIEW_GOLDEN_CHECK_SCHEMA,
+        "status": "ok" if not failed_checks else "failed",
+        "golden_for": golden.get("golden_for"),
+        "source_review": str(review_path) if review_path is not None else None,
+        "source_golden": str(golden_path) if golden_path is not None else None,
+        "source_review_schema": review.get("schema") if isinstance(review, Mapping) else None,
+        "check_count": len(checks),
+        "passed_count": len(checks) - len(failed_checks),
+        "failed_count": len(failed_checks),
+        "checks": checks,
+        "issues": failed_checks,
+        "rules": [
+            "该检查只验证 AI 复盘是否覆盖 sealed V1 golden 边界，不判断策略优劣。",
+            "检查不重跑策略、不重算指标、不抓取行情数据。",
+            "metric 检查接受原始小数、两位小数和百分比展示，但不接受缺失。",
+            "must_not_claim 命中会直接导致检查失败。",
+        ],
+    }
+
+
+def render_ai_review_golden_check_markdown_zh(check: Mapping[str, Any]) -> str:
+    """Render an AI review golden check as Chinese Markdown."""
+
+    lines = [
+        "# AI 复盘 Golden Check",
+        "",
+        f"- schema: `{check.get('schema')}`",
+        f"- status: `{check.get('status')}`",
+        f"- golden_for: `{check.get('golden_for')}`",
+        f"- source_review: `{check.get('source_review')}`",
+        f"- source_golden: `{check.get('source_golden')}`",
+        f"- check_count: `{check.get('check_count')}`",
+        f"- failed_count: `{check.get('failed_count')}`",
+        "",
+        "## 规则",
+    ]
+    for rule in _as_sequence(check.get("rules")):
+        lines.append(f"- {rule}")
+    lines.extend(["", "## 检查结果", "", "| check_id | status | message |", "|---|---|---|"])
+    for item in _as_sequence(check.get("checks")):
+        item_map = _as_mapping(item)
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_table_value(item_map.get("check_id")),
+                    _markdown_table_value(item_map.get("status")),
+                    _markdown_table_value(item_map.get("message_zh")),
+                ]
+            )
+            + " |"
+        )
+    if _as_sequence(check.get("issues")):
+        lines.extend(["", "## 未通过项", "", "```json", _to_pretty_json(check.get("issues")), "```"])
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_ai_review_golden_check(
+    check: Mapping[str, Any],
+    *,
+    output_dir: str | Path,
+) -> tuple[Path, Path]:
+    """Write AI review golden check JSON and Chinese Markdown."""
+
+    target_dir = Path(output_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    json_path = target_dir / "ai_review_golden_check.json"
+    markdown_path = target_dir / "ai_review_golden_check.zh.md"
+    json_path.write_text(_to_pretty_json(check), encoding="utf-8")
+    markdown_path.write_text(render_ai_review_golden_check_markdown_zh(check), encoding="utf-8")
+    return json_path, markdown_path
+
+
 def build_review_experiment_candidates(
     findings_or_path: Mapping[str, Any] | str | Path,
     *,
@@ -996,6 +1195,134 @@ def _load_yaml_mapping(path: str | Path | None) -> Mapping[str, Any]:
         return {}
     payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     return payload if isinstance(payload, Mapping) else {}
+
+
+def _load_json_mapping(value: Mapping[str, Any] | str | Path, *, label: str) -> tuple[Mapping[str, Any], Path | None]:
+    if isinstance(value, Mapping):
+        return value, None
+    path = Path(value)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"{label} must contain a JSON object")
+    return payload, path
+
+
+def _load_review_for_golden_check(value: Mapping[str, Any] | str | Path) -> tuple[Mapping[str, Any], Path | None, str]:
+    if isinstance(value, Mapping):
+        return value, None, _to_pretty_json(value)
+    path = Path(value)
+    raw_text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() != ".json":
+        return {}, path, raw_text
+    payload = json.loads(raw_text)
+    if not isinstance(payload, Mapping):
+        raise ValueError("review must contain a JSON object")
+    return payload, path, raw_text + "\n" + _to_pretty_json(payload)
+
+
+def _golden_check(
+    check_id: str,
+    passed: bool,
+    message_zh: str,
+    *,
+    expected: Any,
+) -> dict[str, Any]:
+    return {
+        "check_id": check_id,
+        "status": "passed" if passed else "failed",
+        "message_zh": message_zh,
+        "expected": expected,
+    }
+
+
+def _finding_text_for_golden_check(
+    review: Mapping[str, Any],
+    fallback_text: str,
+    *,
+    finding_id: str,
+    title_zh: str,
+) -> str:
+    for finding in _as_sequence(review.get("findings")):
+        finding_map = _as_mapping(finding)
+        if str(finding_map.get("finding_id")) == finding_id:
+            return _to_pretty_json(finding_map)
+        if title_zh and _contains_phrase(_to_pretty_json(finding_map), title_zh):
+            return _to_pretty_json(finding_map)
+    return fallback_text
+
+
+def _contains_path(text: str, expected: str) -> bool:
+    haystack = text.replace("\\", "/").lower()
+    needle = expected.replace("\\", "/").lower()
+    return needle in haystack
+
+
+def _contains_phrase(text: str, expected: str) -> bool:
+    normalized_expected = _normalize_for_contains(expected)
+    if not normalized_expected:
+        return True
+    return normalized_expected in _normalize_for_contains(text)
+
+
+def _contains_metric(
+    review: Mapping[str, Any],
+    finding_text: str,
+    metric_key: str,
+    expected_value: Any,
+) -> bool:
+    for key, actual_value in _walk_key_values(review):
+        if str(key) == metric_key and _numbers_close(actual_value, expected_value):
+            return True
+    return any(_contains_phrase(finding_text, variant) for variant in _number_text_variants(expected_value))
+
+
+def _contains_sample_value(text: str, expected_value: Any) -> bool:
+    if isinstance(expected_value, (int, float)) and not isinstance(expected_value, bool):
+        return any(_contains_phrase(text, variant) for variant in _number_text_variants(expected_value))
+    return _contains_phrase(text, str(expected_value))
+
+
+def _normalize_for_contains(value: Any) -> str:
+    text = str(value).lower()
+    return re.sub(r"[\s`'\"“”‘’、，。；;：:,.!?！？()（）\[\]{}<>《》【】\\/|\\\-—_]+", "", text)
+
+
+def _number_text_variants(value: Any) -> tuple[str, ...]:
+    if isinstance(value, bool):
+        return (str(value),)
+    if not isinstance(value, (int, float)):
+        return (str(value),)
+    numeric = float(value)
+    variants = {
+        str(value),
+        f"{numeric:.2f}",
+        f"{numeric:.4f}",
+        f"{numeric:.6f}",
+        f"{numeric * 100:.2f}%",
+    }
+    if numeric.is_integer():
+        variants.add(str(int(numeric)))
+    return tuple(sorted(variants))
+
+
+def _numbers_close(actual_value: Any, expected_value: Any) -> bool:
+    if isinstance(actual_value, bool) or isinstance(expected_value, bool):
+        return actual_value == expected_value
+    if not isinstance(actual_value, (int, float)) or not isinstance(expected_value, (int, float)):
+        return actual_value == expected_value
+    return abs(float(actual_value) - float(expected_value)) <= 1e-9
+
+
+def _walk_key_values(value: Any) -> Sequence[tuple[str, Any]]:
+    pairs: list[tuple[str, Any]] = []
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            pairs.append((str(key), item))
+            pairs.extend(_walk_key_values(item))
+    elif isinstance(value, list):
+        for item in value:
+            pairs.extend(_walk_key_values(item))
+    return tuple(pairs)
 
 
 def _legal_run_plan_patch(patch: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:

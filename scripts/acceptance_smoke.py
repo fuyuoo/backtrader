@@ -50,10 +50,17 @@ BUSINESS_TESTS = (
     "tests/test_attribution_filter_experiments.py",
     "tests/test_market_segment_runs.py",
     "tests/test_market_type_summary.py",
+    "tests/test_strategy_adaptation_matrix.py",
+    "tests/test_strategy_variant_attribution.py",
     "tests/test_review_packet.py",
     "tests/test_ai_review.py",
+    "tests/test_acceptance_smoke.py",
     "tests/test_run_data_tools.py",
 )
+
+STRATEGY_ADAPTATION_V1_REVIEW = Path("docs/strategy-adaptation-v1-ai-review.md")
+STRATEGY_ADAPTATION_V1_GOLDEN = Path("examples/strategy-adaptation-v1-ai-review-golden.json")
+STRATEGY_ADAPTATION_V1_GOLDEN_CHECK_OUTPUT = Path("reports/strategy-adaptation-v1-ai-review-golden-check")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     python = Path(args.python)
 
     _run([str(python), "-m", "pytest", *BUSINESS_TESTS, "-q"], cwd=repo_root)
+    _run_strategy_adaptation_v1_golden_check(python=python, repo_root=repo_root)
 
     if args.with_tushare:
         _run_tushare_smoke(
@@ -125,6 +133,41 @@ def _run_tushare_smoke(
     print(f"cumulative_return: {payload['report']['returns']['cumulative_return']}", flush=True)
     print(f"completed_orders: {payload['report']['execution_costs']['completed_count']}", flush=True)
     print(f"report_md: {artifacts['report_markdown_path']}", flush=True)
+
+
+def _run_strategy_adaptation_v1_golden_check(
+    *,
+    python: Path,
+    repo_root: Path,
+) -> None:
+    stdout = _run(
+        [
+            str(python),
+            "-m",
+            "attbacktrader.cli.review_golden_check",
+            "--review",
+            str(STRATEGY_ADAPTATION_V1_REVIEW),
+            "--golden",
+            str(STRATEGY_ADAPTATION_V1_GOLDEN),
+            "--output-dir",
+            str(STRATEGY_ADAPTATION_V1_GOLDEN_CHECK_OUTPUT),
+        ],
+        cwd=repo_root,
+        capture_stdout=True,
+    )
+    payload = json.loads(stdout)
+    if payload.get("status") != "ok":
+        raise SystemExit(f"Strategy Adaptation V1 AI review golden check failed: {payload.get('failed_count')}")
+    artifacts = payload.get("artifacts", {})
+    check_markdown_path = _resolve(repo_root, Path(artifacts["ai_review_golden_check_chinese_markdown_path"]))
+    if not check_markdown_path.exists():
+        raise SystemExit(f"Expected AI review golden check Markdown was not written: {check_markdown_path}")
+
+    print("\nStrategy Adaptation V1 golden check summary", flush=True)
+    print(f"status: {payload['status']}", flush=True)
+    print(f"check_count: {payload['check_count']}", flush=True)
+    print(f"failed_count: {payload['failed_count']}", flush=True)
+    print(f"check_md: {artifacts['ai_review_golden_check_chinese_markdown_path']}", flush=True)
 
 
 def _run(

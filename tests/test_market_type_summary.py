@@ -4,9 +4,13 @@ from pathlib import Path
 import pytest
 
 from attbacktrader.cli import market_type_summary as market_type_summary_cli
+from attbacktrader.cli import strategy_variant_validation as strategy_variant_validation_cli
 from attbacktrader.reports import (
     build_market_type_summary,
+    build_strategy_variant_validation,
     render_market_type_summary_markdown_zh,
+    render_strategy_variant_validation_markdown_zh,
+    write_strategy_variant_validation,
     write_market_type_summary,
 )
 
@@ -94,6 +98,89 @@ def test_market_type_summary_cli_writes_outputs(tmp_path: Path, capsys) -> None:
     assert stdout["artifacts"]["market_type_summary_json_path"].endswith("market_type_summary.json")
     assert (tmp_path / "out" / "market_type_summary.json").exists()
     assert (tmp_path / "out" / "market_type_summary.zh.md").exists()
+
+
+def test_strategy_variant_validation_compares_market_type_summaries(tmp_path: Path, capsys) -> None:
+    baseline = _market_type_summary_payload(
+        [
+            _market_type("bull_market", "牛市", 0.20, 0.06, 0.60, 10),
+            _market_type("bear_market", "熊市", -0.12, 0.15, 0.20, 8),
+        ],
+        warnings=["牛市 有 1 段交易样本不足"],
+    )
+    variant = _market_type_summary_payload(
+        [
+            _market_type("bull_market", "牛市", 0.12, 0.04, 0.50, 18),
+            _market_type("bear_market", "熊市", -0.05, 0.08, 0.25, 6),
+        ],
+        warnings=["牛市 有 1 段交易样本不足"],
+    )
+    baseline_path = tmp_path / "baseline.json"
+    variant_path = tmp_path / "variant.json"
+    baseline_path.write_text(json.dumps(baseline, ensure_ascii=False), encoding="utf-8")
+    variant_path.write_text(json.dumps(variant, ensure_ascii=False), encoding="utf-8")
+
+    validation = build_strategy_variant_validation(baseline_path, variant_path)
+    markdown = render_strategy_variant_validation_markdown_zh(validation)
+    json_path, markdown_path = write_strategy_variant_validation(validation, output_dir=tmp_path / "validation")
+    exit_code = strategy_variant_validation_cli.main(
+        [
+            "--baseline-summary",
+            str(baseline_path),
+            "--variant-summary",
+            str(variant_path),
+            "--output-dir",
+            str(tmp_path / "cli-validation"),
+        ]
+    )
+    stdout = json.loads(capsys.readouterr().out)
+
+    bull = next(row for row in validation["rows"] if row["market_type_id"] == "bull_market")
+    bear = next(row for row in validation["rows"] if row["market_type_id"] == "bear_market")
+    assert validation["schema"] == "attbacktrader.strategy_variant_validation.v1"
+    assert bull["delta"]["average_return_pct"] == pytest.approx(-0.08)
+    assert bull["direction_zh"] == "收益和胜率下降"
+    assert bear["delta"]["average_return_pct"] == pytest.approx(0.07)
+    assert bear["direction_zh"] == "收益提升且回撤未扩大"
+    assert "策略变体验证对比" in markdown
+    assert "基线: 牛市 有 1 段交易样本不足" in validation["validation_warnings"]
+    assert json_path.exists()
+    assert markdown_path.exists()
+    assert exit_code == 0
+    assert stdout["schema"] == "attbacktrader.strategy_variant_validation.v1"
+    assert (tmp_path / "cli-validation" / "strategy_variant_validation.json").exists()
+
+
+def _market_type_summary_payload(market_types: list[dict], *, warnings: list[str] | None = None) -> dict:
+    return {
+        "schema": "attbacktrader.market_type_summary.v1",
+        "base_run_id": "summary-test",
+        "market_types": market_types,
+        "validation_warnings": warnings or [],
+    }
+
+
+def _market_type(
+    market_type_id: str,
+    label_zh: str,
+    average_return: float,
+    average_drawdown: float,
+    win_rate: float,
+    trade_count: int,
+) -> dict:
+    return {
+        "market_type_id": market_type_id,
+        "market_type_label_zh": label_zh,
+        "segment_count": 3,
+        "total_trade_count": trade_count,
+        "average_return_pct": average_return,
+        "average_max_drawdown": average_drawdown,
+        "weighted_win_rate": win_rate,
+        "profitable_segment_count": 2,
+        "loss_segment_count": 1,
+        "low_sample_segment_count": 0,
+        "average_sold_too_early_rate_5d": 0.9,
+    }
 
 
 def _write_manifest(root: Path) -> Path:

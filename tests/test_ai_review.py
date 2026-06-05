@@ -7,12 +7,14 @@ from attbacktrader.cli import review_experiment_drafts as review_experiment_draf
 from attbacktrader.cli import review_expand_samples as review_expand_samples_cli
 from attbacktrader.cli import review_experiment_candidates as review_experiment_candidates_cli
 from attbacktrader.cli import review_findings as review_findings_cli
+from attbacktrader.cli import review_golden_check as review_golden_check_cli
 from attbacktrader.cli import review_result as review_result_cli
 from attbacktrader.cli import review_sample as review_sample_cli
 from attbacktrader.config import RunPlan
 from attbacktrader.reports import (
     build_ai_review_brief,
     build_ai_review_findings,
+    build_ai_review_golden_check,
     build_ai_review_result,
     build_review_experiment_confirmed_run_plan,
     build_review_packet,
@@ -22,6 +24,7 @@ from attbacktrader.reports import (
     expand_review_samples_from_findings,
     write_ai_review_brief,
     write_ai_review_findings,
+    write_ai_review_golden_check,
     write_ai_review_result,
     write_review_experiment_confirmed_run_plan,
     write_review_experiment_candidates,
@@ -150,6 +153,64 @@ def test_ai_review_result_can_embed_environment_fit_comparison(tmp_path: Path) -
     assert result["environment_fit_comparison_review"]["risk_zh"] == "最佳环境存在变化或样本风险，不能声明稳定适配。"
     assert json_path.exists()
     assert "environment-fit-comparison-001" in markdown_path.read_text(encoding="utf-8")
+
+
+def test_ai_review_golden_check_validates_required_boundary(tmp_path: Path) -> None:
+    golden = _strategy_adaptation_ai_review_golden()
+    review = _strategy_adaptation_ai_review_result()
+
+    check = build_ai_review_golden_check(review, golden)
+    json_path, markdown_path = write_ai_review_golden_check(check, output_dir=tmp_path / "golden-check")
+
+    assert check["schema"] == "attbacktrader.ai_review_golden_check.v1"
+    assert check["status"] == "ok"
+    assert check["failed_count"] == 0
+    assert json_path.exists()
+    assert "AI 复盘 Golden Check" in markdown_path.read_text(encoding="utf-8")
+
+
+def test_ai_review_golden_check_fails_for_forbidden_claim_and_cli_returns_nonzero(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    golden_path = tmp_path / "golden.json"
+    review_path = tmp_path / "review.json"
+    bad_review_path = tmp_path / "bad-review.json"
+    _write_json(golden_path, _strategy_adaptation_ai_review_golden())
+    _write_json(review_path, _strategy_adaptation_ai_review_result())
+    bad_review = _strategy_adaptation_ai_review_result()
+    bad_review["summary_zh"] = bad_review["summary_zh"] + " 可以自动调参。"
+    _write_json(bad_review_path, bad_review)
+
+    good_exit = review_golden_check_cli.main(
+        [
+            "--review",
+            str(review_path),
+            "--golden",
+            str(golden_path),
+            "--output-dir",
+            str(tmp_path / "good-check"),
+        ]
+    )
+    good_stdout = json.loads(capsys.readouterr().out)
+    bad_exit = review_golden_check_cli.main(
+        [
+            "--review",
+            str(bad_review_path),
+            "--golden",
+            str(golden_path),
+            "--output-dir",
+            str(tmp_path / "bad-check"),
+        ]
+    )
+    bad_stdout = json.loads(capsys.readouterr().out)
+
+    assert good_exit == 0
+    assert good_stdout["status"] == "ok"
+    assert bad_exit == 1
+    assert bad_stdout["status"] == "failed"
+    assert bad_stdout["failed_count"] == 1
+    assert (tmp_path / "bad-check" / "ai_review_golden_check.json").exists()
 
 
 def test_review_experiment_drafts_write_manifest_and_yaml(tmp_path: Path) -> None:
@@ -331,6 +392,73 @@ def test_ai_review_result_and_draft_clis_write_outputs(tmp_path: Path, capsys) -
     assert drafts_stdout["draft_count"] == 6
     assert (output_dir / "review_experiment_drafts.all.zh.md").exists()
     assert len(drafts_stdout["artifacts"]["review_experiment_draft_yaml_paths"]) == 6
+
+
+def _strategy_adaptation_ai_review_golden() -> dict:
+    return {
+        "schema": "attbacktrader.strategy_adaptation_v1_ai_review_golden.v1",
+        "golden_for": "Strategy Adaptation V1 sealed AI review",
+        "required_sources": ["docs/source.md"],
+        "expected_verdict": {
+            "must_include_points": ["V1 框架已经完成已知市场类型到变体归因复盘的闭环。"],
+            "must_not_claim": ["可以自动调参。"],
+        },
+        "expected_findings": [
+            {
+                "finding_id": "SA-V1-GOLDEN-001",
+                "title_zh": "V1 框架闭环成立",
+                "required_evidence_refs": ["docs/source.md"],
+                "required_metrics": {
+                    "baseline_average_return_pct": 0.2537250043269954,
+                    "baseline_trade_count": 88,
+                },
+                "required_sample_refs": [
+                    {
+                        "run_id": "variant-run",
+                        "trade_index_pair": "15 -> 17",
+                        "symbol": "000001.SZ",
+                    }
+                ],
+                "required_risk_zh": "当前归因还没有拆开退出方法内部触发原因。",
+                "required_next_check_zh": "先做退出方法证据下钻，不生成新的牛市变体。",
+            }
+        ],
+        "expected_final_recommendation": {
+            "must_include": ["Do not tune.", "Start Exit Method Attribution."],
+            "first_question_zh": "为什么 ma_macd_weakening_exit 在 bull_market 变体中把平均持仓从 24.35 天压到 4.06 天？",
+        },
+    }
+
+
+def _strategy_adaptation_ai_review_result() -> dict:
+    return {
+        "schema": "attbacktrader.ai_review_result.v1",
+        "summary_zh": (
+            "V1 框架已经完成已知市场类型到变体归因复盘的闭环。"
+            " Do not tune. Start Exit Method Attribution."
+            " 为什么 ma_macd_weakening_exit 在 bull_market 变体中把平均持仓从 24.35 天压到 4.06 天？"
+        ),
+        "findings": [
+            {
+                "finding_id": "SA-V1-GOLDEN-001",
+                "claim_zh": "V1 框架闭环成立。",
+                "evidence_refs": ["docs/source.md"],
+                "metrics": {
+                    "baseline_average_return_pct": 0.2537250043269954,
+                    "baseline_trade_count": 88,
+                },
+                "sample_refs": [
+                    {
+                        "run_id": "variant-run",
+                        "trade_index_pair": "15 -> 17",
+                        "symbol": "000001.SZ",
+                    }
+                ],
+                "risk_zh": "当前归因还没有拆开退出方法内部触发原因。",
+                "next_check_zh": "先做退出方法证据下钻，不生成新的牛市变体。",
+            }
+        ],
+    }
 
 
 def _run_dir(root: Path) -> Path:

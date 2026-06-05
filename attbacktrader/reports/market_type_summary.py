@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 
 
 MARKET_TYPE_SUMMARY_SCHEMA = "attbacktrader.market_type_summary.v1"
+STRATEGY_VARIANT_VALIDATION_SCHEMA = "attbacktrader.strategy_variant_validation.v1"
 
 
 def build_market_type_summary(
@@ -164,6 +165,224 @@ def safe_market_type_summary_dir_name(manifest_path: str | Path) -> str:
     stem = path.parent.name if path.parent.name else path.stem
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", stem.strip())
     return f"market-type-summary-{safe or 'runs'}"
+
+
+def build_strategy_variant_validation(
+    baseline_summary_or_path: Mapping[str, Any] | str | Path,
+    variant_summary_or_path: Mapping[str, Any] | str | Path,
+) -> dict[str, Any]:
+    """Compare baseline and strategy-variant market-type summaries."""
+
+    baseline, baseline_path = _load_summary(baseline_summary_or_path)
+    variant, variant_path = _load_summary(variant_summary_or_path)
+    baseline_rows = {
+        str(row.get("market_type_id") or ""): _as_mapping(row)
+        for row in _as_sequence(baseline.get("market_types"))
+    }
+    variant_rows = {
+        str(row.get("market_type_id") or ""): _as_mapping(row)
+        for row in _as_sequence(variant.get("market_types"))
+    }
+    market_type_ids = sorted(set(baseline_rows) | set(variant_rows))
+    rows = [_variant_validation_row(market_type_id, baseline_rows.get(market_type_id), variant_rows.get(market_type_id)) for market_type_id in market_type_ids]
+    return {
+        "schema": STRATEGY_VARIANT_VALIDATION_SCHEMA,
+        "baseline_summary_path": str(baseline_path) if baseline_path is not None else None,
+        "variant_summary_path": str(variant_path) if variant_path is not None else None,
+        "baseline_base_run_id": baseline.get("base_run_id"),
+        "variant_base_run_id": variant.get("base_run_id"),
+        "market_type_count": len(rows),
+        "rows": rows,
+        "validation_warnings": _variant_validation_warnings(baseline, variant),
+        "rules": [
+            "只比较已落盘的 market_type_summary.json，不重跑策略、不重算指标。",
+            "对比结果只说明变体相对基线的变化，不自动确认上线或调参。",
+            "收益、回撤、胜率、交易数需要一起看；交易数大幅变化时优先人工复盘样本。",
+            "样本不足的市场类型只能作为开发线索，不能作为稳定规律。",
+        ],
+    }
+
+
+def render_strategy_variant_validation_markdown_zh(validation: Mapping[str, Any]) -> str:
+    """Render strategy variant validation comparison as Chinese Markdown."""
+
+    lines = [
+        "# 策略变体验证对比",
+        "",
+        f"- schema: `{validation.get('schema')}`",
+        f"- baseline_base_run_id: `{validation.get('baseline_base_run_id')}`",
+        f"- variant_base_run_id: `{validation.get('variant_base_run_id')}`",
+        f"- market_type_count: `{validation.get('market_type_count')}`",
+        "",
+        "## 使用规则",
+    ]
+    for rule in _as_sequence(validation.get("rules")):
+        lines.append(f"- {rule}")
+
+    warnings = _as_sequence(validation.get("validation_warnings"))
+    if warnings:
+        lines.extend(["", "## 样本风险"])
+        for warning in warnings:
+            lines.append(f"- {_escape_cell(warning)}")
+
+    lines.extend(
+        [
+            "",
+            "## 类型对比",
+            "",
+            "| 类型 | 基线收益 | 变体收益 | Δ收益 | 基线回撤 | 变体回撤 | Δ回撤 | 基线胜率 | 变体胜率 | Δ胜率 | 基线交易 | 变体交易 | 方向 |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        ]
+    )
+    for row in _as_sequence(validation.get("rows")):
+        row_map = _as_mapping(row)
+        baseline = _as_mapping(row_map.get("baseline"))
+        variant = _as_mapping(row_map.get("variant"))
+        delta = _as_mapping(row_map.get("delta"))
+        lines.append(
+            "| "
+            f"{_escape_cell(row_map.get('market_type_label_zh'))} | "
+            f"{_format_optional_percent(baseline.get('average_return_pct'))} | "
+            f"{_format_optional_percent(variant.get('average_return_pct'))} | "
+            f"{_format_signed_percent(delta.get('average_return_pct'))} | "
+            f"{_format_optional_percent(baseline.get('average_max_drawdown'))} | "
+            f"{_format_optional_percent(variant.get('average_max_drawdown'))} | "
+            f"{_format_signed_percent(delta.get('average_max_drawdown'))} | "
+            f"{_format_optional_percent(baseline.get('weighted_win_rate'))} | "
+            f"{_format_optional_percent(variant.get('weighted_win_rate'))} | "
+            f"{_format_signed_percent(delta.get('weighted_win_rate'))} | "
+            f"{baseline.get('total_trade_count', '-')} | "
+            f"{variant.get('total_trade_count', '-')} | "
+            f"{_escape_cell(row_map.get('direction_zh'))} |"
+        )
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_strategy_variant_validation(
+    validation: Mapping[str, Any],
+    *,
+    output_dir: str | Path,
+) -> tuple[Path, Path]:
+    """Write strategy variant validation JSON and Chinese Markdown."""
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    json_path = output_path / "strategy_variant_validation.json"
+    markdown_path = output_path / "strategy_variant_validation.zh.md"
+    json_path.write_text(json.dumps(validation, ensure_ascii=False, indent=2), encoding="utf-8")
+    markdown_path.write_text(render_strategy_variant_validation_markdown_zh(validation), encoding="utf-8")
+    return json_path, markdown_path
+
+
+def safe_strategy_variant_validation_dir_name(variant_summary_path: str | Path) -> str:
+    path = Path(variant_summary_path)
+    stem = path.parent.name.replace("market-type-summary-", "") if path.parent.name else path.stem
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", stem.strip())
+    return f"strategy-variant-validation-{safe or 'runs'}"
+
+
+def _variant_validation_row(
+    market_type_id: str,
+    baseline: Mapping[str, Any] | None,
+    variant: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    baseline_row = _metric_snapshot(baseline)
+    variant_row = _metric_snapshot(variant)
+    delta = {
+        "average_return_pct": _delta_float(variant_row.get("average_return_pct"), baseline_row.get("average_return_pct")),
+        "average_max_drawdown": _delta_float(variant_row.get("average_max_drawdown"), baseline_row.get("average_max_drawdown")),
+        "weighted_win_rate": _delta_float(variant_row.get("weighted_win_rate"), baseline_row.get("weighted_win_rate")),
+        "total_trade_count": _delta_int(variant_row.get("total_trade_count"), baseline_row.get("total_trade_count")),
+        "average_sold_too_early_rate_5d": _delta_float(
+            variant_row.get("average_sold_too_early_rate_5d"),
+            baseline_row.get("average_sold_too_early_rate_5d"),
+        ),
+    }
+    return _drop_none(
+        {
+            "market_type_id": market_type_id,
+            "market_type_label_zh": (variant or baseline or {}).get("market_type_label_zh"),
+            "baseline": baseline_row,
+            "variant": variant_row,
+            "delta": _drop_none(delta),
+            "direction_zh": _variant_direction_zh(delta),
+        }
+    )
+
+
+def _metric_snapshot(row: Mapping[str, Any] | None) -> dict[str, Any]:
+    if row is None:
+        return {}
+    return _drop_none(
+        {
+            "segment_count": _optional_int(row.get("segment_count")),
+            "total_trade_count": _optional_int(row.get("total_trade_count")),
+            "average_return_pct": _optional_float(row.get("average_return_pct")),
+            "average_max_drawdown": _optional_float(row.get("average_max_drawdown")),
+            "weighted_win_rate": _optional_float(row.get("weighted_win_rate")),
+            "profitable_segment_count": _optional_int(row.get("profitable_segment_count")),
+            "loss_segment_count": _optional_int(row.get("loss_segment_count")),
+            "low_sample_segment_count": _optional_int(row.get("low_sample_segment_count")),
+            "average_sold_too_early_rate_5d": _optional_float(row.get("average_sold_too_early_rate_5d")),
+        }
+    )
+
+
+def _variant_direction_zh(delta: Mapping[str, Any]) -> str:
+    return_delta = _optional_float(delta.get("average_return_pct"))
+    drawdown_delta = _optional_float(delta.get("average_max_drawdown"))
+    win_rate_delta = _optional_float(delta.get("weighted_win_rate"))
+    trade_count_delta = _optional_int(delta.get("total_trade_count"))
+    if return_delta is None:
+        return "缺少可比收益"
+    if return_delta > 0 and (drawdown_delta is None or drawdown_delta <= 0):
+        return "收益提升且回撤未扩大"
+    if return_delta > 0:
+        return "收益提升但回撤扩大"
+    if return_delta < 0 and win_rate_delta is not None and win_rate_delta < 0:
+        return "收益和胜率下降"
+    if return_delta < 0 and trade_count_delta is not None and abs(trade_count_delta) > 20:
+        return "收益下降且交易数变化大"
+    if return_delta < 0:
+        return "收益下降"
+    if drawdown_delta is not None and drawdown_delta < 0:
+        return "收益持平但回撤下降"
+    return "变化不明显"
+
+
+def _variant_validation_warnings(baseline: Mapping[str, Any], variant: Mapping[str, Any]) -> list[str]:
+    warnings = []
+    for prefix, summary in (("基线", baseline), ("变体", variant)):
+        for warning in _as_sequence(summary.get("validation_warnings")):
+            warnings.append(f"{prefix}: {warning}")
+    return warnings
+
+
+def _load_summary(source: Mapping[str, Any] | str | Path) -> tuple[Mapping[str, Any], Path | None]:
+    if isinstance(source, Mapping):
+        return source, None
+    path = Path(source)
+    if not path.exists():
+        raise FileNotFoundError(f"missing market type summary: {path}")
+    return json.loads(path.read_text(encoding="utf-8")), path
+
+
+def _delta_float(new_value: Any, old_value: Any) -> float | None:
+    new_number = _optional_float(new_value)
+    old_number = _optional_float(old_value)
+    if new_number is None or old_number is None:
+        return None
+    return new_number - old_number
+
+
+def _delta_int(new_value: Any, old_value: Any) -> int | None:
+    new_number = _optional_int(new_value)
+    old_number = _optional_int(old_value)
+    if new_number is None or old_number is None:
+        return None
+    return new_number - old_number
 
 
 def _segment_row(
@@ -376,6 +595,13 @@ def _format_optional_percent(value: Any) -> str:
     if number is None:
         return "-"
     return f"{number:.2%}"
+
+
+def _format_signed_percent(value: Any) -> str:
+    number = _optional_float(value)
+    if number is None:
+        return "-"
+    return f"{number:+.2%}"
 
 
 def _escape_cell(value: Any) -> str:

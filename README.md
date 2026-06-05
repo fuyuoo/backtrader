@@ -295,7 +295,8 @@ not auto-tune strategy parameters.
 
 ## Acceptance Checks
 
-Run the curated ATTbacktrader business regression suite:
+Run the curated ATTbacktrader business regression suite plus the sealed
+Strategy Adaptation V1 AI review golden check:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\acceptance_smoke.py
@@ -307,8 +308,9 @@ Run the same suite plus the real Tushare smoke:
 .\.venv\Scripts\python.exe scripts\acceptance_smoke.py --with-tushare
 ```
 
-The script intentionally runs only ATTbacktrader tests. The repository also
-contains many upstream backtrader tests with different maintenance scope.
+The script intentionally runs only ATTbacktrader tests plus sealed-stage
+golden checks. The repository also contains many upstream backtrader tests with
+different maintenance scope.
 
 ## Main Configuration File
 

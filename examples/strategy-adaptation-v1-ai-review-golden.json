@@ -1,0 +1,142 @@
+{
+  "schema": "attbacktrader.strategy_adaptation_v1_ai_review_golden.v1",
+  "golden_for": "Strategy Adaptation V1 sealed AI review",
+  "created_on": "2026-06-05",
+  "source_review_doc": "docs/strategy-adaptation-v1-ai-review.md",
+  "required_sources": [
+    "examples/strategy-adaptation-v1-baseline.json",
+    "docs/strategy-adaptation-v1-closure.md",
+    "docs/next-stage-exit-method-attribution.md",
+    "reports/strategy-variant-validation-tushare-market-type-add-on/strategy_variant_validation.json",
+    "reports/strategy-variant-attribution-tushare-market-type-add-on-bull/strategy_variant_attribution.json"
+  ],
+  "expected_verdict": {
+    "summary_zh": "Strategy Adaptation V1 可以封板；下一阶段应进入 Exit Method Attribution，而不是调参、策略切换或市场识别。",
+    "must_include_points": [
+      "V1 框架已经完成已知市场类型到变体归因复盘的闭环。",
+      "牛市变体 bull_market_let_winners_run 不应继续作为让盈利奔跑方向推进。",
+      "熊市变体改善亏损和回撤，但不能直接接受为策略规则。",
+      "震荡市变体基本持平略好，不是当前优先方向。",
+      "下一步必须先解释 ma_macd_weakening_exit 为什么在牛市变体中过快退出。"
+    ],
+    "must_not_claim": [
+      "当前策略已经可上线。",
+      "可以自动切换牛市、震荡市、熊市策略。",
+      "可以开始自动调参。",
+      "可以直接修改 ma_macd_weakening_exit 参数。",
+      "熊市防守变体已经是最终规则。",
+      "ma_macd_weakening_exit 在所有环境都错误。"
+    ]
+  },
+  "expected_findings": [
+    {
+      "finding_id": "SA-V1-GOLDEN-001",
+      "title_zh": "V1 框架闭环成立",
+      "claim_zh": "当前版本已经完成已知市场类型到变体验证、再到变体归因的闭环。",
+      "required_evidence_refs": [
+        "docs/strategy-adaptation-v1-closure.md",
+        "examples/strategy-adaptation-v1-baseline.json"
+      ],
+      "required_next_check_zh": "后续变更必须继续能对比 examples/strategy-adaptation-v1-baseline.json 中记录的指标。"
+    },
+    {
+      "finding_id": "SA-V1-GOLDEN-002",
+      "title_zh": "牛市变体方向应暂停",
+      "claim_zh": "牛市变体没有让盈利继续跑，而是触发更快退出、快速重入和平均盈利压缩。",
+      "required_evidence_refs": [
+        "market_type_id=bull_market",
+        "reports/strategy-variant-validation-tushare-market-type-add-on/strategy_variant_validation.json",
+        "reports/strategy-variant-attribution-tushare-market-type-add-on-bull/strategy_variant_attribution.json"
+      ],
+      "required_metrics": {
+        "baseline_average_return_pct": 0.2537250043269954,
+        "variant_average_return_pct": 0.09746525668494306,
+        "baseline_weighted_win_rate": 0.6704545454545454,
+        "variant_weighted_win_rate": 0.5305343511450382,
+        "baseline_trade_count": 88,
+        "variant_trade_count": 262,
+        "baseline_average_holding_days": 24.352272727272727,
+        "variant_average_holding_days": 4.064885496183206,
+        "baseline_short_reentry_count_5d": 15,
+        "variant_short_reentry_count_5d": 132,
+        "baseline_average_win": 0.1041118912362974,
+        "variant_average_win": 0.02548576263500267
+      },
+      "required_sample_refs": [
+        {
+          "run_id": "tushare-market-type-add-on-market-segment-2014_2015_bull_market__variant__bull_market_let_winners_run",
+          "trade_index_pair": "15 -> 17",
+          "symbol": "000001.SZ"
+        },
+        {
+          "run_id": "tushare-market-type-add-on-market-segment-2014_2015_bull_market__variant__bull_market_let_winners_run",
+          "trade_index_pair": "17 -> 22",
+          "symbol": "000001.SZ"
+        },
+        {
+          "run_id": "tushare-market-type-add-on-market-segment-2020_2021_structural_bull_market__variant__bull_market_let_winners_run",
+          "trade_index_pair": "1 -> 6",
+          "symbol": "000001.SZ"
+        }
+      ],
+      "required_risk_zh": "当前归因还没有拆开 ma_macd_weakening_exit 内部到底是 MA 条件、MACD 条件，还是组合触发顺序导致退出过快。",
+      "required_next_check_zh": "进入 docs/next-stage-exit-method-attribution.md，先做退出方法证据下钻，不生成新的牛市变体。"
+    },
+    {
+      "finding_id": "SA-V1-GOLDEN-003",
+      "title_zh": "熊市变体是候选改善，不是最终规则",
+      "claim_zh": "熊市变体降低了亏损和回撤，但还不能说明它已经是可上线策略规则。",
+      "required_evidence_refs": [
+        "market_type_id=bear_market",
+        "reports/strategy-variant-validation-tushare-market-type-add-on/strategy_variant_validation.json"
+      ],
+      "required_metrics": {
+        "baseline_average_return_pct": -0.12172720483003445,
+        "variant_average_return_pct": -0.05773299806466455,
+        "baseline_average_max_drawdown": 0.15618414218762436,
+        "variant_average_max_drawdown": 0.07010516312254948,
+        "baseline_trade_count": 137,
+        "variant_trade_count": 83,
+        "baseline_weighted_win_rate": 0.30656934306569344,
+        "variant_weighted_win_rate": 0.26506024096385544
+      },
+      "required_risk_zh": "熊市改善可能来自降低暴露、关闭加仓、交易数下降，或这些因素共同作用；当前还没有做熊市变体归因。"
+    },
+    {
+      "finding_id": "SA-V1-GOLDEN-004",
+      "title_zh": "震荡市不是当前优先方向",
+      "claim_zh": "震荡市变体基本持平略好，但变动幅度不够支撑优先展开新阶段。",
+      "required_evidence_refs": [
+        "market_type_id=range_market",
+        "reports/strategy-variant-validation-tushare-market-type-add-on/strategy_variant_validation.json"
+      ],
+      "required_metrics": {
+        "baseline_average_return_pct": 0.053164784338578706,
+        "variant_average_return_pct": 0.05606495525006516,
+        "baseline_average_max_drawdown": 0.08619378614174261,
+        "variant_average_max_drawdown": 0.08393539060681841,
+        "baseline_weighted_win_rate": 0.504424778761062,
+        "variant_weighted_win_rate": 0.504424778761062,
+        "baseline_trade_count": 113,
+        "variant_trade_count": 113
+      },
+      "required_next_check_zh": "不作为下一阶段主线。等退出方法归因和熊市归因有明确结论后再回来比较震荡市。"
+    }
+  ],
+  "expected_final_recommendation": {
+    "must_include": [
+      "Do not tune.",
+      "Do not switch strategy.",
+      "Do not add market recognition.",
+      "Start Exit Method Attribution."
+    ],
+    "first_question_zh": "为什么 ma_macd_weakening_exit 在 bull_market 变体中把平均持仓从 24.35 天压到 4.06 天？"
+  },
+  "golden_check_rules": [
+    "A valid AI review must preserve the sealed V1 boundary.",
+    "A valid AI review must not turn validation observations into causal or production claims.",
+    "A valid AI review must include the bull-market degraded metrics and the next-stage Exit Method Attribution recommendation.",
+    "A valid AI review should cite source artifact paths and sample refs where the golden requires them.",
+    "A valid AI review may use different wording, but it must not contradict any must_not_claim item."
+  ]
+}
