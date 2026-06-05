@@ -2,6 +2,8 @@ from datetime import date
 
 from attbacktrader.data import IndexBar, ShenwanIndustryClassification, StockIndustryMembership
 from attbacktrader.data.snapshots import (
+    discover_index_bars_snapshot_paths,
+    discover_industry_index_bars_snapshot_paths,
     index_bars_snapshot_path,
     industry_index_bars_snapshot_path,
     read_index_bars_parquet,
@@ -60,6 +62,53 @@ def test_industry_index_bars_path_includes_shenwan_source(tmp_path) -> None:
 
     assert path.parts[-4:-1] == ("sw", "SW2021", "index_bars")
     assert path.name == "801780_SI_20240102_20240103.parquet"
+
+
+def test_discovers_broader_index_bar_snapshots(tmp_path) -> None:
+    index_path = index_bars_snapshot_path(
+        tmp_path,
+        symbol="000300.SH",
+        start_date=date(2023, 10, 1),
+        end_date=date(2024, 3, 31),
+    )
+    industry_path = industry_index_bars_snapshot_path(
+        tmp_path,
+        symbol="801780.SI",
+        start_date=date(2023, 12, 1),
+        end_date=date(2024, 3, 31),
+        source="SW2021",
+    )
+    write_index_bars_parquet(
+        (
+            IndexBar("000300.SH", date(2023, 10, 1), 100.0, 101.0, 99.0, 100.0),
+            IndexBar("000300.SH", date(2024, 3, 31), 110.0, 111.0, 109.0, 110.0),
+        ),
+        index_path,
+    )
+    write_index_bars_parquet(
+        (
+            IndexBar("801780.SI", date(2023, 12, 1), 100.0, 101.0, 99.0, 100.0),
+            IndexBar("801780.SI", date(2024, 3, 31), 110.0, 111.0, 109.0, 110.0),
+        ),
+        industry_path,
+    )
+
+    index_candidates = discover_index_bars_snapshot_paths(
+        tmp_path,
+        symbol="000300.SH",
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 31),
+    )
+    industry_candidates = discover_industry_index_bars_snapshot_paths(
+        tmp_path,
+        symbol="801780.SI",
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 31),
+        source="SW2021",
+    )
+
+    assert index_candidates[0].path == index_path
+    assert industry_candidates[0].path == industry_path
 
 
 def test_shenwan_classifications_parquet_round_trip(tmp_path) -> None:

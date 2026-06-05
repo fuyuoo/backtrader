@@ -2,6 +2,9 @@
 
 from .csv_store import read_daily_bars_csv
 from .index_store import (
+    IndexBarsSnapshotCandidate,
+    discover_index_bars_snapshot_paths,
+    discover_industry_index_bars_snapshot_paths,
     index_bars_snapshot_path,
     industry_index_bars_snapshot_path,
     read_index_bars_parquet,
@@ -34,8 +37,11 @@ from .tradability_store import (
 
 __all__ = [
     "DailyBarsSnapshotCandidate",
+    "IndexBarsSnapshotCandidate",
     "SnapshotProvenance",
     "daily_bars_snapshot_path",
+    "discover_index_bars_snapshot_paths",
+    "discover_industry_index_bars_snapshot_paths",
     "discover_tradable_bars_snapshot_paths",
     "index_bars_snapshot_path",
     "industry_index_bars_snapshot_path",

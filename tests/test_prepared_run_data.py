@@ -41,7 +41,9 @@ class FakePreparedDataProvider:
         self.calls: list[tuple[str, str]] = []
         self.daily_bar_ranges: list[tuple[str, date, date, str]] = []
         self.index_calls: list[str] = []
+        self.index_ranges: list[tuple[str, date, date]] = []
         self.industry_index_calls: list[tuple[str, str]] = []
+        self.industry_index_ranges: list[tuple[str, date, date, str]] = []
         self.classification_calls: list[str] = []
         self.membership_calls: list[tuple[str, str]] = []
         self.tradability_calls: list[str] = []
@@ -57,10 +59,12 @@ class FakePreparedDataProvider:
 
     def fetch_index_daily_bars(self, *, symbol, start_date, end_date):
         self.index_calls.append(symbol)
+        self.index_ranges.append((symbol, start_date, end_date))
         return _index_bars(symbol, start_date, end_date)
 
     def fetch_industry_index_daily_bars(self, *, symbol, start_date, end_date, source="SW2021"):
         self.industry_index_calls.append((symbol, source))
+        self.industry_index_ranges.append((symbol, start_date, end_date, source))
         return _index_bars(symbol, start_date, end_date)
 
     def fetch_shenwan_industry_classifications(self, *, source="SW2021"):
@@ -103,6 +107,7 @@ class FullCalendarPreparedDataProvider(FakePreparedDataProvider):
 
     def fetch_index_daily_bars(self, *, symbol, start_date, end_date):
         self.index_calls.append(symbol)
+        self.index_ranges.append((symbol, start_date, end_date))
         return tuple(
             replace(bar, symbol=symbol)
             for bar in self.calendar_bars
@@ -128,7 +133,8 @@ def test_prepare_run_data_returns_one_interface_for_snapshots_features_and_analy
     assert provider.membership_calls == [("000001.SZ", "SW2021")]
     assert provider.tradability_calls == ["000001.SZ"]
     assert prepared.benchmark_results(run_plan)[0].bar_count == 2
-    assert prepared.industry_index_results(run_plan)[0].bar_count == 2
+    assert prepared.industry_index_results(run_plan)[0].calculation_bar_count == 2
+    assert prepared.industry_index_results(run_plan)[0].snapshot_provenance.details["requested_start_date"] == "2023-12-14"
     assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_path.exists()
     assert prepared.symbol_data_by_symbol["000001.SZ"].indicator_snapshot_path.exists()
     assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_provenance.action == "created"
@@ -143,6 +149,33 @@ def test_prepare_run_data_returns_one_interface_for_snapshots_features_and_analy
     assert prepared.industry_classification_result.snapshot_path.exists()
     assert prepared.industry_membership_results[0].snapshot_path.exists()
     assert prepared.risk_group_by_symbol(level=1) == {"000001.SZ": "801780.SI"}
+
+
+def test_prepare_run_data_fetches_warmup_windows_for_entry_attribution_indexes(tmp_path: Path) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    provider = FakePreparedDataProvider(bars)
+    run_plan = _run_plan(tmp_path)
+    run_plan = run_plan.model_copy(
+        update={
+            "data": run_plan.data.model_copy(
+                update={
+                    "benchmark_series": run_plan.data.benchmark_series.model_copy(
+                        update={"indexes": ("000300.SH",)}
+                    )
+                }
+            )
+        }
+    )
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+
+    assert provider.index_ranges == [("000300.SH", date(2023, 10, 4), run_plan.run.to_date)]
+    assert provider.industry_index_ranges == [
+        ("801780.SI", date(2023, 12, 14), run_plan.run.to_date, "SW2021")
+    ]
+    assert prepared.benchmark_calculation_bars_by_symbol(run_plan)["000300.SH"][0].trade_date == date(2023, 10, 4)
+    assert prepared.industry_index_calculation_bars_by_symbol(run_plan)["801780.SI"][0].trade_date == date(2023, 12, 14)
+    assert prepared.benchmark_bars_by_symbol(run_plan)["000300.SH"][0].trade_date >= run_plan.run.from_date
 
 
 def test_prepare_run_data_uses_benchmark_index_as_trading_calendar(tmp_path: Path) -> None:
@@ -216,6 +249,57 @@ def test_prepare_run_data_builds_weekly_indicators_required_by_selected_methods(
         symbol_data.indicator_frame.macd_at(date(2024, 1, 5))
 
 
+def test_prepare_run_data_fetches_warmup_window_for_required_indicators(tmp_path: Path) -> None:
+    run_plan = _ma_run_plan(tmp_path)
+    run_plan = run_plan.model_copy(
+        update={"data": run_plan.data.model_copy(update={"refresh_snapshots": True})}
+    )
+    warmup_start = date(2023, 10, 3)
+    bars = _trend_bars_from(
+        "000001.SZ",
+        start_date=warmup_start,
+        count=(run_plan.run.to_date - warmup_start).days + 1,
+    )
+    provider = FakePreparedDataProvider(bars)
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+    symbol_data = prepared.symbol_data_by_symbol["000001.SZ"]
+
+    assert provider.daily_bar_ranges == [
+        ("000001.SZ", warmup_start, run_plan.run.to_date, "qfq"),
+    ]
+    assert symbol_data.bars[0].trade_date == run_plan.run.from_date
+    assert symbol_data.bars[-1].trade_date == run_plan.run.to_date
+    assert symbol_data.snapshot_provenance.start_date == warmup_start
+    assert symbol_data.snapshot_provenance.details["requested_start_date"] == warmup_start.isoformat()
+    assert symbol_data.indicator_snapshots[0].trade_date == warmup_start
+    assert symbol_data.indicator_frame.ma_at(run_plan.run.from_date, period=60).value is not None
+
+
+def test_prepare_run_data_allows_trailing_gap_when_run_window_has_bars(tmp_path: Path) -> None:
+    run_plan = _ma_run_plan(tmp_path)
+    run_plan = run_plan.model_copy(
+        update={"data": run_plan.data.model_copy(update={"refresh_snapshots": True})}
+    )
+    warmup_start = date(2023, 10, 3)
+    available_end = run_plan.run.to_date - timedelta(days=5)
+    bars = _trend_bars_from(
+        "000001.SZ",
+        start_date=warmup_start,
+        count=(available_end - warmup_start).days + 1,
+    )
+    provider = FakePreparedDataProvider(bars)
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+    symbol_data = prepared.symbol_data_by_symbol["000001.SZ"]
+    issue_codes = {issue.code for issue in symbol_data.data_quality_issues}
+
+    assert symbol_data.bars[0].trade_date == run_plan.run.from_date
+    assert symbol_data.bars[-1].trade_date == available_end
+    assert "MISSING_TRAILING_RANGE" in issue_codes
+    assert symbol_data.snapshot_provenance.details["warmup_incomplete"] is True
+
+
 def test_prepare_run_data_incrementally_overwrites_indicator_tail(tmp_path: Path) -> None:
     bars = _trend_bars("000001.SZ", count=70)
     run_plan = _ma_run_plan(tmp_path)
@@ -254,6 +338,7 @@ def test_prepare_run_data_incrementally_fills_existing_bar_snapshot(tmp_path: Pa
     bars = _trend_bars("000001.SZ", count=70)
     provider = FakePreparedDataProvider(bars)
     run_plan = _ma_run_plan(tmp_path)
+    warmup_start = date(2023, 10, 3)
     bar_path = tradable_bars_snapshot_path(
         tmp_path,
         symbol="000001.SZ",
@@ -265,22 +350,30 @@ def test_prepare_run_data_incrementally_fills_existing_bar_snapshot(tmp_path: Pa
     write_daily_bars_parquet(bars[:60], bar_path)
 
     prepared = prepare_run_data(run_plan, provider=provider)
+    snapshot_path = prepared.symbol_data_by_symbol["000001.SZ"].snapshot_path
 
     assert provider.daily_bar_ranges == [
+        ("000001.SZ", warmup_start, run_plan.run.from_date - timedelta(days=1), "qfq"),
         ("000001.SZ", bars[60].trade_date, run_plan.run.to_date, "qfq"),
     ]
-    assert read_daily_bars_parquet(bar_path) == bars
+    assert read_daily_bars_parquet(snapshot_path) == bars
     assert len(prepared.bars_by_symbol["000001.SZ"]) == len(bars)
     assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_provenance.action == "incremental_filled"
+    assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_provenance.details["warmup_incomplete"] is True
 
 
 def test_prepare_run_data_discovers_broader_bar_snapshot_without_provider(tmp_path: Path) -> None:
-    broad_bars = _trend_bars_from("000001.SZ", start_date=date(2023, 12, 20), count=90)
     run_plan = _ma_run_plan(tmp_path)
+    warmup_start = date(2023, 10, 3)
+    broad_bars = _trend_bars_from(
+        "000001.SZ",
+        start_date=warmup_start,
+        count=(date(2024, 3, 19) - warmup_start).days + 1,
+    )
     broad_path = tradable_bars_snapshot_path(
         tmp_path,
         symbol="000001.SZ",
-        start_date=date(2023, 12, 20),
+        start_date=warmup_start,
         end_date=date(2024, 3, 19),
         asset_type="stock",
         adjustment="qfq",
@@ -288,7 +381,7 @@ def test_prepare_run_data_discovers_broader_bar_snapshot_without_provider(tmp_pa
     target_path = tradable_bars_snapshot_path(
         tmp_path,
         symbol="000001.SZ",
-        start_date=run_plan.run.from_date,
+        start_date=warmup_start,
         end_date=run_plan.run.to_date,
         asset_type="stock",
         adjustment="qfq",
@@ -301,10 +394,22 @@ def test_prepare_run_data_discovers_broader_bar_snapshot_without_provider(tmp_pa
         for bar in broad_bars
         if run_plan.run.from_date <= bar.trade_date <= run_plan.run.to_date
     )
+    expected_snapshot_bars = tuple(
+        bar
+        for bar in broad_bars
+        if warmup_start <= bar.trade_date <= run_plan.run.to_date
+    )
 
     assert prepared.bars_by_symbol["000001.SZ"] == expected_bars
+    assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_path == target_path
     assert target_path.exists()
-    assert read_daily_bars_parquet(target_path) == expected_bars
+    assert read_daily_bars_parquet(target_path) == expected_snapshot_bars
+    assert (
+        prepared.symbol_data_by_symbol["000001.SZ"]
+        .indicator_frame.ma_at(run_plan.run.from_date, period=60)
+        .value
+        is not None
+    )
     assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_provenance.action == "range_reused"
     assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_provenance.source_paths == (broad_path,)
 
@@ -313,6 +418,7 @@ def test_prepare_run_data_extends_discovered_bar_snapshot_edges(tmp_path: Path) 
     bars = _trend_bars("000001.SZ", count=70)
     provider = FakePreparedDataProvider(bars)
     run_plan = _ma_run_plan(tmp_path)
+    warmup_start = date(2023, 10, 3)
     central_bars = tuple(
         bar
         for bar in bars
@@ -329,7 +435,7 @@ def test_prepare_run_data_extends_discovered_bar_snapshot_edges(tmp_path: Path) 
     target_path = tradable_bars_snapshot_path(
         tmp_path,
         symbol="000001.SZ",
-        start_date=run_plan.run.from_date,
+        start_date=warmup_start,
         end_date=run_plan.run.to_date,
         asset_type="stock",
         adjustment="qfq",
@@ -339,12 +445,14 @@ def test_prepare_run_data_extends_discovered_bar_snapshot_edges(tmp_path: Path) 
     prepared = prepare_run_data(run_plan, provider=provider)
 
     assert provider.daily_bar_ranges == [
-        ("000001.SZ", date(2024, 1, 1), date(2024, 1, 9), "qfq"),
+        ("000001.SZ", warmup_start, date(2024, 1, 9), "qfq"),
         ("000001.SZ", date(2024, 2, 21), date(2024, 3, 10), "qfq"),
     ]
     assert prepared.bars_by_symbol["000001.SZ"] == bars
+    assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_path == target_path
     assert read_daily_bars_parquet(target_path) == bars
     assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_provenance.action == "incremental_filled"
+    assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_provenance.details["warmup_incomplete"] is True
 
 
 def test_prepare_run_data_uses_indicator_state_to_append_stateful_snapshots(tmp_path: Path) -> None:

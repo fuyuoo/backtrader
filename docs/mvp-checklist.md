@@ -47,6 +47,12 @@ The MVP is ready when a user can:
 | Standard report model | Done | Returns, risk, trade quality, portfolio behavior, benchmark comparison, industry attribution, market input display, scenario fit, and execution costs are represented. |
 | Markdown report | Done | `report.md` is generated beside `report.json` for first-pass review. |
 | Run artifacts | Done | `run_plan.json`, `result.json`, `report.json`, `report.md`, `report.zh.md`, `trades.json`, `signal_audit.json`, `sizing_audit.json`, `result_diagnostics.json`, `trade_lifecycle.json`, `trade_lifecycle.zh.md`, `trade_review.json`, `trade_review.zh.md`, `environment_fit.json`, `environment_fit.zh.md`, `strategy_environment_profile.json`, `strategy_environment_profile.zh.md`, `post_exit_analysis.json`, `post_exit_analysis.zh.md`, `evidence_validation.json`, `equity_curve.json`, `positions.json`, `execution_audit.json`, and `snapshots.json` are persisted. |
+| Run catalog | Done | `att-run-catalog` writes `run_catalog.json` plus `run_catalog.zh.md`, indexing known runs, roles, artifact presence, evidence-validation status, manifest-derived comparison groups, and AI next-read commands without rerunning backtests. |
+| Experiment lifecycle | Done | `att-experiment-lifecycle` writes `experiment_lifecycle.json` plus `experiment_lifecycle.zh.md`, linking review candidates/drafts/confirmations, strategy variant generated runs, Run Catalog execution status, validation comparisons, attribution drill-downs, missing stages, and bounded next actions without rerunning backtests. |
+| Experiment decision records | Done | `att-experiment-decisions` writes `experiment_decisions.json` plus `experiment_decisions.zh.md` from explicit accepted/rejected/parked inputs, closing compared/attributed experiment chains without deriving decisions from returns. |
+| Workbench closure snapshot | Done | `att-workbench-closure-snapshot` writes `examples/backtest-workbench-v1-baseline.json` and `docs/backtest-workbench-v1-closure.md`, recording accepted commands, artifact groups, verification counts, sealed docs, active non-goals, AI read order, and allowed next slices. |
+| Workbench closure golden check | Done | `att-workbench-closure-golden-check` writes `workbench_closure_golden_check.json` plus `workbench_closure_golden_check.zh.md`, failing when the closure Markdown omits baseline commands, artifact groups, non-goals, verification counts, rules, next slices, or AI read order. |
+| AI Skill entry contract | Done | `att-ai-skill-entry-contract` writes `examples/attbacktrader-ai-skill-entry-contract.json` and `docs/attbacktrader-ai-skill-entry-contract.md`, fixing AI first-read order, preflight gates, allowed/forbidden actions, evidence citation rules, output shape, and three-next-action recommendation rules. |
 | Evidence validation | Done | `evidence_validation.json` checks signal, sizing, execution rejection reasons, trade, diagnostics, equity, report, post-exit, and trade-review consistency without rerunning strategies or recalculating indicators. |
 | Lifecycle attribution | Done | `result_diagnostics.json` now groups successful add-on intents into the completed trade lifecycle between primary entry and exit, then summarizes winning-vs-losing add-on evidence and feeds concise add-on entry-point detail rows in Markdown. |
 | Trade lifecycle artifact | Done | `trade_lifecycle.json` stores each completed trade's entry/add-on/exit timeline with signal evidence, linked execution events, and filter indexes. |
@@ -121,10 +127,14 @@ Run the curated business regression suite:
 Expected result for current HEAD:
 
 ```text
-219 passed
+231 passed
 Strategy Adaptation V1 golden check summary
 status: ok
 check_count: 72
+failed_count: 0
+Workbench Closure golden check summary
+status: ok
+check_count: 124
 failed_count: 0
 Acceptance smoke passed.
 ```
@@ -206,7 +216,16 @@ acceptance suite to 216 passed. AI review golden-check coverage for sealed V1
 reviews increased the curated acceptance suite to 218 passed. The acceptance
 script now runs the sealed Strategy Adaptation V1 golden check as a default
 closure gate, and its focused script test increased the curated suite to
-219 passed. The full repository suite currently reports 303 passed.
+219 passed. Run Catalog indexing and CLI coverage increased the curated suite
+to 221 passed. Experiment Lifecycle indexing and CLI coverage increased the
+curated suite to 223 passed. Workbench Closure Snapshot and CLI coverage
+increased the curated suite to 225 passed. AI Skill Entry Contract and CLI
+coverage increased the curated suite to 227 passed. Experiment Decision
+Records and lifecycle decision-stage coverage increased the curated suite to
+229 passed. Workbench Closure Golden Check and CLI failure-path coverage
+increased the curated suite to 231 passed. The acceptance script now also runs
+Workbench Closure Golden Check as a default closure gate. The full repository suite currently reports 315
+passed.
 
 Run the same suite plus real Tushare data:
 
@@ -306,10 +325,27 @@ The current accepted real Tushare smoke result is:
 51. `docs/strategy-adaptation-v1-ai-review.md`
 52. `examples/strategy-adaptation-v1-ai-review-golden.json`
 53. `reports/strategy-adaptation-v1-ai-review-golden-check/ai_review_golden_check.zh.md`
+54. `docs/exit-method-attribution-missing-evidence-check.md`
+55. `docs/backtest-workbench-system-map.md`
+56. `reports/run-catalog/run_catalog.zh.md`
+57. `reports/experiment-lifecycle/experiment_lifecycle.zh.md`
+58. `examples/experiment-decisions/workbench-v1-strategy-variant-decisions.json`
+59. `reports/experiment-decisions/experiment_decisions.zh.md`
+60. `examples/backtest-workbench-v1-baseline.json`
+61. `docs/backtest-workbench-v1-closure.md`
+62. `reports/workbench-closure-golden-check/workbench_closure_golden_check.zh.md`
+63. `examples/attbacktrader-ai-skill-entry-contract.json`
+64. `docs/attbacktrader-ai-skill-entry-contract.md`
 
 ## Current Post-MVP Direction
 
-The run-review workbench and manual market-type validation slice is now sealed.
+The current main line is Backtest Workbench system closure, defined in
+`docs/backtest-workbench-system-map.md`. The goal is not to keep deepening one
+sell-side attribution thread. The goal is a reusable, AI-friendly backtest
+workbench that can run, validate, index, compare, review, and close experiment
+cycles without losing boundary control.
+
+The run-review workbench and manual market-type validation slice is sealed.
 Strategy Adaptation V1 is also sealed in
 `docs/strategy-adaptation-v1-closure.md`, with the accepted baseline captured in
 `examples/strategy-adaptation-v1-baseline.json`. The expected AI review
@@ -340,11 +376,50 @@ explains behavior changes through exit-method shifts, holding-period
 compression, same-symbol re-entry density, and sample refs from
 `trade_lifecycle.json`.
 
-The next active direction is Exit Method Attribution, defined in
-`docs/next-stage-exit-method-attribution.md`. It starts from the sealed V1
-baseline and investigates why `ma_macd_weakening_exit` exited too quickly in
-known bull-market segments before any new strategy variant or switching rule is
-generated.
+Exit Method Attribution is now parked as a future analysis tool, defined in
+`docs/next-stage-exit-method-attribution.md`. The minimal artifact contract is
+already defined there as `attbacktrader.exit_method_attribution.v1`, but it is
+not the active main line.
+The first missing-evidence audit for this stage is recorded in
+`docs/exit-method-attribution-missing-evidence-check.md`: current bull-market
+variant artifacts already contain direct MA/MACD component checks for
+`ma_macd_weakening_exit`, so the next implementation can start from persisted
+artifacts instead of upstream evidence capture when that future stage resumes.
+
+The Run Catalog first slice is now implemented through `att-run-catalog`: one
+AI-readable index of known runs, roles, configs, artifact presence,
+evidence-validation status, manifest-derived comparison groups, and next-read
+commands. Use it as the first workbench entry point before opening individual
+run artifacts.
+The Experiment Lifecycle first slice is now implemented through
+`att-experiment-lifecycle`: it links review experiment and strategy variant
+chains across candidate, draft, confirmed plan, generated run, executed run,
+comparison, attribution, and missing decision states without rerunning
+backtests. Use it after Run Catalog to keep each experiment cycle bounded.
+The Workbench Closure Snapshot is now implemented through
+`att-workbench-closure-snapshot`: it writes the versioned baseline
+`examples/backtest-workbench-v1-baseline.json` and closure document
+`docs/backtest-workbench-v1-closure.md`, fixing accepted commands, artifacts,
+test counts, sealed docs, active non-goals, AI read order, and allowed next
+slices.
+The AI Skill Entry Contract is now implemented through
+`att-ai-skill-entry-contract`: it writes
+`examples/attbacktrader-ai-skill-entry-contract.json` and
+`docs/attbacktrader-ai-skill-entry-contract.md`, then the local
+`attbacktrader-ai-review` Skill can start from Run Catalog, Experiment
+Lifecycle, run overview, dictionary, and review packet before producing
+evidence-cited recommendations.
+Experiment Decision Records are now implemented through
+`att-experiment-decisions`: explicit accepted/rejected/parked inputs close the
+strategy variant lifecycle chains and the current Workbench closure baseline
+records `decision_gap_count=0`. The decision artifact is governance state, not
+strategy scoring or automatic parameter selection.
+Workbench Closure Golden Check is now implemented through
+`att-workbench-closure-golden-check`: it checks that
+`docs/backtest-workbench-v1-closure.md` still reflects
+`examples/backtest-workbench-v1-baseline.json` for accepted commands, artifact
+groups, non-goals, verification counts, rules, next slices, and AI first-read
+order.
 
 The notes below are historical implementation context for the sealed workbench
 and adaptation stack. They are not the active next-stage scope.

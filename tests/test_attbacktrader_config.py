@@ -118,6 +118,14 @@ def test_expanded_sized_example_loads_practical_portfolio_controls() -> None:
     assert IndicatorRequirement("atr14", "D") in required_indicators_for_strategy_config(run_plan.strategy)
 
 
+def test_expanded_add_on_example_enforces_minimum_board_lot_sizing() -> None:
+    run_plan = load_run_plan(Path("examples/run-tushare-expanded-add-on.yaml"))
+    methods = bind_strategy_methods(run_plan.strategy)
+
+    assert run_plan.run.id == "tushare-expanded-add-on-2023-2024"
+    assert methods.sizing_method.min_order_quantity == 100
+
+
 def test_attribution_filter_example_loads_configured_entry_filter() -> None:
     run_plan = load_run_plan(Path("examples/run-tushare-attribution-filter.yaml"))
 

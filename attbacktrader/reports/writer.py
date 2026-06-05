@@ -168,6 +168,7 @@ def write_run_artifacts(
 
 def _snapshot_index(result: RunPlanExecutionResult) -> dict[str, Any]:
     return {
+        "data_windows": _data_windows(result),
         "symbols": [
             {
                 "symbol": symbol_result.symbol,
@@ -189,6 +190,74 @@ def _snapshot_index(result: RunPlanExecutionResult) -> dict[str, Any]:
         "industry_indexes": result.industry_index_results,
         "industry_classification": result.industry_classification_result,
         "industry_memberships": result.industry_membership_results,
+    }
+
+
+def _data_windows(result: RunPlanExecutionResult) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    for symbol_result in result.symbol_results:
+        items.append(
+            _data_window_item(
+                kind="symbol",
+                symbol=symbol_result.symbol,
+                provenance=symbol_result.snapshot_provenance,
+                bar_count=symbol_result.bar_count,
+                calculation_bar_count=None,
+            )
+        )
+    for benchmark in result.benchmark_results:
+        items.append(
+            _data_window_item(
+                kind="benchmark",
+                symbol=benchmark.symbol,
+                provenance=benchmark.snapshot_provenance,
+                bar_count=benchmark.bar_count,
+                calculation_bar_count=benchmark.calculation_bar_count,
+            )
+        )
+    for industry_index in result.industry_index_results:
+        items.append(
+            _data_window_item(
+                kind="industry_index",
+                symbol=industry_index.symbol,
+                provenance=industry_index.snapshot_provenance,
+                bar_count=industry_index.bar_count,
+                calculation_bar_count=industry_index.calculation_bar_count,
+            )
+        )
+
+    requested_starts = [
+        item["requested_start_date"]
+        for item in items
+        if item.get("requested_start_date")
+    ]
+    return {
+        "items": tuple(items),
+        "earliest_requested_start_date": min(requested_starts) if requested_starts else None,
+        "warmup_incomplete_count": sum(1 for item in items if item.get("warmup_incomplete")),
+    }
+
+
+def _data_window_item(
+    *,
+    kind: str,
+    symbol: str,
+    provenance,
+    bar_count: int,
+    calculation_bar_count: int | None,
+) -> dict[str, Any]:
+    details = dict(getattr(provenance, "details", {}) or {})
+    return {
+        "kind": kind,
+        "symbol": symbol,
+        "bar_count": bar_count,
+        "calculation_bar_count": calculation_bar_count,
+        "snapshot_start_date": getattr(provenance, "start_date", None),
+        "snapshot_end_date": getattr(provenance, "end_date", None),
+        "requested_start_date": details.get("requested_start_date"),
+        "requested_end_date": details.get("requested_end_date"),
+        "minimum_start_date": details.get("minimum_start_date"),
+        "warmup_incomplete": bool(details.get("warmup_incomplete")),
     }
 
 

@@ -139,7 +139,7 @@ def test_strategy_binding_accepts_parameterized_methods() -> None:
         add_on_method="kdj_oversold_add_on",
         add_on_params={"min_profit_percent": 0.02, "max_add_on_count": 2},
         sizing_rule="equal_weight",
-        sizing_params={"max_holding_count": 3, "atr_risk_percent": 0.01},
+        sizing_params={"max_holding_count": 3, "atr_risk_percent": 0.01, "min_order_quantity": 100},
     )
 
     methods = bind_strategy_methods(config)
@@ -151,6 +151,7 @@ def test_strategy_binding_accepts_parameterized_methods() -> None:
     assert methods.add_on_method.max_add_on_count == 2
     assert methods.sizing_method.max_holding_count == 3
     assert methods.sizing_method.atr_risk_percent == 0.01
+    assert methods.sizing_method.min_order_quantity == 100
     assert required_indicators_for_strategy_config(config) == frozenset(
         {
             IndicatorRequirement("macd", "W"),
@@ -206,6 +207,18 @@ def test_strategy_binding_rejects_invalid_risk_group_level() -> None:
             stop_loss_method="fixed_percent_stop",
             sizing_rule="equal_weight",
             sizing_params={"risk_group_level": 4},
+        )
+
+
+def test_strategy_binding_rejects_invalid_min_order_quantity() -> None:
+    with pytest.raises(ValueError, match="min_order_quantity"):
+        StrategyConfig(
+            template="trend_template_v1",
+            entry_method="kdj_oversold_entry",
+            profit_taking_method="kdj_overheated_exit",
+            stop_loss_method="fixed_percent_stop",
+            sizing_rule="equal_weight",
+            sizing_params={"min_order_quantity": 0},
         )
 
 

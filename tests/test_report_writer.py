@@ -162,6 +162,8 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert equity_curve_payload[-1]["total_value"] == result.final_value
     assert len(positions_payload) == len(result.position_snapshots)
     assert any(event["event_type"] == "completed" for event in execution_audit_payload)
+    assert snapshots_payload["data_windows"]["items"]
+    assert snapshots_payload["data_windows"]["warmup_incomplete_count"] >= 0
     assert snapshots_payload["symbols"][0]["symbol"] == "000001.SZ"
     assert snapshots_payload["symbols"][0]["snapshot_path"].endswith(".parquet")
     assert snapshots_payload["symbols"][0]["indicator_snapshot_paths"] == [

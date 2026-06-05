@@ -121,6 +121,61 @@ def test_equal_weight_sizing_applies_risk_group_exposure_cap() -> None:
     assert decision.signal_values["risk_group"] == "801780.SI"
 
 
+def test_equal_weight_sizing_can_raise_positive_quantity_to_min_order_quantity() -> None:
+    decision = EqualWeightSizing(
+        max_total_exposure_percent=0.5,
+        min_order_quantity=100,
+    ).size_entry(
+        symbol="000002.SZ",
+        trade_date=date(2024, 1, 2),
+        price=10.0,
+        cash=100000.0,
+        total_value=100000.0,
+        fallback_quantity=10000,
+        current_exposure_value=49550.0,
+    )
+
+    assert decision.requested_quantity == 100
+    assert decision.max_total_exposure_value == pytest.approx(50000.0)
+    assert decision.signal_values["requested_quantity_before_min_order"] == 45
+    assert decision.signal_values["requested_quantity_after_min_order"] == 100
+    assert decision.signal_values["min_order_quantity"] == 100
+    assert decision.signal_values["min_order_quantity_applied"] is True
+
+
+def test_equal_weight_sizing_min_order_quantity_does_not_unblock_zero_or_holding_count() -> None:
+    zero_decision = EqualWeightSizing(
+        max_total_exposure_percent=0.5,
+        min_order_quantity=100,
+    ).size_entry(
+        symbol="000002.SZ",
+        trade_date=date(2024, 1, 2),
+        price=10.0,
+        cash=100000.0,
+        total_value=100000.0,
+        fallback_quantity=10000,
+        current_exposure_value=50000.0,
+    )
+    holding_count_decision = EqualWeightSizing(
+        max_holding_count=1,
+        min_order_quantity=100,
+    ).size_entry(
+        symbol="000002.SZ",
+        trade_date=date(2024, 1, 2),
+        price=10.0,
+        cash=100000.0,
+        total_value=100000.0,
+        current_holding_count=1,
+        fallback_quantity=100,
+    )
+
+    assert zero_decision.requested_quantity == 0
+    assert zero_decision.blocked_by == "SIZING_ZERO_QUANTITY"
+    assert zero_decision.signal_values["min_order_quantity_applied"] is False
+    assert holding_count_decision.requested_quantity == 0
+    assert holding_count_decision.blocked_by == "MAX_HOLDING_COUNT"
+
+
 def test_equal_weight_sizing_applies_turnover_cap() -> None:
     decision = EqualWeightSizing(max_turnover_percent=0.1).size_entry(
         symbol="000002.SZ",

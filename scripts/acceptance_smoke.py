@@ -44,7 +44,17 @@ BUSINESS_TESTS = (
     "tests/test_attbacktrader_config.py",
     "tests/test_prepared_run_data.py",
     "tests/test_strategy_bindings.py",
+    "tests/test_strategy_output_contract.py",
+    "tests/test_strategy_integration_template.py",
+    "tests/test_strategy_integration_validation.py",
+    "tests/test_strategy_integration_closure.py",
     "tests/test_run_plan_executor.py",
+    "tests/test_run_catalog.py",
+    "tests/test_experiment_lifecycle.py",
+    "tests/test_experiment_decisions.py",
+    "tests/test_workbench_closure.py",
+    "tests/test_workbench_closure_golden_check.py",
+    "tests/test_ai_skill_entry_contract.py",
     "tests/test_run_comparison.py",
     "tests/test_run_regression.py",
     "tests/test_attribution_filter_experiments.py",
@@ -61,6 +71,9 @@ BUSINESS_TESTS = (
 STRATEGY_ADAPTATION_V1_REVIEW = Path("docs/strategy-adaptation-v1-ai-review.md")
 STRATEGY_ADAPTATION_V1_GOLDEN = Path("examples/strategy-adaptation-v1-ai-review-golden.json")
 STRATEGY_ADAPTATION_V1_GOLDEN_CHECK_OUTPUT = Path("reports/strategy-adaptation-v1-ai-review-golden-check")
+WORKBENCH_CLOSURE_BASELINE = Path("examples/backtest-workbench-v1-baseline.json")
+WORKBENCH_CLOSURE_DOC = Path("docs/backtest-workbench-v1-closure.md")
+WORKBENCH_CLOSURE_GOLDEN_CHECK_OUTPUT = Path("reports/workbench-closure-golden-check")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -70,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _run([str(python), "-m", "pytest", *BUSINESS_TESTS, "-q"], cwd=repo_root)
     _run_strategy_adaptation_v1_golden_check(python=python, repo_root=repo_root)
+    _run_workbench_closure_golden_check(python=python, repo_root=repo_root)
 
     if args.with_tushare:
         _run_tushare_smoke(
@@ -116,6 +130,7 @@ def _run_tushare_smoke(
             str(config_path),
             "--token-file",
             str(token_path),
+            "--full-json",
         ],
         cwd=repo_root,
         capture_stdout=True,
@@ -168,6 +183,44 @@ def _run_strategy_adaptation_v1_golden_check(
     print(f"check_count: {payload['check_count']}", flush=True)
     print(f"failed_count: {payload['failed_count']}", flush=True)
     print(f"check_md: {artifacts['ai_review_golden_check_chinese_markdown_path']}", flush=True)
+
+
+def _run_workbench_closure_golden_check(
+    *,
+    python: Path,
+    repo_root: Path,
+) -> None:
+    stdout = _run(
+        [
+            str(python),
+            "-m",
+            "attbacktrader.cli.workbench_closure_golden_check",
+            "--baseline",
+            str(WORKBENCH_CLOSURE_BASELINE),
+            "--closure-doc",
+            str(WORKBENCH_CLOSURE_DOC),
+            "--output-dir",
+            str(WORKBENCH_CLOSURE_GOLDEN_CHECK_OUTPUT),
+        ],
+        cwd=repo_root,
+        capture_stdout=True,
+    )
+    payload = json.loads(stdout)
+    if payload.get("status") != "ok":
+        raise SystemExit(f"Workbench Closure golden check failed: {payload.get('failed_count')}")
+    artifacts = payload.get("artifacts", {})
+    check_markdown_path = _resolve(
+        repo_root,
+        Path(artifacts["workbench_closure_golden_check_chinese_markdown_path"]),
+    )
+    if not check_markdown_path.exists():
+        raise SystemExit(f"Expected Workbench closure golden check Markdown was not written: {check_markdown_path}")
+
+    print("\nWorkbench Closure golden check summary", flush=True)
+    print(f"status: {payload['status']}", flush=True)
+    print(f"check_count: {payload['check_count']}", flush=True)
+    print(f"failed_count: {payload['failed_count']}", flush=True)
+    print(f"check_md: {artifacts['workbench_closure_golden_check_chinese_markdown_path']}", flush=True)
 
 
 def _run(

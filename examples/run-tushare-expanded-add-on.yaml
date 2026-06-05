@@ -81,6 +81,7 @@ strategy:
     atr_multiple: 2.0
     atr_period: 14
     atr_timeframe: D
+    min_order_quantity: 100
 
 constraints:
   ashare:

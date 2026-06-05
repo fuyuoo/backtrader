@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Sequence
 
 from attbacktrader.data import IndexBar
+
+
+@dataclass(frozen=True)
+class IndexBarsSnapshotCandidate:
+    path: Path
+    symbol: str
+    start_date: date
+    end_date: date
+
+    def overlaps(self, *, start_date: date, end_date: date) -> bool:
+        return self.start_date <= end_date and self.end_date >= start_date
 
 
 def index_bars_snapshot_path(snapshot_root: str | Path, *, symbol: str, start_date: date, end_date: date) -> Path:
@@ -30,6 +42,39 @@ def industry_index_bars_snapshot_path(
         / source
         / "index_bars"
         / f"{safe_symbol}_{start_date:%Y%m%d}_{end_date:%Y%m%d}.parquet"
+    )
+
+
+def discover_index_bars_snapshot_paths(
+    snapshot_root: str | Path,
+    *,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+) -> tuple[IndexBarsSnapshotCandidate, ...]:
+    directory = Path(snapshot_root) / "indexes"
+    return _discover_index_bar_candidates(
+        directory,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+def discover_industry_index_bars_snapshot_paths(
+    snapshot_root: str | Path,
+    *,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+    source: str = "SW2021",
+) -> tuple[IndexBarsSnapshotCandidate, ...]:
+    directory = Path(snapshot_root) / "industries" / "sw" / source / "index_bars"
+    return _discover_index_bar_candidates(
+        directory,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 
@@ -82,3 +127,43 @@ def read_index_bars_parquet(path: str | Path) -> tuple[IndexBar, ...]:
         for row in frame.itertuples(index=False)
     ]
     return tuple(sorted(bars, key=lambda bar: (bar.symbol, bar.trade_date)))
+
+
+def _discover_index_bar_candidates(
+    directory: Path,
+    *,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+) -> tuple[IndexBarsSnapshotCandidate, ...]:
+    if not directory.exists():
+        return ()
+
+    candidates: list[IndexBarsSnapshotCandidate] = []
+    safe_symbol = symbol.replace(".", "_")
+    for path in directory.glob(f"{safe_symbol}_*.parquet"):
+        candidate = _candidate_from_index_snapshot_path(path, symbol=symbol)
+        if candidate is not None and candidate.overlaps(start_date=start_date, end_date=end_date):
+            candidates.append(candidate)
+    return tuple(sorted(candidates, key=lambda candidate: (candidate.start_date, candidate.end_date, candidate.path.name)))
+
+
+def _candidate_from_index_snapshot_path(path: Path, *, symbol: str) -> IndexBarsSnapshotCandidate | None:
+    safe_symbol = symbol.replace(".", "_")
+    parts = path.stem.split("_")
+    if len(parts) < 3:
+        return None
+    symbol_part = "_".join(parts[:-2])
+    if symbol_part != safe_symbol:
+        return None
+    try:
+        start_date = date.fromisoformat(f"{parts[-2][0:4]}-{parts[-2][4:6]}-{parts[-2][6:8]}")
+        end_date = date.fromisoformat(f"{parts[-1][0:4]}-{parts[-1][4:6]}-{parts[-1][6:8]}")
+    except (ValueError, IndexError):
+        return None
+    return IndexBarsSnapshotCandidate(
+        path=path,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+    )

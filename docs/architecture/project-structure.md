@@ -132,11 +132,15 @@ Rules:
 
 - `strategies/bindings.py` owns the relationship between Strategy Templates, selectable method names, and concrete code-backed methods.
 - `strategies/attribution.py` owns entry attribution factor declarations, shared entry-time evidence builders, factor filtering, and entry-attribution filter application.
+- `strategies/contract.py` owns the Strategy Output Contract: the stable `TradeIntent` fields and `signal_values` shapes consumed by reports, attribution, market-type validation, and AI review.
+- `strategies/integration_template.py` owns the machine-readable strategy integration template used by tests, docs, and AI review.
+- `strategies/integration_validation.py` owns static Strategy Integration Validation: binding selected components, deriving required indicators, sampling strategy method outputs, and checking the Strategy Output Contract without running a backtest.
 - `strategies/templates/` owns fixed code-backed Strategy Templates.
 - `strategies/methods/` owns code-backed Entry, Profit-Taking, Stop-Loss, and Add-On methods.
 - `strategies/intents.py` owns Trade Intent models.
 - A Strategy Template may call multiple signal conditions inside one selected method.
 - Composite entry/exit methods should record the individual condition checks in `signal_values` so `signal_audit.json` explains both triggered and non-triggered decisions.
+- Strategy methods should satisfy the Strategy Output Contract before reports or AI review consume their evidence.
 - Add-on methods run only after a position exists, emit `TradeIntentType.ADD_ON` when they request an additional buy, and should consume prepared features rather than recalculating indicators.
 - The framework does not globally compose arbitrary buy/sell rules in the first version.
 - New methods must be bound to a Strategy Template through Strategy Configuration validation before they are selectable.
@@ -144,6 +148,9 @@ Rules:
 Tests:
 
 - Put method tests in `tests/test_strategy_methods.py` or a focused method test.
+- Put strategy output contract tests in `tests/test_strategy_output_contract.py`.
+- Put strategy integration template tests in `tests/test_strategy_integration_template.py`.
+- Put strategy integration validation tests in `tests/test_strategy_integration_validation.py`.
 - Put template behavior tests in `tests/test_trend_template_v1_golden.py` or a template-specific test.
 
 ### Sizing And Trading Constraints

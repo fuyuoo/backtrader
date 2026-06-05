@@ -107,24 +107,33 @@ Current accepted verification:
 
 ```text
 python scripts\acceptance_smoke.py
-219 passed
+231 passed
 Strategy Adaptation V1 golden check summary
 status: ok
 check_count: 72
 failed_count: 0
+Workbench Closure golden check summary
+status: ok
+check_count: 124
+failed_count: 0
 
 python -m pytest -q
-303 passed
+315 passed
 ```
 
 ## Next Stage
 
-The next stage is defined separately in:
+The originally proposed next stage was defined separately in:
 
 ```text
 docs/next-stage-exit-method-attribution.md
 ```
 
-That stage starts from the sealed V1 baseline and investigates exit-method
-evidence, especially why `ma_macd_weakening_exit` triggered too quickly in
-known bull-market segments.
+That stage is now parked as a future deep-analysis tool. The current main line
+is Backtest Workbench V1 closure, captured in:
+
+```text
+docs/backtest-workbench-system-map.md
+examples/backtest-workbench-v1-baseline.json
+docs/backtest-workbench-v1-closure.md
+```

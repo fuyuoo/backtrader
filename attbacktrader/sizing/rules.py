@@ -50,10 +50,13 @@ class EqualWeightSizing:
     atr_multiple: float = 2.0
     atr_period: int = 14
     atr_timeframe: str = "D"
+    min_order_quantity: int | None = None
 
     def __post_init__(self) -> None:
         if self.max_holding_count is not None and self.max_holding_count <= 0:
             raise ValueError("max_holding_count must be positive")
+        if self.min_order_quantity is not None and self.min_order_quantity <= 0:
+            raise ValueError("min_order_quantity must be positive")
         _validate_percent(self.max_position_percent, "max_position_percent")
         _validate_percent(self.max_total_exposure_percent, "max_total_exposure_percent")
         _validate_percent(self.max_risk_group_exposure_percent, "max_risk_group_exposure_percent")
@@ -233,6 +236,9 @@ class EqualWeightSizing:
             risk_per_share = atr_value * self.atr_multiple
             requested_quantity = min(requested_quantity, int(risk_budget_value / risk_per_share))
 
+        min_order_values = self._min_order_values(requested_quantity)
+        requested_quantity = int(min_order_values["requested_quantity_after_min_order"])
+
         if requested_quantity <= 0:
             return self._blocked_decision(
                 symbol=symbol,
@@ -252,7 +258,7 @@ class EqualWeightSizing:
                 risk_budget_value=risk_budget_value,
                 risk_per_share=risk_per_share,
                 blocked_by="SIZING_ZERO_QUANTITY",
-                extra_signal_values={"atr_value": atr_value},
+                extra_signal_values={"atr_value": atr_value, **min_order_values},
                 current_exposure_value=current_exposure_value,
                 current_risk_group_exposure_value=current_risk_group_exposure_value,
                 current_turnover_value=current_turnover_value,
@@ -277,7 +283,7 @@ class EqualWeightSizing:
             turnover_budget_value=turnover_budget_value,
             risk_budget_value=risk_budget_value,
             risk_per_share=risk_per_share,
-            extra_signal_values={"atr_value": atr_value},
+            extra_signal_values={"atr_value": atr_value, **min_order_values},
             current_exposure_value=current_exposure_value,
             current_risk_group_exposure_value=current_risk_group_exposure_value,
             current_turnover_value=current_turnover_value,
@@ -295,6 +301,7 @@ class EqualWeightSizing:
             or self.max_turnover_percent is not None
             or self.rebalance_min_interval_days is not None
             or self.atr_risk_percent is not None
+            or self.min_order_quantity is not None
         )
 
     def _rebalance_interval_blocked(
@@ -324,6 +331,18 @@ class EqualWeightSizing:
             return row.indicators.atr_at(self.atr_period, self.atr_timeframe).value
         except KeyError:
             return None
+
+    def _min_order_values(self, requested_quantity: int) -> dict[str, Any]:
+        applied = (
+            self.min_order_quantity is not None
+            and 0 < requested_quantity < self.min_order_quantity
+        )
+        return {
+            "min_order_quantity": self.min_order_quantity,
+            "min_order_quantity_applied": applied,
+            "requested_quantity_before_min_order": requested_quantity,
+            "requested_quantity_after_min_order": self.min_order_quantity if applied else requested_quantity,
+        }
 
     def _blocked_decision(
         self,
@@ -439,6 +458,7 @@ class EqualWeightSizing:
             "atr_multiple": self.atr_multiple,
             "atr_period": self.atr_period,
             "atr_timeframe": self.atr_timeframe,
+            "min_order_quantity": self.min_order_quantity,
             "blocked_by": blocked_by,
         }
         if extra_signal_values:

@@ -24,7 +24,10 @@ from attbacktrader.data import (
 from attbacktrader.data.providers import RunDataProvider
 from attbacktrader.data.snapshots import (
     DailyBarsSnapshotCandidate,
+    IndexBarsSnapshotCandidate,
     SnapshotProvenance,
+    discover_index_bars_snapshot_paths,
+    discover_industry_index_bars_snapshot_paths,
     discover_tradable_bars_snapshot_paths,
     index_bars_snapshot_path,
     industry_index_bars_snapshot_path,
@@ -86,6 +89,12 @@ class TradabilityLoadResult:
 
 
 @dataclass(frozen=True)
+class IndexBarsLoadResult:
+    bars: tuple[IndexBar, ...]
+    provenance: SnapshotProvenance
+
+
+@dataclass(frozen=True)
 class PreparedSymbolData:
     symbol: str
     asset_type: str
@@ -108,7 +117,9 @@ class PreparedSymbolData:
 class PreparedIndexData:
     symbol: str
     bars: tuple[IndexBar, ...]
+    calculation_bars: tuple[IndexBar, ...]
     snapshot_path: Path
+    snapshot_provenance: SnapshotProvenance
 
 
 @dataclass(frozen=True)
@@ -116,6 +127,8 @@ class IndexSeriesResult:
     symbol: str
     bar_count: int
     snapshot_path: Path
+    snapshot_provenance: SnapshotProvenance
+    calculation_bar_count: int
 
 
 @dataclass(frozen=True)
@@ -183,9 +196,23 @@ class PreparedRunData:
             if symbol in self.index_data_by_symbol
         }
 
+    def benchmark_calculation_bars_by_symbol(self, run_plan: RunPlan) -> dict[str, tuple[IndexBar, ...]]:
+        return {
+            symbol: self.index_data_by_symbol[symbol].calculation_bars
+            for symbol in run_plan.data.benchmark_series.indexes
+            if symbol in self.index_data_by_symbol
+        }
+
     def industry_index_bars_by_symbol(self, run_plan: RunPlan) -> dict[str, tuple[IndexBar, ...]]:
         return {
             symbol: self.industry_index_data_by_symbol[symbol].bars
+            for symbol in run_plan.data.industry_series.indexes
+            if symbol in self.industry_index_data_by_symbol
+        }
+
+    def industry_index_calculation_bars_by_symbol(self, run_plan: RunPlan) -> dict[str, tuple[IndexBar, ...]]:
+        return {
+            symbol: self.industry_index_data_by_symbol[symbol].calculation_bars
             for symbol in run_plan.data.industry_series.indexes
             if symbol in self.industry_index_data_by_symbol
         }
@@ -289,6 +316,68 @@ def _latest_membership(
     return sorted(memberships, key=lambda membership: (membership.in_date, membership.symbol))[-1]
 
 
+def _indicator_calculation_start_date(
+    run_start_date: date,
+    *,
+    indicator_requirements: tuple[IndicatorRequirement, ...],
+) -> date:
+    lookback_days = max(
+        (
+            _warmup_calendar_days(plan)
+            for plan in build_indicator_update_plans(
+                symbol="__warmup__",
+                indicator_requirements=indicator_requirements,
+            )
+        ),
+        default=0,
+    )
+    if lookback_days <= 0:
+        return run_start_date
+    return run_start_date - timedelta(days=lookback_days)
+
+
+def _warmup_calendar_days(plan: IndicatorUpdatePlan) -> int:
+    missing_bars = max(plan.warmup_bars - 1, 0)
+    if missing_bars == 0:
+        return 0
+    if plan.timeframe == "D":
+        return _calendar_days_for_trading_bars(missing_bars)
+    if plan.timeframe == "W":
+        return missing_bars * 7 + 14
+    if plan.timeframe == "M":
+        return missing_bars * 31 + 31
+    raise ValueError(f"unsupported indicator timeframe: {plan.timeframe}")
+
+
+def _calendar_days_for_trading_bars(bar_count: int) -> int:
+    return ((bar_count * 7) + 4) // 5 + 7
+
+
+def _market_index_calculation_start_date(run_plan: RunPlan, *, symbol: str) -> date:
+    config = run_plan.analysis.entry_attribution
+    if not config.enabled or symbol != config.market_symbol:
+        return run_plan.run.from_date
+    if not _entry_attribution_has_factor(run_plan, prefix="market."):
+        return run_plan.run.from_date
+    return run_plan.run.from_date - timedelta(
+        days=_calendar_days_for_trading_bars(max(config.market_slow_period - 1, 0))
+    )
+
+
+def _industry_index_calculation_start_date(run_plan: RunPlan) -> date:
+    if not _entry_attribution_has_factor(run_plan, prefix="industry."):
+        return run_plan.run.from_date
+    return _indicator_calculation_start_date(
+        run_plan.run.from_date,
+        indicator_requirements=(IndicatorRequirement("kdj", "D"),),
+    )
+
+
+def _entry_attribution_has_factor(run_plan: RunPlan, *, prefix: str) -> bool:
+    config = run_plan.analysis.entry_attribution
+    return config.enabled and any(factor.startswith(prefix) for factor in config.resolved_factors)
+
+
 def _prepare_symbol_data(
     run_plan: RunPlan,
     *,
@@ -297,10 +386,14 @@ def _prepare_symbol_data(
     indicator_requirements: tuple[IndicatorRequirement, ...],
     trading_calendar: TradingCalendar | None,
 ) -> PreparedSymbolData:
+    calculation_start_date = _indicator_calculation_start_date(
+        run_plan.run.from_date,
+        indicator_requirements=indicator_requirements,
+    )
     snapshot_path = tradable_bars_snapshot_path(
         run_plan.data.snapshot_root,
         symbol=series.symbol,
-        start_date=run_plan.run.from_date,
+        start_date=calculation_start_date,
         end_date=run_plan.run.to_date,
         asset_type=series.asset_type,
         adjustment=series.price_adjustment or "none",
@@ -315,8 +408,23 @@ def _prepare_symbol_data(
             asset_type=series.asset_type,
         )
 
-    bars_load_result = _load_or_fetch_bars(run_plan, series=series, path=snapshot_path, provider=provider)
-    bars = bars_load_result.bars
+    bars_load_result = _load_or_fetch_bars(
+        run_plan,
+        series=series,
+        path=snapshot_path,
+        provider=provider,
+        start_date=calculation_start_date,
+        end_date=run_plan.run.to_date,
+        minimum_start_date=run_plan.run.from_date,
+    )
+    calculation_bars = bars_load_result.bars
+    bars = _bars_for_date_range(
+        calculation_bars,
+        start_date=run_plan.run.from_date,
+        end_date=run_plan.run.to_date,
+    )
+    if not bars:
+        raise ValueError(f"no daily bars returned for {series.symbol} in run window")
     data_quality_issues = assess_daily_bar_quality(
         bars,
         symbol=series.symbol,
@@ -327,7 +435,7 @@ def _prepare_symbol_data(
     indicator_snapshots, indicator_paths, indicator_provenance = _load_or_build_required_indicators(
         run_plan,
         series=series,
-        bars=bars,
+        bars=calculation_bars,
         indicator_requirements=indicator_requirements,
     )
     indicator_frame = indicator_frame_from_snapshots(indicator_snapshots)
@@ -368,21 +476,26 @@ def _load_or_fetch_bars(
     series: TradableSeriesConfig,
     path: Path,
     provider: RunDataProvider | None,
+    start_date: date,
+    end_date: date,
+    minimum_start_date: date,
 ) -> DailyBarsLoadResult:
+    existing_bars, candidates = _load_discovered_tradable_bars(
+        run_plan,
+        series=series,
+        start_date=start_date,
+        end_date=end_date,
+    )
     if not run_plan.data.refresh_snapshots:
-        existing_bars, candidates = _load_discovered_tradable_bars(
-            run_plan,
-            series=series,
-        )
         if _bars_cover_date_range(
             existing_bars,
-            start_date=run_plan.run.from_date,
-            end_date=run_plan.run.to_date,
+            start_date=start_date,
+            end_date=end_date,
         ):
             bars = _bars_for_date_range(
                 existing_bars,
-                start_date=run_plan.run.from_date,
-                end_date=run_plan.run.to_date,
+                start_date=start_date,
+                end_date=end_date,
             )
             if not path.exists():
                 write_daily_bars_parquet(bars, path)
@@ -395,6 +508,41 @@ def _load_or_fetch_bars(
                     path=path,
                     source_paths=_candidate_paths(candidates),
                     bars=bars,
+                    details=_bar_load_details(
+                        requested_start_date=start_date,
+                        requested_end_date=end_date,
+                        minimum_start_date=minimum_start_date,
+                    ),
+                ),
+            )
+
+        if provider is None and _bars_cover_date_range(
+            existing_bars,
+            start_date=minimum_start_date,
+            end_date=end_date,
+        ):
+            bars = _bars_for_date_range(
+                existing_bars,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if not path.exists():
+                write_daily_bars_parquet(bars, path)
+            action = "exact_reused" if _has_exact_bar_candidate(candidates, path) else "range_reused"
+            return DailyBarsLoadResult(
+                bars=bars,
+                provenance=_snapshot_provenance(
+                    snapshot_type="tradable_bars",
+                    action=action,
+                    path=path,
+                    source_paths=_candidate_paths(candidates),
+                    bars=bars,
+                    details=_bar_load_details(
+                        requested_start_date=start_date,
+                        requested_end_date=end_date,
+                        minimum_start_date=minimum_start_date,
+                        warmup_incomplete=True,
+                    ),
                 ),
             )
 
@@ -406,6 +554,8 @@ def _load_or_fetch_bars(
             series=series,
             provider=provider,
             existing_bars=existing_bars,
+            start_date=start_date,
+            end_date=end_date,
         )
         if not existing_bars and not missing_bars:
             raise ValueError(f"no daily bars returned for {series.symbol}")
@@ -414,14 +564,16 @@ def _load_or_fetch_bars(
             existing_bars,
             missing_bars,
             path,
-            start_date=run_plan.run.from_date,
-            end_date=run_plan.run.to_date,
+            start_date=start_date,
+            end_date=end_date,
         )
         bars = _bars_for_date_range(
             read_daily_bars_parquet(path),
-            start_date=run_plan.run.from_date,
-            end_date=run_plan.run.to_date,
+            start_date=start_date,
+            end_date=end_date,
         )
+        if not _has_bars_in_date_range(bars, start_date=minimum_start_date, end_date=end_date):
+            raise ValueError(f"no daily bars returned for {series.symbol} in run window")
         return DailyBarsLoadResult(
             bars=bars,
             provenance=_snapshot_provenance(
@@ -430,25 +582,74 @@ def _load_or_fetch_bars(
                 path=path,
                 source_paths=_candidate_paths(candidates),
                 bars=bars,
-                details={"fetched_ranges": _date_ranges_payload(missing_ranges)},
+                details=_bar_load_details(
+                    requested_start_date=start_date,
+                    requested_end_date=end_date,
+                    minimum_start_date=minimum_start_date,
+                    fetched_ranges=_date_ranges_payload(missing_ranges),
+                    warmup_incomplete=not _bars_cover_date_range(
+                        bars,
+                        start_date=start_date,
+                        end_date=end_date,
+                    ),
+                ),
             ),
         )
 
     if provider is None:
         raise ValueError("provider is required when snapshots must be refreshed or created")
 
-    bars = _fetch_tradable_bars(run_plan, series=series, provider=provider)
-    if not bars:
+    missing_bars, missing_ranges = _fetch_missing_tradable_bars(
+        run_plan,
+        series=series,
+        provider=provider,
+        existing_bars=existing_bars,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if not existing_bars and not missing_bars:
         raise ValueError(f"no daily bars returned for {series.symbol}")
 
-    write_daily_bars_parquet(bars, path)
+    write_merged_daily_bars_parquet(
+        existing_bars,
+        missing_bars,
+        path,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    bars = _bars_for_date_range(
+        read_daily_bars_parquet(path),
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if not _has_bars_in_date_range(bars, start_date=minimum_start_date, end_date=end_date):
+        raise ValueError(f"no daily bars returned for {series.symbol} in run window")
+
     return DailyBarsLoadResult(
         bars=bars,
         provenance=_snapshot_provenance(
             snapshot_type="tradable_bars",
-            action="created",
+            action=(
+                "created"
+                if not existing_bars
+                else "incremental_filled"
+                if missing_bars
+                else ("exact_reused" if _has_exact_bar_candidate(candidates, path) else "range_reused")
+            ),
             path=path,
+            source_paths=_candidate_paths(candidates),
             bars=bars,
+            details=_bar_load_details(
+                requested_start_date=start_date,
+                requested_end_date=end_date,
+                minimum_start_date=minimum_start_date,
+                fetched_ranges=_date_ranges_payload(missing_ranges),
+                warmup_incomplete=not _bars_cover_date_range(
+                    bars,
+                    start_date=start_date,
+                    end_date=end_date,
+                ),
+            ),
         ),
     )
 
@@ -457,12 +658,14 @@ def _load_discovered_tradable_bars(
     run_plan: RunPlan,
     *,
     series: TradableSeriesConfig,
+    start_date: date,
+    end_date: date,
 ) -> tuple[tuple[DailyBar, ...], tuple[DailyBarsSnapshotCandidate, ...]]:
     candidates = discover_tradable_bars_snapshot_paths(
         run_plan.data.snapshot_root,
         symbol=series.symbol,
-        start_date=run_plan.run.from_date,
-        end_date=run_plan.run.to_date,
+        start_date=start_date,
+        end_date=end_date,
         asset_type=series.asset_type,
         adjustment=series.price_adjustment or "none",
     )
@@ -481,13 +684,15 @@ def _fetch_tradable_bars(
     *,
     series: TradableSeriesConfig,
     provider: RunDataProvider,
+    start_date: date,
+    end_date: date,
 ) -> tuple[DailyBar, ...]:
     return _fetch_tradable_bars_for_range(
         run_plan,
         series=series,
         provider=provider,
-        start_date=run_plan.run.from_date,
-        end_date=run_plan.run.to_date,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 
@@ -497,18 +702,26 @@ def _fetch_missing_tradable_bars(
     series: TradableSeriesConfig,
     provider: RunDataProvider,
     existing_bars: tuple[DailyBar, ...],
+    start_date: date,
+    end_date: date,
 ) -> tuple[tuple[DailyBar, ...], tuple[tuple[date, date], ...]]:
     if not existing_bars:
-        return _fetch_tradable_bars(run_plan, series=series, provider=provider), (
-            (run_plan.run.from_date, run_plan.run.to_date),
+        return _fetch_tradable_bars(
+            run_plan,
+            series=series,
+            provider=provider,
+            start_date=start_date,
+            end_date=end_date,
+        ), (
+            (start_date, end_date),
         )
 
     existing_dates = tuple(sorted({bar.trade_date for bar in existing_bars}))
     missing_ranges: list[tuple[date, date]] = []
-    if existing_dates[0] > run_plan.run.from_date:
-        missing_ranges.append((run_plan.run.from_date, existing_dates[0] - timedelta(days=1)))
-    if existing_dates[-1] < run_plan.run.to_date:
-        missing_ranges.append((existing_dates[-1] + timedelta(days=1), run_plan.run.to_date))
+    if existing_dates[0] > start_date:
+        missing_ranges.append((start_date, existing_dates[0] - timedelta(days=1)))
+    if existing_dates[-1] < end_date:
+        missing_ranges.append((existing_dates[-1] + timedelta(days=1), end_date))
 
     fetched_bars: list[DailyBar] = []
     for start_date, end_date in missing_ranges:
@@ -589,12 +802,46 @@ def _bars_cover_date_range(
     return min(dates) <= start_date and max(dates) >= end_date
 
 
+def _has_bars_in_date_range(
+    bars: tuple[DailyBar, ...],
+    *,
+    start_date: date,
+    end_date: date,
+) -> bool:
+    return any(start_date <= bar.trade_date <= end_date for bar in bars)
+
+
 def _bars_for_date_range(
     bars: tuple[DailyBar, ...],
     *,
     start_date: date,
     end_date: date,
 ) -> tuple[DailyBar, ...]:
+    return tuple(
+        bar
+        for bar in bars
+        if start_date <= bar.trade_date <= end_date
+    )
+
+
+def _index_bars_cover_date_range(
+    bars: tuple[IndexBar, ...],
+    *,
+    start_date: date,
+    end_date: date,
+) -> bool:
+    if not bars:
+        return False
+    dates = [bar.trade_date for bar in bars]
+    return min(dates) <= start_date and max(dates) >= end_date
+
+
+def _index_bars_for_date_range(
+    bars: tuple[IndexBar, ...],
+    *,
+    start_date: date,
+    end_date: date,
+) -> tuple[IndexBar, ...]:
     return tuple(
         bar
         for bar in bars
@@ -645,6 +892,10 @@ def _has_exact_indicator_candidate(candidates: tuple[IndicatorSnapshotCandidate,
     return any(candidate.path == path for candidate in candidates)
 
 
+def _has_exact_index_candidate(candidates: tuple[IndexBarsSnapshotCandidate, ...], path: Path) -> bool:
+    return any(candidate.path == path for candidate in candidates)
+
+
 def _date_ranges_payload(ranges: tuple[tuple[date, date], ...]) -> tuple[dict[str, str], ...]:
     return tuple(
         {
@@ -653,6 +904,26 @@ def _date_ranges_payload(ranges: tuple[tuple[date, date], ...]) -> tuple[dict[st
         }
         for start_date, end_date in ranges
     )
+
+
+def _bar_load_details(
+    *,
+    requested_start_date: date,
+    requested_end_date: date,
+    minimum_start_date: date,
+    fetched_ranges: tuple[dict[str, str], ...] = (),
+    warmup_incomplete: bool = False,
+) -> dict[str, Any]:
+    details: dict[str, Any] = {
+        "requested_start_date": requested_start_date.isoformat(),
+        "requested_end_date": requested_end_date.isoformat(),
+        "minimum_start_date": minimum_start_date.isoformat(),
+    }
+    if fetched_ranges:
+        details["fetched_ranges"] = fetched_ranges
+    if warmup_incomplete:
+        details["warmup_incomplete"] = True
+    return details
 
 
 def _load_or_build_required_indicators(
@@ -670,17 +941,19 @@ def _load_or_build_required_indicators(
         symbol=series.symbol,
         indicator_requirements=indicator_requirements,
     ):
+        timeframe_bars = bars if plan.timeframe == "D" else resample_daily_bars(bars, frequency=plan.timeframe)
+        path_start_date = timeframe_bars[0].trade_date if timeframe_bars else run_plan.run.from_date
+        path_end_date = timeframe_bars[-1].trade_date if timeframe_bars else run_plan.run.to_date
         path = indicator_snapshot_path(
             run_plan.data.snapshot_root,
             symbol=series.symbol,
-            start_date=run_plan.run.from_date,
-            end_date=run_plan.run.to_date,
+            start_date=path_start_date,
+            end_date=path_end_date,
             adjustment=series.price_adjustment or "none",
             asset_type=series.asset_type,
             indicator_names=plan.indicator_names,
             timeframe=plan.timeframe,
         )
-        timeframe_bars = bars if plan.timeframe == "D" else resample_daily_bars(bars, frequency=plan.timeframe)
         load_result = _load_or_build_indicators(
             run_plan,
             series=series,
@@ -1170,14 +1443,33 @@ def _prepare_index_data(
     symbol: str,
     provider: RunDataProvider | None,
 ) -> PreparedIndexData:
+    calculation_start_date = _market_index_calculation_start_date(run_plan, symbol=symbol)
     snapshot_path = index_bars_snapshot_path(
         run_plan.data.snapshot_root,
         symbol=symbol,
+        start_date=calculation_start_date,
+        end_date=run_plan.run.to_date,
+    )
+    load_result = _load_or_fetch_index_bars(
+        run_plan,
+        symbol=symbol,
+        path=snapshot_path,
+        provider=provider,
+        start_date=calculation_start_date,
+        end_date=run_plan.run.to_date,
+    )
+    bars = _index_bars_for_date_range(
+        load_result.bars,
         start_date=run_plan.run.from_date,
         end_date=run_plan.run.to_date,
     )
-    bars = _load_or_fetch_index_bars(run_plan, symbol=symbol, path=snapshot_path, provider=provider)
-    return PreparedIndexData(symbol=symbol, bars=bars, snapshot_path=snapshot_path)
+    return PreparedIndexData(
+        symbol=symbol,
+        bars=bars,
+        calculation_bars=load_result.bars,
+        snapshot_path=snapshot_path,
+        snapshot_provenance=load_result.provenance,
+    )
 
 
 def _load_or_fetch_index_bars(
@@ -1186,21 +1478,82 @@ def _load_or_fetch_index_bars(
     symbol: str,
     path: Path,
     provider: RunDataProvider | None,
-) -> tuple[IndexBar, ...]:
-    if not run_plan.data.refresh_snapshots and path.exists():
-        return read_index_bars_parquet(path)
+    start_date: date,
+    end_date: date,
+) -> IndexBarsLoadResult:
+    if not run_plan.data.refresh_snapshots:
+        existing_bars, candidates = _load_discovered_index_bars(
+            run_plan,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if _index_bars_cover_date_range(existing_bars, start_date=start_date, end_date=end_date):
+            bars = _index_bars_for_date_range(existing_bars, start_date=start_date, end_date=end_date)
+            if not path.exists():
+                write_index_bars_parquet(bars, path)
+            action = "exact_reused" if _has_exact_index_candidate(candidates, path) else "range_reused"
+            return IndexBarsLoadResult(
+                bars=bars,
+                provenance=_snapshot_provenance(
+                    snapshot_type="index_bars",
+                    action=action,
+                    path=path,
+                    source_paths=_candidate_paths(candidates),
+                    bars=bars,
+                    details=_bar_load_details(
+                        requested_start_date=start_date,
+                        requested_end_date=end_date,
+                        minimum_start_date=run_plan.run.from_date,
+                    ),
+                ),
+            )
 
     if provider is None:
         raise ValueError("provider is required when index snapshots must be refreshed or created")
 
     bars = provider.fetch_index_daily_bars(
         symbol=symbol,
-        start_date=run_plan.run.from_date,
-        end_date=run_plan.run.to_date,
+        start_date=start_date,
+        end_date=end_date,
     )
 
     write_index_bars_parquet(bars, path)
-    return bars
+    return IndexBarsLoadResult(
+        bars=bars,
+        provenance=_snapshot_provenance(
+            snapshot_type="index_bars",
+            action="created",
+            path=path,
+            bars=bars,
+            details=_bar_load_details(
+                requested_start_date=start_date,
+                requested_end_date=end_date,
+                minimum_start_date=run_plan.run.from_date,
+                warmup_incomplete=not _index_bars_cover_date_range(
+                    bars,
+                    start_date=start_date,
+                    end_date=end_date,
+                ),
+            ),
+        ),
+    )
+
+
+def _load_discovered_index_bars(
+    run_plan: RunPlan,
+    *,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+) -> tuple[tuple[IndexBar, ...], tuple[IndexBarsSnapshotCandidate, ...]]:
+    candidates = discover_index_bars_snapshot_paths(
+        run_plan.data.snapshot_root,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return _read_index_bar_candidates(candidates), candidates
 
 
 def _prepare_industry_index_data_by_symbol(
@@ -1221,21 +1574,35 @@ def _prepare_industry_index_data(
     provider: RunDataProvider | None,
 ) -> PreparedIndexData:
     source = run_plan.data.industry_series.source
+    calculation_start_date = _industry_index_calculation_start_date(run_plan)
     snapshot_path = industry_index_bars_snapshot_path(
         run_plan.data.snapshot_root,
         symbol=symbol,
-        start_date=run_plan.run.from_date,
+        start_date=calculation_start_date,
         end_date=run_plan.run.to_date,
         source=source,
     )
-    bars = _load_or_fetch_industry_index_bars(
+    load_result = _load_or_fetch_industry_index_bars(
         run_plan,
         symbol=symbol,
         source=source,
         path=snapshot_path,
         provider=provider,
+        start_date=calculation_start_date,
+        end_date=run_plan.run.to_date,
     )
-    return PreparedIndexData(symbol=symbol, bars=bars, snapshot_path=snapshot_path)
+    bars = _index_bars_for_date_range(
+        load_result.bars,
+        start_date=run_plan.run.from_date,
+        end_date=run_plan.run.to_date,
+    )
+    return PreparedIndexData(
+        symbol=symbol,
+        bars=bars,
+        calculation_bars=load_result.bars,
+        snapshot_path=snapshot_path,
+        snapshot_provenance=load_result.provenance,
+    )
 
 
 def _load_or_fetch_industry_index_bars(
@@ -1245,21 +1612,100 @@ def _load_or_fetch_industry_index_bars(
     source: str,
     path: Path,
     provider: RunDataProvider | None,
-) -> tuple[IndexBar, ...]:
-    if not run_plan.data.refresh_snapshots and path.exists():
-        return read_index_bars_parquet(path)
+    start_date: date,
+    end_date: date,
+) -> IndexBarsLoadResult:
+    if not run_plan.data.refresh_snapshots:
+        existing_bars, candidates = _load_discovered_industry_index_bars(
+            run_plan,
+            symbol=symbol,
+            source=source,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if _index_bars_cover_date_range(existing_bars, start_date=start_date, end_date=end_date):
+            bars = _index_bars_for_date_range(existing_bars, start_date=start_date, end_date=end_date)
+            if not path.exists():
+                write_index_bars_parquet(bars, path)
+            action = "exact_reused" if _has_exact_index_candidate(candidates, path) else "range_reused"
+            return IndexBarsLoadResult(
+                bars=bars,
+                provenance=_snapshot_provenance(
+                    snapshot_type="industry_index_bars",
+                    action=action,
+                    path=path,
+                    source_paths=_candidate_paths(candidates),
+                    bars=bars,
+                    details=_bar_load_details(
+                        requested_start_date=start_date,
+                        requested_end_date=end_date,
+                        minimum_start_date=run_plan.run.from_date,
+                    ),
+                ),
+            )
 
     if provider is None:
         raise ValueError("provider is required when industry index snapshots must be refreshed or created")
 
     bars = provider.fetch_industry_index_daily_bars(
         symbol=symbol,
-        start_date=run_plan.run.from_date,
-        end_date=run_plan.run.to_date,
+        start_date=start_date,
+        end_date=end_date,
         source=source,
     )
     write_index_bars_parquet(bars, path)
-    return bars
+    return IndexBarsLoadResult(
+        bars=bars,
+        provenance=_snapshot_provenance(
+            snapshot_type="industry_index_bars",
+            action="created",
+            path=path,
+            bars=bars,
+            details=_bar_load_details(
+                requested_start_date=start_date,
+                requested_end_date=end_date,
+                minimum_start_date=run_plan.run.from_date,
+                warmup_incomplete=not _index_bars_cover_date_range(
+                    bars,
+                    start_date=start_date,
+                    end_date=end_date,
+                ),
+            ),
+        ),
+    )
+
+
+def _load_discovered_industry_index_bars(
+    run_plan: RunPlan,
+    *,
+    symbol: str,
+    source: str,
+    start_date: date,
+    end_date: date,
+) -> tuple[tuple[IndexBar, ...], tuple[IndexBarsSnapshotCandidate, ...]]:
+    candidates = discover_industry_index_bars_snapshot_paths(
+        run_plan.data.snapshot_root,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+        source=source,
+    )
+    return _read_index_bar_candidates(candidates), candidates
+
+
+def _read_index_bar_candidates(candidates: tuple[IndexBarsSnapshotCandidate, ...]) -> tuple[IndexBar, ...]:
+    bars: list[IndexBar] = []
+    for candidate in candidates:
+        bars.extend(read_index_bars_parquet(candidate.path))
+    return _deduplicate_index_bars(bars)
+
+
+def _deduplicate_index_bars(bars: tuple[IndexBar, ...] | list[IndexBar]) -> tuple[IndexBar, ...]:
+    bars_by_key = {
+        (bar.symbol, bar.trade_date): bar
+        for bar in bars
+    }
+    return tuple(sorted(bars_by_key.values(), key=lambda bar: (bar.symbol, bar.trade_date)))
 
 
 def _prepare_industry_data(
@@ -1365,4 +1811,6 @@ def _index_series_result(prepared: PreparedIndexData) -> IndexSeriesResult:
         symbol=prepared.symbol,
         bar_count=len(prepared.bars),
         snapshot_path=prepared.snapshot_path,
+        snapshot_provenance=prepared.snapshot_provenance,
+        calculation_bar_count=len(prepared.calculation_bars),
     )

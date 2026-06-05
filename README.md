@@ -302,6 +302,49 @@ Strategy Adaptation V1 AI review golden check:
 .\.venv\Scripts\python.exe scripts\acceptance_smoke.py
 ```
 
+Build the workbench run catalog when you need one AI-readable entry point over
+persisted runs:
+
+```powershell
+.\.venv\Scripts\python.exe -m attbacktrader.cli.run_catalog
+```
+
+Build the experiment lifecycle view when you need to see whether review
+experiments or strategy variants are drafted, confirmed, executed, compared,
+attributed, or waiting for an accepted/rejected/parked decision:
+
+```powershell
+.\.venv\Scripts\python.exe -m attbacktrader.cli.experiment_lifecycle
+```
+
+Build explicit experiment decision records after compared or attributed
+experiments have a human/AI-supervised accepted, rejected, or parked outcome:
+
+```powershell
+.\.venv\Scripts\python.exe -m attbacktrader.cli.experiment_decisions
+```
+
+Write the Backtest Workbench V1 closure snapshot when you need the accepted
+command, artifact, test, document, and non-goal boundary:
+
+```powershell
+.\.venv\Scripts\python.exe -m attbacktrader.cli.workbench_closure_snapshot --sealed-on 2026-06-05
+```
+
+Run the Workbench closure golden check when you need to verify that the closure
+Markdown still reflects the baseline contract:
+
+```powershell
+.\.venv\Scripts\python.exe -m attbacktrader.cli.workbench_closure_golden_check
+```
+
+Write the AI Skill entry contract when you need the ATTbacktrader review Skill
+to follow the same first-read order, evidence gates, and output contract:
+
+```powershell
+.\.venv\Scripts\python.exe -m attbacktrader.cli.ai_skill_entry_contract --generated-on 2026-06-05
+```
+
 Run the same suite plus the real Tushare smoke:
 
 ```powershell

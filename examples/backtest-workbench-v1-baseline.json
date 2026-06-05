@@ -1,0 +1,545 @@
+{
+  "schema": "attbacktrader.backtest_workbench_v1_baseline.v1",
+  "sealed_on": "2026-06-05",
+  "objective": "Seal Backtest Workbench V1 as an AI-friendly evidence workbench: run, validate, index, review, compare, and close bounded experiment cycles from persisted artifacts.",
+  "source_branch": "autoBacktrader",
+  "mvp_base_commit": "d339bfc",
+  "strategy_adaptation_v1_commit": "8c63fdf",
+  "verification": {
+    "acceptance_smoke": {
+      "command": "python scripts\\acceptance_smoke.py",
+      "expected": "231 passed; Strategy Adaptation V1 golden check status ok, check_count 72, failed_count 0; Workbench Closure golden check status ok, failed_count 0"
+    },
+    "full_pytest": {
+      "command": "python -m pytest -q",
+      "expected": "315 passed"
+    },
+    "diff_check": {
+      "command": "git diff --check",
+      "expected": "no whitespace errors; CRLF warnings are acceptable on Windows"
+    }
+  },
+  "source_artifacts": {
+    "run_catalog": {
+      "path": "reports\\run-catalog\\run_catalog.json",
+      "exists": true,
+      "schema": "attbacktrader.run_catalog.v1"
+    },
+    "experiment_lifecycle": {
+      "path": "reports\\experiment-lifecycle\\experiment_lifecycle.json",
+      "exists": true,
+      "schema": "attbacktrader.experiment_lifecycle.v1"
+    },
+    "strategy_adaptation_golden_check": {
+      "path": "reports\\strategy-adaptation-v1-ai-review-golden-check\\ai_review_golden_check.json",
+      "exists": true,
+      "schema": "attbacktrader.ai_review_golden_check.v1"
+    }
+  },
+  "run_catalog_summary": {
+    "schema": "attbacktrader.run_catalog.v1",
+    "run_count": 24,
+    "group_count": 9,
+    "missing_required_artifact_run_count": 1,
+    "missing_run_dir_count": 0,
+    "role_counts": [
+      {
+        "key": "experiment_run",
+        "count": 4
+      },
+      {
+        "key": "market_segment_baseline",
+        "count": 9
+      },
+      {
+        "key": "smoke_run",
+        "count": 2
+      },
+      {
+        "key": "strategy_variant_segment",
+        "count": 9
+      }
+    ],
+    "evidence_status_counts": [
+      {
+        "key": "missing",
+        "count": 1
+      },
+      {
+        "key": "ok",
+        "count": 23
+      }
+    ]
+  },
+  "experiment_lifecycle_summary": {
+    "schema": "attbacktrader.experiment_lifecycle.v1",
+    "item_count": 41,
+    "chain_count": 9,
+    "lineage_counts": [
+      {
+        "key": "review_experiment",
+        "count": 13
+      },
+      {
+        "key": "strategy_variant",
+        "count": 28
+      }
+    ],
+    "stage_counts": [
+      {
+        "key": "attribution",
+        "count": 1
+      },
+      {
+        "key": "candidate",
+        "count": 6
+      },
+      {
+        "key": "comparison",
+        "count": 3
+      },
+      {
+        "key": "confirmed_run_plan",
+        "count": 1
+      },
+      {
+        "key": "decision",
+        "count": 3
+      },
+      {
+        "key": "draft",
+        "count": 9
+      },
+      {
+        "key": "executed_run",
+        "count": 9
+      },
+      {
+        "key": "generated_run",
+        "count": 9
+      }
+    ],
+    "status_counts": [
+      {
+        "key": "attributed",
+        "count": 1
+      },
+      {
+        "key": "candidate",
+        "count": 6
+      },
+      {
+        "key": "compared",
+        "count": 3
+      },
+      {
+        "key": "confirmed_run_plan_generated",
+        "count": 1
+      },
+      {
+        "key": "draft_requires_manual_confirmation",
+        "count": 9
+      },
+      {
+        "key": "executed_ok",
+        "count": 9
+      },
+      {
+        "key": "generated_run_plan",
+        "count": 9
+      },
+      {
+        "key": "parked",
+        "count": 2
+      },
+      {
+        "key": "rejected",
+        "count": 1
+      }
+    ],
+    "decision_gap_count": 0,
+    "execution_gap_count": 6,
+    "chains_waiting_decision": []
+  },
+  "strategy_adaptation_golden_summary": {
+    "schema": "attbacktrader.ai_review_golden_check.v1",
+    "status": "ok",
+    "check_count": 72,
+    "passed_count": 72,
+    "failed_count": 0,
+    "golden_for": "Strategy Adaptation V1 sealed AI review"
+  },
+  "accepted_commands": [
+    {
+      "command": "att-run-plan",
+      "direction_zh": "回测执行",
+      "purpose_zh": "从一个已验证 YAML RunPlan 执行可重复回测并落盘证据链。"
+    },
+    {
+      "command": "att-run-catalog",
+      "direction_zh": "工作台导航",
+      "purpose_zh": "索引已落盘 runs、角色、artifact 完整性、证据状态和可比较分组。"
+    },
+    {
+      "command": "att-experiment-lifecycle",
+      "direction_zh": "实验治理",
+      "purpose_zh": "查看候选、草稿、确认、生成、执行、比较、归因和缺失决策阶段。"
+    },
+    {
+      "command": "att-experiment-decisions",
+      "direction_zh": "实验治理",
+      "purpose_zh": "从显式 decision input 写出 accepted/rejected/parked 实验决策记录。"
+    },
+    {
+      "command": "att-run-data-overview",
+      "direction_zh": "AI 下钻",
+      "purpose_zh": "读取单个 run 的第一屏总览和证据状态。"
+    },
+    {
+      "command": "att-run-data-dictionary",
+      "direction_zh": "AI 下钻",
+      "purpose_zh": "解释单个 run 的 artifact 和字段含义。"
+    },
+    {
+      "command": "att-review-packet",
+      "direction_zh": "AI 复盘",
+      "purpose_zh": "从已落盘 run 生成 Skill 可读复盘包。"
+    },
+    {
+      "command": "att-review-findings",
+      "direction_zh": "AI 复盘",
+      "purpose_zh": "把复盘包整理成引用明确的 finding。"
+    },
+    {
+      "command": "att-review-experiment-candidates",
+      "direction_zh": "实验治理",
+      "purpose_zh": "把 finding 转成候选验证方向，不修改策略。"
+    },
+    {
+      "command": "att-review-experiment-drafts",
+      "direction_zh": "实验治理",
+      "purpose_zh": "生成需要人工确认的实验草稿。"
+    },
+    {
+      "command": "att-review-experiment-confirm",
+      "direction_zh": "实验治理",
+      "purpose_zh": "把一个人工确认草稿转成合法 RunPlan。"
+    },
+    {
+      "command": "att-compare-runs",
+      "direction_zh": "比较验证",
+      "purpose_zh": "比较多个已落盘 run 的收益、风险、交易和阻断差异。"
+    },
+    {
+      "command": "att-compare-environment-fit",
+      "direction_zh": "比较验证",
+      "purpose_zh": "比较多个 run 的环境适配证据稳定性。"
+    },
+    {
+      "command": "att-generate-market-segment-runs",
+      "direction_zh": "市场段验证",
+      "purpose_zh": "从人工行情段 catalog 生成合法市场段 RunPlans。"
+    },
+    {
+      "command": "att-market-type-summary",
+      "direction_zh": "市场段验证",
+      "purpose_zh": "汇总已知牛市、震荡市、熊市段表现。"
+    },
+    {
+      "command": "att-strategy-adaptation-matrix",
+      "direction_zh": "策略适配 V1",
+      "purpose_zh": "从已知市场类型的交易证据生成适配矩阵。"
+    },
+    {
+      "command": "att-strategy-variant-validation",
+      "direction_zh": "策略适配 V1",
+      "purpose_zh": "比较基线和策略变体在已知市场类型下的表现。"
+    },
+    {
+      "command": "att-review-golden-check",
+      "direction_zh": "封板校验",
+      "purpose_zh": "校验 sealed-stage AI review 是否越界或漏证据。"
+    },
+    {
+      "command": "att-workbench-closure-snapshot",
+      "direction_zh": "封板/验收",
+      "purpose_zh": "写出 Backtest Workbench V1 baseline JSON 和 closure 文档。"
+    },
+    {
+      "command": "att-workbench-closure-golden-check",
+      "direction_zh": "封板校验",
+      "purpose_zh": "校验 Workbench V1 closure 文档是否忠实保留 baseline 的命令、非目标、测试计数和 AI 读取顺序。"
+    },
+    {
+      "command": "att-ai-skill-entry-contract",
+      "direction_zh": "AI 易用",
+      "purpose_zh": "写出 ATTbacktrader AI review Skill 的固定入口、证据门禁和输出合同。"
+    },
+    {
+      "command": "scripts\\acceptance_smoke.py",
+      "direction_zh": "封板校验",
+      "purpose_zh": "运行 curated regression suite、sealed V1 golden check 和 Workbench closure golden check。"
+    }
+  ],
+  "accepted_artifact_groups": [
+    {
+      "group": "per_run_core",
+      "group_label_zh": "单次回测核心证据",
+      "direction_zh": "回测执行",
+      "purpose_zh": "证明一次 run 可复盘、可校验、可下钻。",
+      "artifacts": [
+        "run_plan.json",
+        "report.json",
+        "report.zh.md",
+        "trades.json",
+        "signal_audit.json",
+        "sizing_audit.json",
+        "execution_audit.json",
+        "trade_lifecycle.json",
+        "trade_lifecycle.zh.md",
+        "trade_review.json",
+        "trade_review.zh.md",
+        "post_exit_analysis.json",
+        "post_exit_analysis.zh.md",
+        "evidence_validation.json",
+        "equity_curve.json",
+        "positions.json",
+        "snapshots.json"
+      ]
+    },
+    {
+      "group": "ai_review_workbench",
+      "group_label_zh": "AI 复盘工作台",
+      "direction_zh": "AI 复盘",
+      "purpose_zh": "让 AI 从总览、字典、样本和 brief 开始复盘。",
+      "artifacts": [
+        "run_data_overview.json",
+        "run_data_dictionary.json",
+        "run_data_drilldown.json",
+        "run_data_drilldown_batch.json",
+        "run_data_attribution_index.json",
+        "review_packet.<focus>.json",
+        "review_findings.<focus>.json",
+        "review_sample.<kind>.<id>.json",
+        "review_sample_batch.<focus>.json",
+        "review_brief.<focus>.json",
+        "ai_review_result.<focus>.json"
+      ]
+    },
+    {
+      "group": "experiment_governance",
+      "group_label_zh": "实验治理",
+      "direction_zh": "实验闭环",
+      "purpose_zh": "把复盘发现转成有限候选、草稿、确认和生命周期状态。",
+      "artifacts": [
+        "review_experiment_candidates.<focus>.json",
+        "review_experiment_drafts.<focus>.json",
+        "review_experiment_confirmed.<draft>.json",
+        "run_catalog.json",
+        "run_catalog.zh.md",
+        "experiment_lifecycle.json",
+        "experiment_lifecycle.zh.md",
+        "experiment_decisions.json",
+        "experiment_decisions.zh.md",
+        "examples/experiment-decisions/workbench-v1-strategy-variant-decisions.json"
+      ]
+    },
+    {
+      "group": "comparison_and_market_type",
+      "group_label_zh": "比较与市场类型",
+      "direction_zh": "比较验证",
+      "purpose_zh": "比较 run、环境适配、市场段和策略变体表现。",
+      "artifacts": [
+        "comparison.json",
+        "environment_fit_comparison.json",
+        "market_segment_run_manifest.json",
+        "market_type_summary.json",
+        "strategy_adaptation_matrix.json",
+        "strategy_adaptation_drilldown.json",
+        "strategy_variant_drafts.json",
+        "strategy_variant_run_manifest.json",
+        "strategy_variant_validation.json",
+        "strategy_variant_attribution.json"
+      ]
+    },
+    {
+      "group": "closure",
+      "group_label_zh": "封板合同",
+      "direction_zh": "封板/验收",
+      "purpose_zh": "固定当前 V1 边界、测试计数、非目标和 AI 入口。",
+      "artifacts": [
+        "examples/backtest-workbench-v1-baseline.json",
+        "docs/backtest-workbench-v1-closure.md",
+        "workbench_closure_golden_check.json",
+        "workbench_closure_golden_check.zh.md",
+        "examples/attbacktrader-ai-skill-entry-contract.json",
+        "docs/attbacktrader-ai-skill-entry-contract.md",
+        "examples/strategy-adaptation-v1-baseline.json",
+        "docs/strategy-adaptation-v1-closure.md",
+        "examples/strategy-adaptation-v1-ai-review-golden.json",
+        "ai_review_golden_check.json"
+      ]
+    }
+  ],
+  "sealed_docs": [
+    {
+      "path": "docs\\mvp-checklist.md",
+      "exists": true,
+      "size_bytes": 43932
+    },
+    {
+      "path": "docs\\backtest-workbench-system-map.md",
+      "exists": true,
+      "size_bytes": 13951
+    },
+    {
+      "path": "docs\\backtest-workbench-v1-closure.md",
+      "exists": true,
+      "size_bytes": 10043
+    },
+    {
+      "path": "docs\\attbacktrader-ai-skill-entry-contract.md",
+      "exists": true,
+      "size_bytes": 7084
+    },
+    {
+      "path": "docs\\run-review-workbench-closure.md",
+      "exists": true,
+      "size_bytes": 6884
+    },
+    {
+      "path": "docs\\strategy-adaptation-v1-closure.md",
+      "exists": true,
+      "size_bytes": 4708
+    },
+    {
+      "path": "docs\\strategy-adaptation-v1-ai-review.md",
+      "exists": true,
+      "size_bytes": 6443
+    },
+    {
+      "path": "docs\\architecture\\project-structure.md",
+      "exists": true,
+      "size_bytes": 17908
+    },
+    {
+      "path": "docs\\architecture\\evidence-chain.md",
+      "exists": true,
+      "size_bytes": 12968
+    },
+    {
+      "path": "docs\\next-stage-exit-method-attribution.md",
+      "exists": true,
+      "size_bytes": 12006
+    },
+    {
+      "path": "docs\\exit-method-attribution-missing-evidence-check.md",
+      "exists": true,
+      "size_bytes": 5821
+    }
+  ],
+  "active_non_goals": [
+    "不做自动参数调优或贝叶斯优化。",
+    "不做自动策略搜索。",
+    "不做自动牛市/震荡市/熊市识别。",
+    "不做自动策略切换。",
+    "不把报告层后验观察直接变成交易规则。",
+    "不在指标层计算多头趋势、突破、卖飞原因等决策语义。",
+    "不默认填充缺失 warmup、缺失证据或缺失未来窗口。",
+    "不继续在当前主线深挖 Exit Method Attribution；该方向已 parked 为未来 stage。",
+    "不宣称当前策略已经可上线或适合生产交易。"
+  ],
+  "closure_criteria": [
+    {
+      "criterion_zh": "curated acceptance smoke 通过",
+      "status": "accepted",
+      "evidence": "python scripts\\acceptance_smoke.py -> 231 passed; Strategy golden 72/72 ok; Workbench closure golden ok"
+    },
+    {
+      "criterion_zh": "完整仓库测试通过",
+      "status": "accepted",
+      "evidence": "python -m pytest -q -> 315 passed"
+    },
+    {
+      "criterion_zh": "Run Catalog 可作为第一入口",
+      "status": "accepted",
+      "evidence": "reports\\run-catalog\\run_catalog.json"
+    },
+    {
+      "criterion_zh": "Experiment Lifecycle 可显示实验阶段",
+      "status": "accepted",
+      "evidence": "reports\\experiment-lifecycle\\experiment_lifecycle.json decision_gap_count=0"
+    },
+    {
+      "criterion_zh": "Strategy Adaptation V1 受 golden check 保护",
+      "status": "accepted",
+      "evidence": "reports\\strategy-adaptation-v1-ai-review-golden-check\\ai_review_golden_check.json"
+    },
+    {
+      "criterion_zh": "Exit Method Attribution 等深度分析已 parked",
+      "status": "accepted",
+      "evidence": "docs/next-stage-exit-method-attribution.md; docs/exit-method-attribution-missing-evidence-check.md"
+    }
+  ],
+  "ai_first_read_order": [
+    {
+      "order": 1,
+      "artifact": "reports/run-catalog/run_catalog.json",
+      "purpose_zh": "先确定 run 是否存在、证据是否完整、可比较分组是什么。"
+    },
+    {
+      "order": 2,
+      "artifact": "reports/experiment-lifecycle/experiment_lifecycle.json",
+      "purpose_zh": "再确定实验链路卡在 draft、execution、comparison、attribution 还是 decision。"
+    },
+    {
+      "order": 3,
+      "artifact": "reports/experiment-decisions/experiment_decisions.json",
+      "purpose_zh": "涉及 compared/attributed experiment 时先看 explicit accepted/rejected/parked 决策。"
+    },
+    {
+      "order": 4,
+      "artifact": "reports/<run_id>/run_data_overview.json",
+      "purpose_zh": "读取单个 run 的复盘总览和 evidence_validation 状态。"
+    },
+    {
+      "order": 5,
+      "artifact": "reports/<run_id>/run_data_dictionary.json",
+      "purpose_zh": "确认字段含义和 artifact 下钻入口。"
+    },
+    {
+      "order": 6,
+      "artifact": "reports/<run_id>/review_packet.all.json",
+      "purpose_zh": "进入 AI review，引用样本和证据，不重跑策略。"
+    },
+    {
+      "order": 7,
+      "artifact": "comparison / market_type_summary / strategy_variant_validation",
+      "purpose_zh": "只有需要比较时才读取，不从单 run 直接推出策略结论。"
+    }
+  ],
+  "next_allowed_slices": [
+    {
+      "name_zh": "AI Skill Contract Golden Check",
+      "direction_zh": "AI 易用/封板校验",
+      "purpose_zh": "校验 Skill 文档是否保留 contract 的 first-read order、preflight gates 和输出推荐规则。"
+    },
+    {
+      "name_zh": "AI Skill Dry-run Review Smoke",
+      "direction_zh": "AI 可用性验证",
+      "purpose_zh": "用一个已知 run 按 Skill 入口完整复盘，检查证据引用、边界和三下一步输出是否稳定。"
+    },
+    {
+      "name_zh": "Workbench Artifact Freshness Check",
+      "direction_zh": "工作台可用性",
+      "purpose_zh": "检查 run catalog、lifecycle、decisions、closure、AI contract 是否由最新命令生成，避免 AI 读到旧 artifact。"
+    }
+  ],
+  "rules": [
+    "Workbench Closure Snapshot 是边界合同，不是策略收益评分。",
+    "Snapshot 只记录已接受命令、artifact、测试、文档和非目标；不重跑回测。",
+    "reports/ 下的本地 artifacts 可缺失；缺失时先生成 Run Catalog 和 Experiment Lifecycle。",
+    "新的深度分析必须先进入独立 stage 文档，不能在 Workbench V1 内无限扩展。",
+    "accepted/rejected/parked 决策应作为实验生命周期的下一层闭环，不应由收益表现自动推断。"
+  ]
+}
