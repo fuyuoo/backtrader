@@ -57,6 +57,7 @@ def build_attribution_summary(
         ],
         "overview": _overview(trade_attribution, attributions, post_exit),
         "industry_attribution": _industry_attribution_chapter(matrix_by_id, top_n=top_n),
+        "environment_factor_chapters": _environment_factor_chapters(matrix_by_id, top_n=top_n),
         "matrix_focus": [
             _matrix_focus(matrix_by_id[matrix_id], top_n=top_n)
             for matrix_id in _FOCUS_MATRIX_IDS
@@ -151,6 +152,26 @@ def render_attribution_summary_markdown_zh(report: Mapping[str, Any]) -> str:
             lines.append("")
             lines.append("负向线索：")
             _append_rows_table(lines, _as_sequence(section_map.get("negative_rows")))
+            lines.append("")
+
+    environment_chapters = _as_sequence(report.get("environment_factor_chapters"))
+    if environment_chapters:
+        lines.extend(["", "## 周期因子专章", ""])
+        for chapter in environment_chapters:
+            chapter_map = _as_mapping(chapter)
+            lines.extend(
+                [
+                    f"### {chapter_map.get('title')}",
+                    "",
+                    str(chapter_map.get("description") or ""),
+                    "",
+                    "正向线索：",
+                ]
+            )
+            _append_rows_table(lines, _as_sequence(chapter_map.get("positive_rows")))
+            lines.append("")
+            lines.append("负向线索：")
+            _append_rows_table(lines, _as_sequence(chapter_map.get("negative_rows")))
             lines.append("")
 
     lines.extend(["", "## 重点结论卡片"])
@@ -310,6 +331,44 @@ def _industry_attribution_chapter(
         "section_count": len(sections),
         "sections": tuple(sections),
     }
+
+
+def _environment_factor_chapters(
+    matrix_by_id: Mapping[str, Mapping[str, Any]],
+    *,
+    top_n: int,
+) -> tuple[dict[str, Any], ...]:
+    chapters: list[dict[str, Any]] = []
+    chapter_specs = (
+        (
+            "weekly_kdj",
+            "周线 KDJ 联动",
+            "观察入场时个股/行业日线 KDJ 与已完成周线 KDJ 是否一致，重点看胜率、平均收益和止损率。",
+            ("entry_symbol_daily_weekly_kdj", "entry_industry_daily_weekly_kdj"),
+        ),
+        (
+            "macd_energy_zone",
+            "MACD 日周能量区间",
+            "观察入场时个股/行业 MACD 日线区间与已完成周线区间的组合，MACD 柱使用 2*(DIF-DEA)。",
+            ("entry_symbol_daily_weekly_macd_zone", "entry_industry_daily_weekly_macd_zone"),
+        ),
+    )
+    for chapter_id, title, description, matrix_ids in chapter_specs:
+        positive_rows = _top_rows_from_matrices(matrix_by_id, matrix_ids, top_n=top_n, positive=True)
+        negative_rows = _top_rows_from_matrices(matrix_by_id, matrix_ids, top_n=top_n, positive=False)
+        if not positive_rows and not negative_rows:
+            continue
+        chapters.append(
+            {
+                "chapter_id": chapter_id,
+                "title": title,
+                "description": description,
+                "matrix_ids": tuple(matrix_ids),
+                "positive_rows": positive_rows,
+                "negative_rows": negative_rows,
+            }
+        )
+    return tuple(chapters)
 
 
 def _summary_cards(
