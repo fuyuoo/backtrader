@@ -1,7 +1,7 @@
 """External data provider implementations."""
 
 from .base import DailyBarProvider, IndexBarProvider, IndustryProvider, RunDataProvider
-from .tushare import TushareProvider, read_tushare_token
+from .tushare import TushareProvider, TushareRateLimitConfig, read_tushare_token
 
 __all__ = [
     "DailyBarProvider",
@@ -9,5 +9,6 @@ __all__ = [
     "IndustryProvider",
     "RunDataProvider",
     "TushareProvider",
+    "TushareRateLimitConfig",
     "read_tushare_token",
 ]

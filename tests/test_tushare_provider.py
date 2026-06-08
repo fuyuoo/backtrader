@@ -8,9 +8,14 @@ import pytest
 
 from attbacktrader.data.providers.tushare import (
     TushareProvider,
+    TushareRateLimitConfig,
+    _date_windows,
     _daily_bars_from_frame,
+    _index_constituents_from_frame,
     _index_bars_from_frame,
+    _month_windows,
     _shenwan_classifications_from_frame,
+    _stock_names_from_frame,
     _stock_industry_memberships_from_frame,
     _tradability_statuses_from_frames,
     read_tushare_token,
@@ -59,6 +64,130 @@ def test_tushare_provider_fetches_qfq_daily_bars_by_default(monkeypatch: pytest.
     assert bars[0].close == 8.88
 
 
+def test_tushare_provider_retries_transient_rate_limit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"index_daily": 0}
+    sleeps = []
+    now = [0.0]
+    frame = pd.DataFrame(
+        [
+            {
+                "ts_code": "000001.SH",
+                "trade_date": "20240102",
+                "open": 2950.0,
+                "high": 2960.0,
+                "low": 2940.0,
+                "close": 2955.0,
+                "vol": 1000,
+                "amount": 2000,
+            }
+        ]
+    )
+
+    class FakeApi:
+        def index_daily(self, **kwargs):
+            calls["index_daily"] += 1
+            if calls["index_daily"] == 1:
+                raise Exception("每分钟最多访问该接口200次")
+            return frame
+
+    def sleeper(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: FakeApi()))
+
+    provider = TushareProvider(
+        "test-token",
+        rate_limit=TushareRateLimitConfig(
+            requests_per_minute=60,
+            retry_attempts=1,
+            retry_base_seconds=0.5,
+            retry_max_seconds=0.5,
+        ),
+        sleeper=sleeper,
+        clock=lambda: now[0],
+    )
+
+    bars = provider.fetch_index_daily_bars(
+        symbol="000001.SH",
+        start_date=date(2024, 1, 2),
+        end_date=date(2024, 1, 2),
+    )
+
+    assert calls["index_daily"] == 2
+    assert sleeps == [0.5, 0.5]
+    assert bars[0].close == 2955.0
+
+
+def test_tushare_provider_does_not_retry_permission_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"index_daily": 0}
+
+    class FakeApi:
+        def index_daily(self, **kwargs):
+            calls["index_daily"] += 1
+            raise Exception("抱歉，您没有权限访问该接口")
+
+    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: FakeApi()))
+
+    provider = TushareProvider(
+        "test-token",
+        rate_limit=TushareRateLimitConfig(requests_per_minute=600, retry_attempts=3),
+        sleeper=lambda seconds: None,
+    )
+
+    with pytest.raises(RuntimeError, match="index_daily failed"):
+        provider.fetch_index_daily_bars(
+            symbol="000001.SH",
+            start_date=date(2024, 1, 2),
+            end_date=date(2024, 1, 2),
+        )
+
+    assert calls["index_daily"] == 1
+
+
+def test_tushare_provider_splits_index_daily_by_configured_date_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    class FakeApi:
+        def index_daily(self, **kwargs):
+            calls.append(kwargs)
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SH",
+                        "trade_date": kwargs["start_date"],
+                        "open": 2950.0,
+                        "high": 2960.0,
+                        "low": 2940.0,
+                        "close": 2955.0,
+                        "vol": 1000,
+                        "amount": 2000,
+                    }
+                ]
+            )
+
+    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: FakeApi()))
+
+    provider = TushareProvider(
+        "test-token",
+        rate_limit=TushareRateLimitConfig(requests_per_minute=600, date_window_days=2),
+        sleeper=lambda seconds: None,
+    )
+
+    bars = provider.fetch_index_daily_bars(
+        symbol="000001.SH",
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 1, 5),
+    )
+
+    assert [(call["start_date"], call["end_date"]) for call in calls] == [
+        ("20240101", "20240102"),
+        ("20240103", "20240104"),
+        ("20240105", "20240105"),
+    ]
+    assert len(bars) == 3
+
+
 def test_tushare_provider_fetches_industry_index_bars_from_sw_daily(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {}
     frame = pd.DataFrame(
@@ -95,6 +224,108 @@ def test_tushare_provider_fetches_industry_index_bars_from_sw_daily(monkeypatch:
     assert calls["sw_daily"]["start_date"] == "20240102"
     assert bars[0].symbol == "801780.SI"
     assert bars[0].close == 3205.0
+
+
+def test_tushare_provider_fetches_index_constituents_from_index_weight(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {}
+    frame = pd.DataFrame(
+        [
+            {
+                "index_code": "000300.SH",
+                "con_code": "000001.SZ",
+                "trade_date": "20240601",
+                "weight": 0.5,
+            }
+        ]
+    )
+
+    class FakeApi:
+        def index_weight(self, **kwargs):
+            calls["index_weight"] = kwargs
+            return frame
+
+    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: FakeApi()))
+
+    provider = TushareProvider(
+        "test-token",
+        rate_limit=TushareRateLimitConfig(requests_per_minute=600),
+        sleeper=lambda seconds: None,
+    )
+    constituents = provider.fetch_index_constituents(
+        index_symbol="000300.SH",
+        start_date=date(2024, 6, 1),
+        end_date=date(2024, 6, 7),
+    )
+
+    assert calls["index_weight"]["index_code"] == "000300.SH"
+    assert calls["index_weight"]["start_date"] == "20240601"
+    assert calls["index_weight"]["end_date"] == "20240607"
+    assert constituents[0].symbol == "000001.SZ"
+    assert constituents[0].source_index == "000300.SH"
+    assert constituents[0].trade_date == date(2024, 6, 1)
+    assert constituents[0].weight == 0.5
+
+
+def test_tushare_provider_fetches_index_constituents_by_month(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    class FakeApi:
+        def index_weight(self, **kwargs):
+            calls.append(kwargs)
+            return pd.DataFrame(
+                [
+                    {
+                        "index_code": kwargs["index_code"],
+                        "con_code": "000001.SZ",
+                        "trade_date": kwargs["end_date"],
+                        "weight": 0.5,
+                    }
+                ]
+            )
+
+    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: FakeApi()))
+
+    provider = TushareProvider(
+        "test-token",
+        rate_limit=TushareRateLimitConfig(requests_per_minute=600),
+        sleeper=lambda seconds: None,
+    )
+
+    constituents = provider.fetch_index_constituents(
+        index_symbol="000300.SH",
+        start_date=date(2024, 1, 15),
+        end_date=date(2024, 3, 5),
+    )
+
+    assert [(call["start_date"], call["end_date"]) for call in calls] == [
+        ("20240115", "20240131"),
+        ("20240201", "20240229"),
+        ("20240301", "20240305"),
+    ]
+    assert len(constituents) == 3
+
+
+def test_tushare_provider_fetches_stock_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {}
+    frame = pd.DataFrame(
+        [
+            {"ts_code": "000001.SZ", "name": "平安银行"},
+            {"ts_code": "600519.SH", "name": "贵州茅台"},
+        ]
+    )
+
+    class FakeApi:
+        def stock_basic(self, **kwargs):
+            calls["stock_basic"] = kwargs
+            return frame
+
+    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: FakeApi()))
+
+    provider = TushareProvider("test-token")
+    names = provider.fetch_stock_names()
+
+    assert calls["stock_basic"]["fields"] == "ts_code,name"
+    assert names == {"000001.SZ": "平安银行", "600519.SH": "贵州茅台"}
 
 
 def test_tushare_provider_fetches_tradability_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -252,6 +483,33 @@ def test_tushare_index_daily_frame_expands_high_low_to_cover_open_close() -> Non
     assert bars[1].open == 3335.00
 
 
+def test_tushare_index_weight_frame_maps_to_sorted_constituents() -> None:
+    frame = pd.DataFrame(
+        [
+            {"index_code": "000905.SH", "con_code": "000002.SZ", "trade_date": "20240601", "weight": 0.2},
+            {"index_code": "000300.SH", "con_code": "000001.SZ", "trade_date": "20240501", "weight": None},
+        ]
+    )
+
+    constituents = _index_constituents_from_frame(frame, source_index="fallback")
+
+    assert [item.symbol for item in constituents] == ["000001.SZ", "000002.SZ"]
+    assert constituents[0].source_index == "000300.SH"
+    assert constituents[0].weight is None
+    assert constituents[1].trade_date == date(2024, 6, 1)
+
+
+def test_tushare_stock_basic_frame_maps_stock_names() -> None:
+    frame = pd.DataFrame(
+        [
+            {"ts_code": "000001.SZ", "name": "平安银行"},
+            {"ts_code": "600519.SH", "name": "贵州茅台"},
+        ]
+    )
+
+    assert _stock_names_from_frame(frame) == {"000001.SZ": "平安银行", "600519.SH": "贵州茅台"}
+
+
 def test_tushare_shenwan_classification_frame_maps_levels() -> None:
     frame = pd.DataFrame(
         [
@@ -346,6 +604,31 @@ def test_tushare_tradability_frames_map_limit_and_suspend_state() -> None:
     assert statuses[0].is_limit_up is True
     assert statuses[1].is_limit_down is True
     assert statuses[2].is_suspended is True
+
+
+def test_tushare_rate_limit_config_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ATT_TUSHARE_REQUESTS_PER_MINUTE", "45")
+    monkeypatch.setenv("ATT_TUSHARE_RETRY_ATTEMPTS", "7")
+    monkeypatch.setenv("ATT_TUSHARE_DATE_WINDOW_DAYS", "31")
+
+    config = TushareRateLimitConfig.from_env()
+
+    assert config.requests_per_minute == 45
+    assert config.retry_attempts == 7
+    assert config.date_window_days == 31
+
+
+def test_tushare_date_window_helpers_cover_full_range() -> None:
+    assert list(_date_windows(date(2024, 1, 1), date(2024, 1, 5), window_days=2)) == [
+        (date(2024, 1, 1), date(2024, 1, 2)),
+        (date(2024, 1, 3), date(2024, 1, 4)),
+        (date(2024, 1, 5), date(2024, 1, 5)),
+    ]
+    assert list(_month_windows(date(2024, 1, 15), date(2024, 3, 5))) == [
+        (date(2024, 1, 15), date(2024, 1, 31)),
+        (date(2024, 2, 1), date(2024, 2, 29)),
+        (date(2024, 3, 1), date(2024, 3, 5)),
+    ]
 
 
 def test_read_tushare_token_rejects_placeholder(tmp_path: Path) -> None:

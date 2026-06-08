@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+import os
+import time
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +14,7 @@ from attbacktrader.data.adjustments import DEFAULT_PRICE_ADJUSTMENT
 from attbacktrader.data import (
     DailyBar,
     IndexBar,
+    IndexConstituent,
     ShenwanIndustryClassification,
     StockIndustryMembership,
     TradabilityStatus,
@@ -22,6 +27,16 @@ INDEX_FIELDS = "ts_code,trade_date,open,high,low,close,vol,amount"
 LIMIT_FIELDS = "ts_code,trade_date,up_limit,down_limit"
 RAW_CLOSE_FIELDS = "ts_code,trade_date,close"
 SUSPEND_FIELDS = "ts_code,trade_date,suspend_timing,suspend_type"
+INDEX_WEIGHT_FIELDS = "index_code,con_code,trade_date,weight"
+STOCK_BASIC_FIELDS = "ts_code,name"
+DEFAULT_TUSHARE_REQUESTS_PER_MINUTE = 180.0
+DEFAULT_TUSHARE_RETRY_ATTEMPTS = 5
+DEFAULT_TUSHARE_RETRY_BASE_SECONDS = 2.0
+DEFAULT_TUSHARE_RETRY_MAX_SECONDS = 60.0
+DEFAULT_TUSHARE_DATE_WINDOW_DAYS = 366
+TUSHARE_REQUESTS_PER_MINUTE_ENV = "ATT_TUSHARE_REQUESTS_PER_MINUTE"
+TUSHARE_RETRY_ATTEMPTS_ENV = "ATT_TUSHARE_RETRY_ATTEMPTS"
+TUSHARE_DATE_WINDOW_DAYS_ENV = "ATT_TUSHARE_DATE_WINDOW_DAYS"
 
 
 def read_tushare_token(path: str | Path = DEFAULT_TUSHARE_TOKEN_FILE) -> str:
@@ -32,10 +47,76 @@ def read_tushare_token(path: str | Path = DEFAULT_TUSHARE_TOKEN_FILE) -> str:
     return token
 
 
+@dataclass(frozen=True)
+class TushareRateLimitConfig:
+    """Rate limit and retry settings for Tushare Pro calls."""
+
+    requests_per_minute: float = DEFAULT_TUSHARE_REQUESTS_PER_MINUTE
+    retry_attempts: int = DEFAULT_TUSHARE_RETRY_ATTEMPTS
+    retry_base_seconds: float = DEFAULT_TUSHARE_RETRY_BASE_SECONDS
+    retry_max_seconds: float = DEFAULT_TUSHARE_RETRY_MAX_SECONDS
+    date_window_days: int = DEFAULT_TUSHARE_DATE_WINDOW_DAYS
+
+    def __post_init__(self) -> None:
+        if self.requests_per_minute <= 0:
+            raise ValueError("requests_per_minute must be positive")
+        if self.retry_attempts < 0:
+            raise ValueError("retry_attempts must be non-negative")
+        if self.retry_base_seconds < 0:
+            raise ValueError("retry_base_seconds must be non-negative")
+        if self.retry_max_seconds < self.retry_base_seconds:
+            raise ValueError("retry_max_seconds must be greater than or equal to retry_base_seconds")
+        if self.date_window_days <= 0:
+            raise ValueError("date_window_days must be positive")
+
+    @classmethod
+    def from_env(cls) -> "TushareRateLimitConfig":
+        return cls(
+            requests_per_minute=_env_float(
+                TUSHARE_REQUESTS_PER_MINUTE_ENV,
+                DEFAULT_TUSHARE_REQUESTS_PER_MINUTE,
+            ),
+            retry_attempts=_env_int(
+                TUSHARE_RETRY_ATTEMPTS_ENV,
+                DEFAULT_TUSHARE_RETRY_ATTEMPTS,
+            ),
+            date_window_days=_env_int(
+                TUSHARE_DATE_WINDOW_DAYS_ENV,
+                DEFAULT_TUSHARE_DATE_WINDOW_DAYS,
+            ),
+        )
+
+    @classmethod
+    def from_overrides(
+        cls,
+        *,
+        requests_per_minute: float | None = None,
+        retry_attempts: int | None = None,
+        date_window_days: int | None = None,
+    ) -> "TushareRateLimitConfig":
+        base = cls.from_env()
+        return cls(
+            requests_per_minute=base.requests_per_minute
+            if requests_per_minute is None
+            else requests_per_minute,
+            retry_attempts=base.retry_attempts if retry_attempts is None else retry_attempts,
+            retry_base_seconds=base.retry_base_seconds,
+            retry_max_seconds=base.retry_max_seconds,
+            date_window_days=base.date_window_days if date_window_days is None else date_window_days,
+        )
+
+
 class TushareProvider:
     """Fetch market data from the current Tushare provider."""
 
-    def __init__(self, token: str) -> None:
+    def __init__(
+        self,
+        token: str,
+        *,
+        rate_limit: TushareRateLimitConfig | None = None,
+        sleeper: Callable[[float], None] | None = None,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
         if not token:
             raise ValueError("token cannot be empty")
 
@@ -46,6 +127,10 @@ class TushareProvider:
 
         self._ts: Any = ts
         self._pro: Any = ts.pro_api(token)
+        self._rate_limit = rate_limit or TushareRateLimitConfig.from_env()
+        self._sleeper = sleeper or time.sleep
+        self._clock = clock or time.monotonic
+        self._next_request_at: float | None = None
 
     def fetch_daily_bars(
         self,
@@ -62,7 +147,9 @@ class TushareProvider:
         if end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
 
-        frame = self._ts.pro_bar(
+        frame = self._call_tushare(
+            self._ts.pro_bar,
+            api_name="pro_bar",
             ts_code=symbol,
             api=self._pro,
             start_date=_format_tushare_date(start_date),
@@ -82,10 +169,12 @@ class TushareProvider:
         if end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
 
-        frame = self._pro.index_daily(
+        frame = self._fetch_date_windowed(
+            self._pro.index_daily,
+            api_name="index_daily",
+            start_date=start_date,
+            end_date=end_date,
             ts_code=symbol,
-            start_date=_format_tushare_date(start_date),
-            end_date=_format_tushare_date(end_date),
             fields=INDEX_FIELDS,
         )
 
@@ -105,10 +194,12 @@ class TushareProvider:
         if end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
 
-        frame = self._pro.sw_daily(
+        frame = self._fetch_date_windowed(
+            self._pro.sw_daily,
+            api_name="sw_daily",
+            start_date=start_date,
+            end_date=end_date,
             ts_code=symbol,
-            start_date=_format_tushare_date(start_date),
-            end_date=_format_tushare_date(end_date),
             fields=INDEX_FIELDS,
         )
 
@@ -117,12 +208,40 @@ class TushareProvider:
 
         return _index_bars_from_frame(frame)
 
+    def fetch_index_constituents(
+        self,
+        *,
+        index_symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[IndexConstituent, ...]:
+        if end_date < start_date:
+            raise ValueError("end_date must be on or after start_date")
+
+        frame = self._fetch_month_windowed(
+            self._pro.index_weight,
+            api_name="index_weight",
+            start_date=start_date,
+            end_date=end_date,
+            index_code=index_symbol,
+            fields=INDEX_WEIGHT_FIELDS,
+        )
+        if frame is None or frame.empty:
+            return ()
+        return _index_constituents_from_frame(frame, source_index=index_symbol)
+
+    def fetch_stock_names(self) -> dict[str, str]:
+        frame = self._call_tushare(self._pro.stock_basic, api_name="stock_basic", fields=STOCK_BASIC_FIELDS)
+        if frame is None or frame.empty:
+            return {}
+        return _stock_names_from_frame(frame)
+
     def fetch_shenwan_industry_classifications(
         self,
         *,
         source: str = "SW2021",
     ) -> tuple[ShenwanIndustryClassification, ...]:
-        frame = self._pro.index_classify(src=source)
+        frame = self._call_tushare(self._pro.index_classify, api_name="index_classify", src=source)
         if frame is None or frame.empty:
             return ()
 
@@ -134,7 +253,7 @@ class TushareProvider:
         symbol: str,
         source: str = "SW2021",
     ) -> tuple[StockIndustryMembership, ...]:
-        frame = self._pro.index_member_all(ts_code=symbol)
+        frame = self._call_tushare(self._pro.index_member_all, api_name="index_member_all", ts_code=symbol)
         if frame is None or frame.empty:
             return ()
 
@@ -150,24 +269,28 @@ class TushareProvider:
         if end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
 
-        start = _format_tushare_date(start_date)
-        end = _format_tushare_date(end_date)
-        limit_frame = self._pro.stk_limit(
+        limit_frame = self._fetch_date_windowed(
+            self._pro.stk_limit,
+            api_name="stk_limit",
+            start_date=start_date,
+            end_date=end_date,
             ts_code=symbol,
-            start_date=start,
-            end_date=end,
             fields=LIMIT_FIELDS,
         )
-        close_frame = self._pro.daily(
+        close_frame = self._fetch_date_windowed(
+            self._pro.daily,
+            api_name="daily",
+            start_date=start_date,
+            end_date=end_date,
             ts_code=symbol,
-            start_date=start,
-            end_date=end,
             fields=RAW_CLOSE_FIELDS,
         )
-        suspend_frame = self._pro.suspend_d(
+        suspend_frame = self._fetch_date_windowed(
+            self._pro.suspend_d,
+            api_name="suspend_d",
+            start_date=start_date,
+            end_date=end_date,
             ts_code=symbol,
-            start_date=start,
-            end_date=end,
             fields=SUSPEND_FIELDS,
         )
 
@@ -177,6 +300,72 @@ class TushareProvider:
             close_frame=close_frame,
             suspend_frame=suspend_frame,
         )
+
+    def _fetch_date_windowed(
+        self,
+        call: Callable[..., Any],
+        *,
+        api_name: str,
+        start_date: date,
+        end_date: date,
+        **kwargs: Any,
+    ) -> Any:
+        frames = [
+            self._call_tushare(
+                call,
+                api_name=api_name,
+                start_date=_format_tushare_date(window_start),
+                end_date=_format_tushare_date(window_end),
+                **kwargs,
+            )
+            for window_start, window_end in _date_windows(
+                start_date,
+                end_date,
+                window_days=self._rate_limit.date_window_days,
+            )
+        ]
+        return _concat_frames(frames)
+
+    def _fetch_month_windowed(
+        self,
+        call: Callable[..., Any],
+        *,
+        api_name: str,
+        start_date: date,
+        end_date: date,
+        **kwargs: Any,
+    ) -> Any:
+        frames = [
+            self._call_tushare(
+                call,
+                api_name=api_name,
+                start_date=_format_tushare_date(window_start),
+                end_date=_format_tushare_date(window_end),
+                **kwargs,
+            )
+            for window_start, window_end in _month_windows(start_date, end_date)
+        ]
+        return _concat_frames(frames)
+
+    def _call_tushare(self, call: Callable[..., Any], *, api_name: str, **kwargs: Any) -> Any:
+        attempt = 0
+        while True:
+            self._wait_for_request_slot()
+            try:
+                return call(**kwargs)
+            except Exception as exc:
+                if attempt >= self._rate_limit.retry_attempts or not _is_retryable_tushare_error(exc):
+                    raise RuntimeError(f"Tushare API {api_name} failed") from exc
+                self._sleeper(_retry_delay_seconds(attempt, self._rate_limit))
+                attempt += 1
+
+    def _wait_for_request_slot(self) -> None:
+        interval_seconds = 60.0 / self._rate_limit.requests_per_minute
+        now = self._clock()
+        if self._next_request_at is not None and now < self._next_request_at:
+            self._sleeper(self._next_request_at - now)
+            now = self._clock()
+        self._next_request_at = now + interval_seconds
 
 
 def _daily_bars_from_frame(frame: Any) -> tuple[DailyBar, ...]:
@@ -221,6 +410,26 @@ def _index_bars_from_frame(frame: Any) -> tuple[IndexBar, ...]:
         )
 
     return tuple(sorted(bars, key=lambda bar: bar.trade_date))
+
+
+def _index_constituents_from_frame(frame: Any, *, source_index: str) -> tuple[IndexConstituent, ...]:
+    constituents = [
+        IndexConstituent(
+            symbol=str(row.con_code),
+            source_index=str(getattr(row, "index_code", source_index)),
+            trade_date=_parse_tushare_date(str(row.trade_date)),
+            weight=_optional_float(row.weight),
+        )
+        for row in frame.itertuples(index=False)
+    ]
+    return tuple(sorted(constituents, key=lambda item: (item.source_index, item.trade_date, item.symbol)))
+
+
+def _stock_names_from_frame(frame: Any) -> dict[str, str]:
+    return {
+        str(row.ts_code): str(row.name)
+        for row in frame.itertuples(index=False)
+    }
 
 
 def _shenwan_classifications_from_frame(frame: Any) -> tuple[ShenwanIndustryClassification, ...]:
@@ -291,6 +500,91 @@ def _tradability_statuses_from_frames(
         )
 
     return tuple(statuses)
+
+
+def _date_windows(start_date: date, end_date: date, *, window_days: int) -> Iterable[tuple[date, date]]:
+    current = start_date
+    while current <= end_date:
+        window_end = min(end_date, current + timedelta(days=window_days - 1))
+        yield current, window_end
+        current = window_end + timedelta(days=1)
+
+
+def _month_windows(start_date: date, end_date: date) -> Iterable[tuple[date, date]]:
+    current = start_date
+    while current <= end_date:
+        if current.month == 12:
+            next_month = date(current.year + 1, 1, 1)
+        else:
+            next_month = date(current.year, current.month + 1, 1)
+        window_end = min(end_date, next_month - timedelta(days=1))
+        yield current, window_end
+        current = window_end + timedelta(days=1)
+
+
+def _concat_frames(frames: Iterable[Any]) -> Any:
+    non_empty_frames = [frame for frame in frames if frame is not None and not frame.empty]
+    if not non_empty_frames:
+        return None
+    if len(non_empty_frames) == 1:
+        return non_empty_frames[0]
+
+    import pandas as pd
+
+    return pd.concat(non_empty_frames, ignore_index=True)
+
+
+def _retry_delay_seconds(attempt: int, config: TushareRateLimitConfig) -> float:
+    if config.retry_base_seconds == 0:
+        return 0.0
+    return min(config.retry_max_seconds, config.retry_base_seconds * (2 ** attempt))
+
+
+def _is_retryable_tushare_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    non_retryable_markers = (
+        "积分不足",
+        "没有权限",
+        "无权限",
+        "权限不足",
+        "not permitted",
+        "permission",
+        "daily limit",
+        "每天总量",
+        "总量上限",
+    )
+    if any(marker in message for marker in non_retryable_markers):
+        return False
+
+    retryable_markers = (
+        "每分钟",
+        "频次",
+        "太频繁",
+        "rate limit",
+        "too many",
+        "timeout",
+        "timed out",
+        "connection",
+        "temporarily",
+        "502",
+        "503",
+        "504",
+    )
+    return any(marker in message for marker in retryable_markers)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+    return float(raw_value)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+    return int(raw_value)
 
 
 def _limit_by_date(frame: Any) -> dict[date, tuple[float | None, float | None]]:

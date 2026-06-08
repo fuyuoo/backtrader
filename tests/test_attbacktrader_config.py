@@ -56,6 +56,8 @@ def test_example_run_yaml_loads_to_immutable_run_plan() -> None:
     assert run_plan.execution.stake == 100
     assert run_plan.output.persist is True
     assert run_plan.output.report_root == Path("reports")
+    assert run_plan.output.artifact_detail == "compact"
+    assert run_plan.output.signal_audit_sample_limit == 200
     assert run_plan.analysis.industry_attribution.source == "SW2021"
     assert run_plan.analysis.market_regime.timeframes == ("D", "W", "M")
     assert run_plan.analysis.scenario_fit.min_trades == 3
@@ -126,6 +128,26 @@ def test_expanded_add_on_example_enforces_minimum_board_lot_sizing() -> None:
     assert methods.sizing_method.min_order_quantity == 100
 
 
+def test_baoma_example_loads_dedicated_business_runner_config() -> None:
+    run_plan = load_run_plan(Path("examples/run-baoma-v1-fixed-sample.yaml"))
+
+    assert run_plan.data.stock_pool_file == Path("examples/stock-pools/baoma-hs300-csi500-20260607.csv")
+    assert len(run_plan.data.resolved_tradable_series) == 800
+    assert run_plan.data.resolved_tradable_series[0].symbol == "000001.SZ"
+    assert run_plan.data.resolved_tradable_series[-1].symbol == "689009.SH"
+    assert {series.asset_type for series in run_plan.data.resolved_tradable_series} == {"stock"}
+    assert {series.price_adjustment for series in run_plan.data.resolved_tradable_series} == {"qfq"}
+    assert run_plan.execution.engine == "baoma_v1_business"
+    assert run_plan.execution.baoma.buy_slice_fraction == pytest.approx(0.33)
+    assert run_plan.execution.baoma.first_scale_out_return == pytest.approx(0.05)
+    assert run_plan.execution.baoma.second_scale_out_return == pytest.approx(0.15)
+    assert run_plan.execution.baoma.force_exit_at_end is False
+    assert run_plan.analysis.industry_attribution.enabled is True
+    assert run_plan.analysis.industry_attribution.source == "SW2021"
+    assert len(run_plan.data.industry_series.indexes) == 31
+    assert "801780.SI" in run_plan.data.industry_series.indexes
+
+
 def test_attribution_filter_example_loads_configured_entry_filter() -> None:
     run_plan = load_run_plan(Path("examples/run-tushare-attribution-filter.yaml"))
 
@@ -161,9 +183,46 @@ def test_minimal_valid_config_uses_default_analysis_and_constraints() -> None:
     assert run_plan.analysis.scenario_fit.enabled is True
     assert run_plan.analysis.scenario_fit.min_trades == 3
     assert "symbol.ma.price_above_ma25" in run_plan.analysis.entry_attribution.resolved_factors
+    assert run_plan.analysis.attribution.enabled is True
+    assert "symbol.ma.price_above_ma25" in run_plan.analysis.resolved_attribution_factor_selection["include"]
+    assert run_plan.analysis.resolved_attribution_factor_selection["not_include"] == ()
     assert run_plan.analysis.post_exit.window_days == (5,)
     assert run_plan.analysis.post_exit.primary_window_days == 5
     assert run_plan.analysis.post_exit.rebound_thresholds == (0.0, 0.02, 0.05, 0.10)
+
+
+def test_stock_pool_file_resolves_to_stock_tradable_series(tmp_path: Path) -> None:
+    pool_path = tmp_path / "pool.csv"
+    pool_path.write_text(
+        "\n".join(
+            [
+                "ts_code,name,source_index,freeze_date",
+                "000001.SZ,Ping An Bank,HS300,2026-06-07",
+                "600036.SH,China Merchants Bank,HS300,2026-06-07",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    raw_config = minimal_config()
+    raw_config["data"].pop("symbols")
+    raw_config["data"]["stock_pool_file"] = str(pool_path)
+
+    run_plan = RunPlan.from_mapping(raw_config)
+
+    assert [series.symbol for series in run_plan.data.resolved_tradable_series] == [
+        "000001.SZ",
+        "600036.SH",
+    ]
+    assert [series.asset_type for series in run_plan.data.resolved_tradable_series] == ["stock", "stock"]
+    assert [series.price_adjustment for series in run_plan.data.resolved_tradable_series] == ["qfq", "qfq"]
+
+
+def test_tradable_scope_sources_are_mutually_exclusive() -> None:
+    raw_config = minimal_config()
+    raw_config["data"]["stock_pool_file"] = "examples/stock-pools/baoma-fixed-sample.csv"
+
+    with pytest.raises(ValidationError, match="tradable scope must use exactly one source"):
+        RunPlan.from_mapping(raw_config)
 
 
 def test_invalid_date_range_fails_before_execution() -> None:
@@ -239,6 +298,69 @@ def test_entry_attribution_config_validates_factors_and_filter_checks() -> None:
         "symbol.ma.price_above_ma25",
         "market.hs300.bullish_trend",
     )
+
+
+def test_attribution_config_resolves_include_and_not_include() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "attribution": {
+            "include": [
+                "symbol.ma.price_above_ma25",
+                "market.hs300.bullish_trend",
+            ],
+        }
+    }
+
+    run_plan = RunPlan.from_mapping(raw_config)
+    selection = run_plan.analysis.resolved_attribution_factor_selection
+
+    assert selection["configured_source"] == "analysis.attribution.include"
+    assert selection["include"] == (
+        "symbol.ma.price_above_ma25",
+        "market.hs300.bullish_trend",
+    )
+    assert "symbol.ma.ma60" in selection["not_include"]
+    assert selection["include_count"] == 2
+    assert selection["not_include_count"] == len(selection["applicable"]) - 2
+    assert run_plan.analysis.resolved_entry_attribution_factors == selection["include"]
+    selected_factors = [factor for factor in selection["factors"] if factor["selected"]]
+    assert [factor["key"] for factor in selected_factors] == list(selection["include"])
+
+
+def test_attribution_config_can_disable_all_factor_selection() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "attribution": {"enabled": False},
+    }
+
+    run_plan = RunPlan.from_mapping(raw_config)
+    selection = run_plan.analysis.resolved_attribution_factor_selection
+
+    assert selection["include"] == ()
+    assert "symbol.ma.price_above_ma25" in selection["not_include"]
+    assert run_plan.analysis.resolved_entry_attribution_factors == ()
+
+
+def test_attribution_include_validates_unknown_and_duplicate_factors() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "attribution": {
+            "include": ["symbol.ma.ma60", "symbol.ma.ma60"],
+        }
+    }
+
+    with pytest.raises(ValidationError, match="cannot contain duplicates"):
+        RunPlan.from_mapping(raw_config)
+
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "attribution": {
+            "include": ["missing.factor"],
+        }
+    }
+
+    with pytest.raises(ValidationError, match="unknown attribution include factors"):
+        RunPlan.from_mapping(raw_config)
 
 
 def test_entry_attribution_filter_checks_must_be_enabled_factors() -> None:

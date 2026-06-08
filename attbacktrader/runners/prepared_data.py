@@ -67,6 +67,7 @@ from attbacktrader.features import (
     write_indicator_snapshots_parquet,
     write_merged_indicator_snapshots_parquet,
 )
+from attbacktrader.strategies import attribution_declaration_by_key
 from attbacktrader.strategies.bindings import required_indicators_for_strategy_config
 
 
@@ -257,7 +258,7 @@ def prepare_run_data(
     provider: RunDataProvider | None = None,
 ) -> PreparedRunData:
     tradable_series = run_plan.data.resolved_tradable_series
-    indicator_requirements = tuple(sorted(required_indicators_for_strategy_config(run_plan.strategy)))
+    indicator_requirements = _indicator_requirements_for_run_plan(run_plan)
     prepared_indexes_by_symbol = _prepare_index_data_by_symbol(run_plan, provider=provider)
     trading_calendar = _trading_calendar_for_run(run_plan, prepared_indexes_by_symbol)
     prepared_symbols = tuple(
@@ -288,6 +289,39 @@ def prepare_run_data(
         memberships_by_symbol=memberships_by_symbol,
         trading_calendar=trading_calendar,
     )
+
+
+def _indicator_requirements_for_run_plan(run_plan: RunPlan) -> tuple[IndicatorRequirement, ...]:
+    requirements = set(required_indicators_for_strategy_config(run_plan.strategy))
+    declarations = attribution_declaration_by_key()
+    selection = run_plan.analysis.resolved_attribution_factor_selection
+
+    should_include_attribution_requirements = (
+        selection.get("configured_source") == "analysis.attribution.include"
+        or run_plan.execution.engine == "baoma_v1_business"
+    )
+    if selection.get("enabled", True) and should_include_attribution_requirements:
+        for key in selection.get("include", ()):
+            declaration = declarations.get(str(key))
+            if declaration is None or declaration.scope != "symbol":
+                continue
+            requirements.update(_indicator_requirements_from_dependencies(declaration.dependencies))
+
+    return tuple(sorted(requirements))
+
+
+def _indicator_requirements_from_dependencies(
+    dependencies: tuple[str, ...],
+) -> tuple[IndicatorRequirement, ...]:
+    requirements: list[IndicatorRequirement] = []
+    for dependency in dependencies:
+        if ":" not in dependency:
+            continue
+        name, timeframe = dependency.split(":", 1)
+        if not name or not timeframe:
+            continue
+        requirements.append(IndicatorRequirement(name, timeframe))
+    return tuple(requirements)
 
 
 def _trading_calendar_for_run(
@@ -336,6 +370,27 @@ def _indicator_calculation_start_date(
     return run_start_date - timedelta(days=lookback_days)
 
 
+def _symbol_calculation_start_date(
+    run_plan: RunPlan,
+    *,
+    indicator_requirements: tuple[IndicatorRequirement, ...],
+) -> date:
+    indicator_start_date = _indicator_calculation_start_date(
+        run_plan.run.from_date,
+        indicator_requirements=indicator_requirements,
+    )
+    if run_plan.execution.engine != "baoma_v1_business":
+        return indicator_start_date
+    return min(indicator_start_date, _one_year_before(run_plan.run.from_date))
+
+
+def _one_year_before(value: date) -> date:
+    try:
+        return value.replace(year=value.year - 1)
+    except ValueError:
+        return value.replace(year=value.year - 1, day=28)
+
+
 def _warmup_calendar_days(plan: IndicatorUpdatePlan) -> int:
     missing_bars = max(plan.warmup_bars - 1, 0)
     if missing_bars == 0:
@@ -355,16 +410,47 @@ def _calendar_days_for_trading_bars(bar_count: int) -> int:
 
 def _market_index_calculation_start_date(run_plan: RunPlan, *, symbol: str) -> date:
     config = run_plan.analysis.entry_attribution
+    start_date = run_plan.run.from_date
     if not config.enabled or symbol != config.market_symbol:
-        return run_plan.run.from_date
-    if not _entry_attribution_has_factor(run_plan, prefix="market."):
-        return run_plan.run.from_date
-    return run_plan.run.from_date - timedelta(
-        days=_calendar_days_for_trading_bars(max(config.market_slow_period - 1, 0))
-    )
+        if symbol == "000300.SH" and _selected_attribution_has_any_factor(
+            run_plan,
+            prefixes=("industry.relative.hs300.", "market.hs300.ma"),
+        ):
+            return _indicator_calculation_start_date(
+                start_date,
+                indicator_requirements=(IndicatorRequirement("ma60", "D"),),
+            )
+        return start_date
+    if _entry_attribution_has_factor(run_plan, prefix="market."):
+        start_date = min(
+            start_date,
+            run_plan.run.from_date - timedelta(
+                days=_calendar_days_for_trading_bars(max(config.market_slow_period - 1, 0))
+            ),
+        )
+    if _selected_attribution_has_any_factor(
+        run_plan,
+        prefixes=("industry.relative.hs300.", "market.hs300.ma"),
+    ):
+        start_date = min(
+            start_date,
+            _indicator_calculation_start_date(
+                run_plan.run.from_date,
+                indicator_requirements=(IndicatorRequirement("ma60", "D"),),
+            ),
+        )
+    return start_date
 
 
 def _industry_index_calculation_start_date(run_plan: RunPlan) -> date:
+    if _selected_attribution_has_any_factor(
+        run_plan,
+        prefixes=("industry.ma.", "industry.relative.hs300."),
+    ):
+        return _indicator_calculation_start_date(
+            run_plan.run.from_date,
+            indicator_requirements=(IndicatorRequirement("ma60", "D"),),
+        )
     if not _entry_attribution_has_factor(run_plan, prefix="industry."):
         return run_plan.run.from_date
     return _indicator_calculation_start_date(
@@ -378,6 +464,17 @@ def _entry_attribution_has_factor(run_plan: RunPlan, *, prefix: str) -> bool:
     return config.enabled and any(factor.startswith(prefix) for factor in config.resolved_factors)
 
 
+def _selected_attribution_has_any_factor(run_plan: RunPlan, *, prefixes: tuple[str, ...]) -> bool:
+    selection = run_plan.analysis.resolved_attribution_factor_selection
+    if selection.get("configured_source") != "analysis.attribution.include":
+        return False
+    return any(
+        str(factor).startswith(prefix)
+        for factor in selection.get("include", ())
+        for prefix in prefixes
+    )
+
+
 def _prepare_symbol_data(
     run_plan: RunPlan,
     *,
@@ -386,8 +483,8 @@ def _prepare_symbol_data(
     indicator_requirements: tuple[IndicatorRequirement, ...],
     trading_calendar: TradingCalendar | None,
 ) -> PreparedSymbolData:
-    calculation_start_date = _indicator_calculation_start_date(
-        run_plan.run.from_date,
+    calculation_start_date = _symbol_calculation_start_date(
+        run_plan,
         indicator_requirements=indicator_requirements,
     )
     snapshot_path = tradable_bars_snapshot_path(
@@ -833,7 +930,14 @@ def _index_bars_cover_date_range(
     if not bars:
         return False
     dates = [bar.trade_date for bar in bars]
-    return min(dates) <= start_date and max(dates) >= end_date
+    first_date = min(dates)
+    return _covers_start_with_calendar_gap(first_date, start_date=start_date) and max(dates) >= end_date
+
+
+def _covers_start_with_calendar_gap(first_date: date, *, start_date: date) -> bool:
+    if first_date <= start_date:
+        return True
+    return (first_date - start_date).days <= 7
 
 
 def _index_bars_for_date_range(

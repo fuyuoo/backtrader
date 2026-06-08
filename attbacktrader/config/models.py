@@ -9,12 +9,18 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, field_validator, model_validator
 
 from attbacktrader.data.adjustments import DEFAULT_PRICE_ADJUSTMENT
+from attbacktrader.data.stock_pool import read_fixed_stock_pool_csv
 from attbacktrader.strategies.bindings import (
     allowed_strategy_component_values,
     strategy_component_binding_fields,
     validate_strategy_component_params,
 )
-from attbacktrader.strategies.attribution import entry_attribution_declaration_by_key
+from attbacktrader.strategies.attribution import (
+    attribution_declaration_by_key,
+    entry_attribution_declaration_by_key,
+    entry_attribution_factor_keys,
+    resolve_attribution_factor_selection,
+)
 
 
 class FrozenModel(BaseModel):
@@ -65,14 +71,28 @@ class DataConfig(FrozenModel):
     refresh_snapshots: bool = True
     symbols: tuple[str, ...] = ()
     tradable_series: tuple[TradableSeriesConfig, ...] = ()
+    stock_pool_file: Path | None = None
     decision_series: SeriesSelection = Field(default_factory=SeriesSelection)
     benchmark_series: SeriesSelection = Field(default_factory=SeriesSelection)
     industry_series: IndustrySeriesConfig = Field(default_factory=IndustrySeriesConfig)
 
     @model_validator(mode="after")
     def validate_tradable_scope(self) -> "DataConfig":
-        if not self.symbols and not self.tradable_series:
-            raise ValueError("data.symbols or data.tradable_series must contain at least one tradable series")
+        sources = [
+            name
+            for name, has_value in (
+                ("data.symbols", bool(self.symbols)),
+                ("data.tradable_series", bool(self.tradable_series)),
+                ("data.stock_pool_file", self.stock_pool_file is not None),
+            )
+            if has_value
+        ]
+        if not sources:
+            raise ValueError(
+                "data.symbols, data.tradable_series, or data.stock_pool_file must contain at least one tradable series"
+            )
+        if len(sources) > 1:
+            raise ValueError(f"tradable scope must use exactly one source, got: {sources}")
 
         symbols = [series.symbol for series in self.tradable_series] if self.tradable_series else list(self.symbols)
         duplicates = sorted({symbol for symbol in symbols if symbols.count(symbol) > 1})
@@ -85,6 +105,17 @@ class DataConfig(FrozenModel):
     def resolved_tradable_series(self) -> tuple[TradableSeriesConfig, ...]:
         if self.tradable_series:
             return self.tradable_series
+
+        if self.stock_pool_file is not None:
+            return tuple(
+                TradableSeriesConfig(
+                    symbol=member.symbol,
+                    asset_type="stock",
+                    provider=self.provider,
+                    price_adjustment=self.price_adjustment,
+                )
+                for member in read_fixed_stock_pool_csv(self.stock_pool_file)
+            )
 
         return tuple(
             TradableSeriesConfig(
@@ -165,14 +196,30 @@ class BrokerConfig(FrozenModel):
     slippage: SlippageConfig
 
 
+class BaomaExecutionConfig(FrozenModel):
+    buy_slice_fraction: float = Field(default=0.33, gt=0, le=1)
+    first_scale_out_return: float = Field(default=0.05, gt=0)
+    second_scale_out_return: float = Field(default=0.15, gt=0)
+    force_exit_at_end: bool = False
+
+    @model_validator(mode="after")
+    def validate_scale_out_thresholds(self) -> "BaomaExecutionConfig":
+        if self.second_scale_out_return <= self.first_scale_out_return:
+            raise ValueError("execution.baoma.second_scale_out_return must be greater than first_scale_out_return")
+        return self
+
+
 class ExecutionConfig(FrozenModel):
-    engine: Literal["business", "backtrader"] = "business"
+    engine: Literal["business", "backtrader", "baoma_v1_business"] = "business"
     stake: PositiveInt = 100
+    baoma: BaomaExecutionConfig = Field(default_factory=BaomaExecutionConfig)
 
 
 class OutputConfig(FrozenModel):
     persist: bool = True
     report_root: Path = Path("reports")
+    artifact_detail: Literal["compact", "full"] = "compact"
+    signal_audit_sample_limit: int = Field(default=200, ge=0)
 
 
 class IndustryAttributionConfig(FrozenModel):
@@ -294,6 +341,24 @@ class EntryAttributionConfig(FrozenModel):
         return tuple(entry_attribution_declaration_by_key())
 
 
+class AttributionConfig(FrozenModel):
+    enabled: bool = True
+    include: tuple[str, ...] = ()
+
+    @field_validator("include")
+    @classmethod
+    def validate_include(cls, include: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(include)) != len(include):
+            raise ValueError("analysis.attribution.include cannot contain duplicates")
+
+        declarations = attribution_declaration_by_key()
+        invalid = sorted(key for key in include if key not in declarations)
+        if invalid:
+            raise ValueError(f"unknown attribution include factors: {invalid}")
+
+        return include
+
+
 class PostExitAnalysisConfig(FrozenModel):
     enabled: bool = True
     window_days: tuple[PositiveInt, ...] = (5,)
@@ -334,11 +399,66 @@ class PostExitAnalysisConfig(FrozenModel):
 
 
 class AnalysisConfig(FrozenModel):
+    attribution: AttributionConfig = Field(default_factory=AttributionConfig)
     industry_attribution: IndustryAttributionConfig = Field(default_factory=IndustryAttributionConfig)
     market_regime: MarketRegimeConfig = Field(default_factory=MarketRegimeConfig)
     scenario_fit: ScenarioFitConfig = Field(default_factory=ScenarioFitConfig)
     entry_attribution: EntryAttributionConfig = Field(default_factory=EntryAttributionConfig)
     post_exit: PostExitAnalysisConfig = Field(default_factory=PostExitAnalysisConfig)
+
+    @model_validator(mode="after")
+    def validate_attribution_selection(self) -> "AnalysisConfig":
+        if self.entry_attribution.entry_filter.enabled:
+            missing_filter_factors = sorted(
+                set(self.entry_attribution.entry_filter.require_checks) - set(self.resolved_entry_attribution_factors)
+            )
+            if missing_filter_factors:
+                raise ValueError(
+                    "analysis.entry_attribution.entry_filter.require_checks must be included in resolved "
+                    f"attribution factors: {missing_filter_factors}"
+                )
+        return self
+
+    @property
+    def resolved_attribution_factor_selection(self) -> dict[str, Any]:
+        applicable = tuple(attribution_declaration_by_key())
+        if not self.attribution.enabled:
+            include = ()
+            configured_source = "analysis.attribution.enabled=false"
+        elif self.attribution.include:
+            include = self.attribution.include
+            configured_source = "analysis.attribution.include"
+        elif self.entry_attribution.factors:
+            include = self.entry_attribution.factors
+            configured_source = "analysis.entry_attribution.factors"
+        else:
+            include = applicable
+            configured_source = "default:all_applicable"
+
+        selection = resolve_attribution_factor_selection(
+            include,
+            applicable_factor_keys=applicable,
+            configured_source=configured_source,
+        )
+        selection["enabled"] = self.attribution.enabled
+        entry_keys = set(entry_attribution_factor_keys())
+        selection["entry_attribution"] = {
+            "enabled": self.entry_attribution.enabled,
+            "runtime_include": (
+                tuple(key for key in include if key in entry_keys)
+                if self.entry_attribution.enabled
+                else ()
+            ),
+        }
+        return selection
+
+    @property
+    def resolved_entry_attribution_factors(self) -> tuple[str, ...]:
+        if not self.entry_attribution.enabled:
+            return ()
+        selection = self.resolved_attribution_factor_selection
+        entry_keys = set(entry_attribution_factor_keys())
+        return tuple(key for key in selection["include"] if key in entry_keys)
 
 
 class RunPlan(FrozenModel):

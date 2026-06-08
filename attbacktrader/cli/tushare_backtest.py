@@ -8,6 +8,7 @@ from dataclasses import asdict
 from datetime import date, datetime
 from pathlib import Path
 
+from attbacktrader.cli.tushare_options import add_tushare_rate_limit_args, tushare_rate_limit_config_from_args
 from attbacktrader.data.adjustments import DEFAULT_PRICE_ADJUSTMENT
 from attbacktrader.data.providers import TushareProvider, read_tushare_token
 from attbacktrader.data.snapshots import daily_bars_snapshot_path, write_daily_bars_parquet
@@ -28,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     end_date = _parse_cli_date(args.end_date)
 
     token = read_tushare_token(args.token_file)
-    provider = TushareProvider(token)
+    provider = TushareProvider(token, rate_limit=tushare_rate_limit_config_from_args(args))
     bars = provider.fetch_daily_bars(
         symbol=args.symbol,
         start_date=start_date,
@@ -99,6 +100,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--start-date", required=True, help="Start date, YYYYMMDD or YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="End date, YYYYMMDD or YYYY-MM-DD")
     parser.add_argument("--token-file", default=".secrets/tushare_token.txt")
+    add_tushare_rate_limit_args(parser)
     parser.add_argument("--snapshot-root", default="data/snapshots")
     parser.add_argument("--adjustment", choices=["qfq", "hfq"], default=DEFAULT_PRICE_ADJUSTMENT)
     parser.add_argument("--report-id", default=None)

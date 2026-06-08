@@ -178,6 +178,46 @@ def test_prepare_run_data_fetches_warmup_windows_for_entry_attribution_indexes(t
     assert prepared.benchmark_bars_by_symbol(run_plan)["000300.SH"][0].trade_date >= run_plan.run.from_date
 
 
+def test_prepare_run_data_fetches_warmup_windows_for_selected_industry_relative_attribution(
+    tmp_path: Path,
+) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    provider = FakePreparedDataProvider(bars)
+    run_plan = _run_plan(tmp_path)
+    run_plan = run_plan.model_copy(
+        update={
+            "data": run_plan.data.model_copy(
+                update={
+                    "benchmark_series": run_plan.data.benchmark_series.model_copy(
+                        update={"indexes": ("000300.SH",)}
+                    )
+                }
+            ),
+            "analysis": run_plan.analysis.model_copy(
+                update={
+                    "attribution": run_plan.analysis.attribution.model_copy(
+                        update={
+                            "include": (
+                                "industry.ma.trend_state",
+                                "industry.relative.hs300.strength_state",
+                            )
+                        }
+                    )
+                }
+            ),
+        }
+    )
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+
+    assert provider.index_ranges == [("000300.SH", date(2023, 10, 4), run_plan.run.to_date)]
+    assert provider.industry_index_ranges == [
+        ("801780.SI", date(2023, 10, 4), run_plan.run.to_date, "SW2021")
+    ]
+    assert prepared.benchmark_calculation_bars_by_symbol(run_plan)["000300.SH"][0].trade_date == date(2023, 10, 4)
+    assert prepared.industry_index_calculation_bars_by_symbol(run_plan)["801780.SI"][0].trade_date == date(2023, 10, 4)
+
+
 def test_prepare_run_data_uses_benchmark_index_as_trading_calendar(tmp_path: Path) -> None:
     bars = (
         DailyBar("000001.SZ", date(2024, 1, 2), 10.0, 11.0, 9.0, 10.0, 1000.0),
@@ -276,6 +316,89 @@ def test_prepare_run_data_fetches_warmup_window_for_required_indicators(tmp_path
     assert symbol_data.indicator_frame.ma_at(run_plan.run.from_date, period=60).value is not None
 
 
+def test_prepare_run_data_fetches_one_year_symbol_warmup_for_baoma_engine(tmp_path: Path) -> None:
+    run_plan = _ma_run_plan(tmp_path)
+    run_plan = run_plan.model_copy(
+        update={"execution": run_plan.execution.model_copy(update={"engine": "baoma_v1_business"})}
+    )
+    warmup_start = date(2023, 1, 1)
+    bars = _trend_bars_from(
+        "000001.SZ",
+        start_date=warmup_start,
+        count=(run_plan.run.to_date - warmup_start).days + 1,
+    )
+    provider = FakePreparedDataProvider(bars)
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+    symbol_data = prepared.symbol_data_by_symbol["000001.SZ"]
+
+    assert provider.daily_bar_ranges == [
+        ("000001.SZ", warmup_start, run_plan.run.to_date, "qfq"),
+    ]
+    assert symbol_data.bars[0].trade_date == run_plan.run.from_date
+    assert symbol_data.snapshot_provenance.start_date == warmup_start
+    assert symbol_data.snapshot_provenance.details["requested_start_date"] == warmup_start.isoformat()
+    assert symbol_data.indicator_snapshots[0].trade_date == warmup_start
+
+
+def test_prepare_run_data_includes_symbol_indicators_required_by_selected_attribution(
+    tmp_path: Path,
+) -> None:
+    bars = _trend_bars("000001.SZ", count=70)
+    run_plan = RunPlan.from_mapping(
+        {
+            "run": {
+                "id": "prepared-data-attribution-indicator-test",
+                "from_date": "2024-01-01",
+                "to_date": "2024-03-10",
+            },
+            "data": {
+                "snapshot_root": tmp_path,
+                "refresh_snapshots": False,
+                "symbols": ["000001.SZ"],
+            },
+            "strategy": {
+                "template": "trend_template_v1",
+                "entry_method": "ma_bullish_trend_entry",
+                "profit_taking_method": "rsi_overbought_exit",
+                "stop_loss_method": "fixed_percent_stop",
+                "sizing_rule": "equal_weight",
+            },
+            "broker": {
+                "initial_cash": 1000000,
+                "commission_rate": 0.0003,
+                "stamp_tax_rate": 0.001,
+                "transfer_fee_rate": 0.00001,
+                "slippage": {"type": "percent", "value": 0.0005},
+            },
+            "constraints": {"ashare": {"enabled": False}},
+            "analysis": {
+                "attribution": {
+                    "enabled": True,
+                    "include": ["symbol.kdj.j", "symbol.kdj.j_below_threshold"],
+                },
+                "industry_attribution": {"enabled": False},
+                "market_regime": {"enabled": False},
+                "scenario_fit": {"enabled": False},
+            },
+        }
+    )
+    bar_path = tradable_bars_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=run_plan.run.from_date,
+        end_date=run_plan.run.to_date,
+        asset_type="stock",
+        adjustment="qfq",
+    )
+    write_daily_bars_parquet(bars, bar_path)
+
+    prepared = prepare_run_data(run_plan, provider=None)
+    symbol_data = prepared.symbol_data_by_symbol["000001.SZ"]
+
+    assert symbol_data.indicator_frame.kdj_at(run_plan.run.to_date).j is not None
+
+
 def test_prepare_run_data_allows_trailing_gap_when_run_window_has_bars(tmp_path: Path) -> None:
     run_plan = _ma_run_plan(tmp_path)
     run_plan = run_plan.model_copy(
@@ -298,6 +421,18 @@ def test_prepare_run_data_allows_trailing_gap_when_run_window_has_bars(tmp_path:
     assert symbol_data.bars[-1].trade_date == available_end
     assert "MISSING_TRAILING_RANGE" in issue_codes
     assert symbol_data.snapshot_provenance.details["warmup_incomplete"] is True
+
+
+def test_index_bars_cover_date_range_allows_short_leading_calendar_gap() -> None:
+    from attbacktrader.runners.prepared_data import _index_bars_cover_date_range
+
+    bars = _index_bars("000300.SH", date(2023, 1, 3), date(2023, 1, 5))
+
+    assert _index_bars_cover_date_range(
+        bars,
+        start_date=date(2023, 1, 1),
+        end_date=date(2023, 1, 5),
+    )
 
 
 def test_prepare_run_data_incrementally_overwrites_indicator_tail(tmp_path: Path) -> None:
