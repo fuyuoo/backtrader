@@ -19,6 +19,7 @@ from attbacktrader.engines.backtrader.strategy_bridge import (
     TrendTemplateV1BacktraderStrategy,
     TrendTemplateV1PortfolioBacktraderStrategy,
 )
+from attbacktrader.engines.business.lifecycle import LifecycleExecutionEvent, LifecyclePositionSnapshot
 from attbacktrader.engines.ledger import EquityCurvePoint, ExecutionAuditEvent, PositionSnapshot
 from attbacktrader.features import (
     DEFAULT_INDICATOR_NAMES,
@@ -42,6 +43,8 @@ class BacktraderRunResult:
     equity_curve: tuple[EquityCurvePoint, ...]
     position_snapshots: tuple[PositionSnapshot, ...]
     execution_audit: tuple[ExecutionAuditEvent, ...]
+    lifecycle_events: tuple[LifecycleExecutionEvent, ...] = ()
+    lifecycle_snapshots: tuple[LifecyclePositionSnapshot, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,8 @@ class BacktraderPortfolioRunResult:
     equity_curve: tuple[EquityCurvePoint, ...]
     position_snapshots: tuple[PositionSnapshot, ...]
     execution_audit: tuple[ExecutionAuditEvent, ...]
+    lifecycle_events: tuple[LifecycleExecutionEvent, ...] = ()
+    lifecycle_snapshots: tuple[LifecyclePositionSnapshot, ...] = ()
 
 
 def run_trend_template_v1_backtrader(
@@ -70,6 +75,8 @@ def run_trend_template_v1_backtrader(
     sizing_method: Any = None,
     broker_settings: BacktraderBrokerSettings | None = None,
     ashare_settings: BacktraderAShareSettings | None = None,
+    lifecycle_enabled: bool = False,
+    lifecycle_board_lot_size: int = 100,
 ) -> BacktraderRunResult:
     if initial_cash <= 0:
         raise ValueError("initial_cash must be positive")
@@ -77,6 +84,8 @@ def run_trend_template_v1_backtrader(
         raise ValueError("stake must be positive")
     if not bars:
         raise ValueError("bars cannot be empty")
+    if lifecycle_board_lot_size <= 0:
+        raise ValueError("lifecycle_board_lot_size must be positive")
 
     ordered_bars = tuple(sorted(bars, key=lambda bar: bar.trade_date))
     symbol = ordered_bars[0].symbol
@@ -126,6 +135,8 @@ def run_trend_template_v1_backtrader(
         add_on_method=add_on_method,
         sizing_method=sizing_method,
         ashare_settings=ashare_settings,
+        lifecycle_enabled=lifecycle_enabled,
+        lifecycle_board_lot_size=lifecycle_board_lot_size,
     )
 
     strategies = cerebro.run()
@@ -138,6 +149,8 @@ def run_trend_template_v1_backtrader(
         equity_curve=strategy.equity_curve(),
         position_snapshots=strategy.position_snapshots(),
         execution_audit=strategy.execution_audit(),
+        lifecycle_events=strategy.lifecycle_events(),
+        lifecycle_snapshots=strategy.lifecycle_snapshots(),
     )
 
 
@@ -157,6 +170,8 @@ def run_trend_template_v1_portfolio_backtrader(
     sizing_method: Any = None,
     broker_settings: BacktraderBrokerSettings | None = None,
     ashare_settings: BacktraderAShareSettings | None = None,
+    lifecycle_enabled: bool = False,
+    lifecycle_board_lot_size: int = 100,
 ) -> BacktraderPortfolioRunResult:
     if initial_cash <= 0:
         raise ValueError("initial_cash must be positive")
@@ -164,6 +179,8 @@ def run_trend_template_v1_portfolio_backtrader(
         raise ValueError("stake must be positive")
     if not bars_by_symbol:
         raise ValueError("bars_by_symbol cannot be empty")
+    if lifecycle_board_lot_size <= 0:
+        raise ValueError("lifecycle_board_lot_size must be positive")
 
     ordered_bars_by_symbol = {
         symbol: tuple(sorted(bars, key=lambda bar: bar.trade_date))
@@ -230,6 +247,8 @@ def run_trend_template_v1_portfolio_backtrader(
         add_on_method=add_on_method,
         sizing_method=sizing_method,
         ashare_settings=ashare_settings,
+        lifecycle_enabled=lifecycle_enabled,
+        lifecycle_board_lot_size=lifecycle_board_lot_size,
     )
 
     strategies = cerebro.run()
@@ -242,6 +261,8 @@ def run_trend_template_v1_portfolio_backtrader(
         equity_curve=strategy.equity_curve(),
         position_snapshots=strategy.position_snapshots(),
         execution_audit=strategy.execution_audit(),
+        lifecycle_events=strategy.lifecycle_events(),
+        lifecycle_snapshots=strategy.lifecycle_snapshots(),
     )
 
 

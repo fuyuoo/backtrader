@@ -5,8 +5,12 @@ import pytest
 from attbacktrader.data import DailyBar
 from attbacktrader.features import (
     IndicatorRequirement,
+    IndicatorFrame,
     KDJValue,
     MACDValue,
+    MAValue,
+    MarketFeatureRow,
+    MarketIndicators,
     build_indicator_snapshots_for_requirements,
     calculate_atr,
     calculate_kdj,
@@ -18,6 +22,10 @@ from attbacktrader.features import (
 from attbacktrader.strategies import TradeIntentType
 from attbacktrader.strategies.methods import (
     AtrMultipleStop,
+    BaomaAddOn,
+    BaomaEntry,
+    BaomaMa25ProfitExit,
+    BaomaMa60Stop,
     FixedPercentStop,
     KdjOversoldAddOn,
     KdjOverheatedExit,
@@ -213,6 +221,203 @@ def test_ma_macd_bullish_confirmation_entry_combines_decision_layer_checks() -> 
     }
 
 
+def test_baoma_entry_uses_previous_day_conditions_and_dea_waterline_age() -> None:
+    rows = _baoma_rows(
+        closes=(10.0, 11.0, 11.0, 12.0),
+        opens=(10.0, 10.5, 12.0, 12.0),
+        dea_values=(0.0, 0.1, 0.2, 0.3),
+        ma60_values=(9.0, 9.5, 10.0, 10.5),
+    )
+    method = BaomaEntry()
+
+    intent = method.evaluate(
+        symbol="000001.SZ",
+        trade_date=rows[-1].trade_date,
+        row=rows[-1],
+        previous_row=rows[-2],
+    )
+
+    assert intent.intent_type == TradeIntentType.ENTER
+    assert intent.reason_code == "BAOMA_ENTRY_TRIGGERED"
+    assert intent.signal_values["signal_trade_date"] == rows[-2].trade_date.isoformat()
+    assert intent.signal_values["dea_waterline_age_trading_days"] == 1
+    assert intent.signal_values["checks"]["price_above_ma60"] is True
+    assert intent.signal_values["checks"]["dea_recent_waterline"] is True
+    assert intent.signal_values["checks"]["previous_bearish_candle"] is True
+
+
+def test_baoma_entry_rejects_old_dea_waterline_cycle() -> None:
+    rows = _baoma_rows(
+        closes=tuple(11.0 for _ in range(18)),
+        opens=tuple(12.0 for _ in range(18)),
+        dea_values=(0.0,) + tuple(0.1 for _ in range(17)),
+        ma60_values=tuple(10.0 for _ in range(18)),
+    )
+    method = BaomaEntry()
+
+    intent = method.evaluate(
+        symbol="000001.SZ",
+        trade_date=rows[-1].trade_date,
+        row=rows[-1],
+        previous_row=rows[-2],
+    )
+
+    assert intent.intent_type == TradeIntentType.HOLD
+    assert intent.reason_code == "BAOMA_ENTRY_NOT_TRIGGERED"
+    assert intent.signal_values["dea_waterline_age_trading_days"] == 15
+    assert intent.signal_values["checks"]["dea_recent_waterline"] is False
+
+
+def test_baoma_entry_returns_unavailable_without_previous_row() -> None:
+    rows = _baoma_rows(
+        closes=(10.0, 11.0),
+        opens=(10.0, 12.0),
+        dea_values=(0.0, 0.1),
+        ma60_values=(9.0, 9.0),
+    )
+
+    intent = BaomaEntry().evaluate(
+        symbol="000001.SZ",
+        trade_date=rows[-1].trade_date,
+        row=rows[-1],
+        previous_row=None,
+    )
+
+    assert intent.intent_type == TradeIntentType.HOLD
+    assert intent.reason_code == "BAOMA_ENTRY_UNAVAILABLE"
+    assert intent.signal_values["checks"]["required_values_available"] is False
+
+
+def test_baoma_add_on_reuses_entry_conditions_and_blocks_ever_profitable_position() -> None:
+    rows = _baoma_rows(
+        closes=(10.0, 11.0, 11.0, 12.0),
+        opens=(10.0, 10.5, 12.0, 12.0),
+        dea_values=(0.0, 0.1, 0.2, 0.3),
+        ma60_values=(9.0, 9.5, 10.0, 10.5),
+    )
+    method = BaomaAddOn()
+
+    add_on_intent = method.evaluate(
+        symbol="000001.SZ",
+        trade_date=rows[-1].trade_date,
+        current_quantity=100,
+        entry_price=10.0,
+        current_price=12.0,
+        add_on_count=1,
+        ever_profitable=False,
+        row=rows[-1],
+        previous_row=rows[-2],
+    )
+
+    assert add_on_intent.intent_type == TradeIntentType.ADD_ON
+    assert add_on_intent.reason_code == "BAOMA_ADD_ON_TRIGGERED"
+    assert add_on_intent.signal_values["position_action"] == "add_on"
+
+    blocked_intent = method.evaluate(
+        symbol="000001.SZ",
+        trade_date=rows[-1].trade_date,
+        current_quantity=100,
+        entry_price=10.0,
+        current_price=12.0,
+        add_on_count=1,
+        ever_profitable=True,
+        row=rows[-1],
+        previous_row=rows[-2],
+    )
+
+    assert blocked_intent.intent_type == TradeIntentType.HOLD
+    assert blocked_intent.reason_code == "BAOMA_ADD_ON_NOT_TRIGGERED"
+    assert blocked_intent.signal_values["checks"]["ever_profitable_block"] is True
+
+
+def test_baoma_ma60_stop_requires_previous_break_and_current_confirmation() -> None:
+    rows = _baoma_rows(
+        closes=(12.0, 9.0, 9.5),
+        opens=(12.0, 9.5, 9.8),
+        dea_values=(0.0, 0.1, 0.2),
+        ma60_values=(10.0, 10.0, 10.0),
+    )
+    method = BaomaMa60Stop()
+
+    stop_intent = method.evaluate(
+        symbol="000001.SZ",
+        trade_date=rows[-1].trade_date,
+        entry_price=11.0,
+        current_price=9.5,
+        row=rows[-1],
+        previous_row=rows[-2],
+    )
+
+    assert stop_intent.intent_type == TradeIntentType.EXIT_LOSS
+    assert stop_intent.reason_code == "BAOMA_MA60_STOP_TRIGGERED"
+    assert stop_intent.signal_values["checks"]["previous_price_below_ma"] is True
+    assert stop_intent.signal_values["checks"]["current_price_below_ma"] is True
+
+    recovered_rows = _baoma_rows(
+        closes=(12.0, 9.0, 10.5),
+        opens=(12.0, 9.5, 10.6),
+        dea_values=(0.0, 0.1, 0.2),
+        ma60_values=(10.0, 10.0, 10.0),
+    )
+    recovered_intent = method.evaluate(
+        symbol="000001.SZ",
+        trade_date=recovered_rows[-1].trade_date,
+        entry_price=11.0,
+        current_price=10.5,
+        row=recovered_rows[-1],
+        previous_row=recovered_rows[-2],
+    )
+
+    assert recovered_intent.intent_type == TradeIntentType.HOLD
+    assert recovered_intent.reason_code == "BAOMA_MA60_STOP_NOT_TRIGGERED"
+
+
+def test_baoma_ma25_profit_exit_requires_lifecycle_remaining_cost() -> None:
+    rows = _baoma_rows(
+        closes=(12.0, 9.0, 9.5),
+        opens=(12.0, 9.5, 9.8),
+        dea_values=(0.0, 0.1, 0.2),
+        ma60_values=(10.0, 10.0, 10.0),
+        ma25_values=(10.0, 10.0, 10.0),
+    )
+    method = BaomaMa25ProfitExit()
+
+    unavailable = method.evaluate(
+        symbol="000001.SZ",
+        trade_date=rows[-1].trade_date,
+        row=rows[-1],
+        previous_row=rows[-2],
+    )
+
+    assert unavailable.intent_type == TradeIntentType.HOLD
+    assert unavailable.reason_code == "BAOMA_MA25_PROFIT_EXIT_UNAVAILABLE"
+    assert unavailable.signal_values["checks"]["remaining_cost_available"] is False
+
+    exit_intent = method.evaluate(
+        symbol="000001.SZ",
+        trade_date=rows[-1].trade_date,
+        row=rows[-1],
+        previous_row=rows[-2],
+        adjusted_remaining_cost_basis=8.0,
+    )
+
+    assert exit_intent.intent_type == TradeIntentType.EXIT_PROFIT
+    assert exit_intent.reason_code == "BAOMA_MA25_PROFIT_EXIT_TRIGGERED"
+    assert exit_intent.signal_values["checks"]["confirmed_profitable"] is True
+
+    not_profitable = method.evaluate(
+        symbol="000001.SZ",
+        trade_date=rows[-1].trade_date,
+        row=rows[-1],
+        previous_row=rows[-2],
+        adjusted_remaining_cost_basis=10.0,
+    )
+
+    assert not_profitable.intent_type == TradeIntentType.HOLD
+    assert not_profitable.reason_code == "BAOMA_MA25_PROFIT_EXIT_NOT_TRIGGERED"
+    assert not_profitable.signal_values["checks"]["confirmed_profitable"] is False
+
+
 def test_kdj_exit_triggers_only_when_j_is_above_100() -> None:
     method = KdjOverheatedExit()
 
@@ -402,4 +607,67 @@ def _weakening_fixture_bars(symbol: str) -> tuple[DailyBar, ...]:
             volume=1000,
         )
         for index, close in enumerate(closes)
+    )
+
+
+def _baoma_rows(
+    *,
+    closes: tuple[float, ...],
+    opens: tuple[float, ...],
+    dea_values: tuple[float, ...],
+    ma60_values: tuple[float, ...],
+    ma25_values: tuple[float, ...] | None = None,
+) -> tuple[MarketFeatureRow, ...]:
+    symbol = "000001.SZ"
+    start_date = date(2024, 1, 1)
+    trade_dates = tuple(start_date + timedelta(days=index) for index in range(len(closes)))
+    bars = tuple(
+        DailyBar(
+            symbol=symbol,
+            trade_date=trade_date,
+            open=open_price,
+            high=max(open_price, close_price),
+            low=min(open_price, close_price),
+            close=close_price,
+            volume=1000,
+        )
+        for trade_date, open_price, close_price in zip(trade_dates, opens, closes)
+    )
+    ma_by_key = {
+        ("D", 60, trade_date): MAValue(period=60, value=ma_value)
+        for trade_date, ma_value in zip(trade_dates, ma60_values)
+    }
+    if ma25_values is not None:
+        ma_by_key.update(
+            {
+                ("D", 25, trade_date): MAValue(period=25, value=ma_value)
+                for trade_date, ma_value in zip(trade_dates, ma25_values)
+            }
+        )
+    frame = IndicatorFrame(
+        symbol=symbol,
+        macd_by_key={
+            ("D", trade_date): MACDValue(line=dea, signal=dea, histogram=0.0)
+            for trade_date, dea in zip(trade_dates, dea_values)
+        },
+        ma_by_key=ma_by_key,
+    )
+    requirements = (
+        IndicatorRequirement("macd", "D"),
+        IndicatorRequirement("ma25", "D"),
+        IndicatorRequirement("ma60", "D"),
+    )
+    return tuple(
+        MarketFeatureRow(
+            symbol=symbol,
+            trade_date=bar.trade_date,
+            bar=bar,
+            indicators=MarketIndicators(
+                symbol=symbol,
+                trade_date=bar.trade_date,
+                frame=frame,
+                requirements=requirements,
+            ),
+        )
+        for bar in bars
     )

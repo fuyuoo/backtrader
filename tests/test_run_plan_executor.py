@@ -15,7 +15,11 @@ from attbacktrader.data import (
     TradabilityStatus,
 )
 from attbacktrader.data.snapshots import read_daily_bars_csv
+from attbacktrader.engines.business import BaomaBusinessRunResult, LifecycleClosedTrade, LifecycleExecutionEvent
+from attbacktrader.reports.renderer import render_backtest_report_markdown_zh
+import attbacktrader.runners.run_plan as run_plan_module
 from attbacktrader.runners import execute_run_plan
+from attbacktrader.strategies import TradeIntent, TradeIntentType
 
 
 class FakeRunDataProvider:
@@ -116,6 +120,11 @@ def test_execute_run_plan_fetches_snapshots_indicators_and_runs_portfolio(tmp_pa
     assert result.signal_audit
     assert result.symbol_results[0].intents
     assert result.signal_audit[0].signal_values
+    assert result.attribution_factor_selection is not None
+    assert result.attribution_factor_selection["schema"] == "attbacktrader.attribution_factor_selection.v1"
+    assert result.attribution_factor_selection["configured_source"] == "default:all_applicable"
+    assert "symbol.ma.price_above_ma25" in result.attribution_factor_selection["include"]
+    assert result.attribution_factor_selection["not_include"] == ()
     assert result.report.trade_quality.trade_count == 4
     assert result.post_exit_analysis.trade_count == 4
     assert result.post_exit_analysis.window_days == 5
@@ -153,6 +162,67 @@ def test_execute_run_plan_fetches_snapshots_indicators_and_runs_portfolio(tmp_pa
     assert result.symbol_results[0].tradability_snapshot_path.exists()
     assert result.symbol_results[0].snapshot_path.parent.name == "qfq"
     assert result.symbol_results[0].indicator_snapshot_path.parent.name == "qfq"
+
+
+def test_execute_run_plan_auto_filters_stock_pool_before_backtest(tmp_path: Path) -> None:
+    pool_path = tmp_path / "pool.csv"
+    pool_path.write_text(
+        "\n".join(
+            [
+                "ts_code,name,source_index,freeze_date",
+                "000001.SZ,平安银行,HS300,2026-06-07",
+                "000002.SZ,万科A,HS300,2026-06-07",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    provider = FakeRunDataProvider({"000001.SZ": bars})
+
+    run_plan = _stock_pool_run_plan(tmp_path, pool_path)
+    result = execute_run_plan(run_plan, provider=provider)
+
+    assert result.symbols == ("000001.SZ",)
+    assert result.stock_pool_filter is not None
+    assert result.stock_pool_filter.original_count == 2
+    assert result.stock_pool_filter.kept_count == 1
+    assert result.stock_pool_filter.excluded_count == 1
+    assert result.stock_pool_filter.excluded_symbols[0].symbol == "000002.SZ"
+    assert result.stock_pool_filter.excluded_symbols[0].status == "error"
+    assert result.data_preflight_report is not None
+    assert result.data_preflight_report.checked_symbol_count == 2
+    report_markdown = render_backtest_report_markdown_zh(run_plan, result)
+    assert "## 股票池过滤" in report_markdown
+    assert "| 原始股票数 | 2 |" in report_markdown
+    assert "| 回测保留 | 1 |" in report_markdown
+    assert "| 自动剔除 | 1 |" in report_markdown
+
+
+def test_execute_run_plan_auto_filter_reuses_existing_snapshots(tmp_path: Path) -> None:
+    pool_path = tmp_path / "pool.csv"
+    pool_path.write_text(
+        "\n".join(
+            [
+                "ts_code,name,source_index,freeze_date",
+                "000001.SZ,平安银行,HS300,2026-06-07",
+                "000002.SZ,万科A,HS300,2026-06-07",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    run_plan = _stock_pool_run_plan(tmp_path, pool_path)
+
+    execute_run_plan(run_plan, provider=FakeRunDataProvider({"000001.SZ": bars}))
+    offline_result = execute_run_plan(run_plan, provider=None)
+
+    assert offline_result.symbols == ("000001.SZ",)
+    assert offline_result.stock_pool_filter is not None
+    assert offline_result.stock_pool_filter.original_count == 2
+    assert offline_result.stock_pool_filter.kept_count == 1
+    assert offline_result.stock_pool_filter.excluded_count == 1
+    assert offline_result.data_preflight_report is not None
+    assert offline_result.data_preflight_report.checked_symbol_count == 2
 
 
 def test_execute_run_plan_can_reuse_existing_snapshots_without_provider(tmp_path: Path) -> None:
@@ -334,6 +404,92 @@ def test_execute_run_plan_can_trade_index_series_without_stock_coupling(tmp_path
     assert result.industry_membership_results == ()
 
 
+def test_execute_run_plan_can_route_to_baoma_dedicated_business_runner(tmp_path: Path, monkeypatch) -> None:
+    bars = _route_fixture_bars("000001.SZ")
+    provider = FakeRunDataProvider({"000001.SZ": bars})
+    captured = {}
+    entry_intent = TradeIntent(
+        intent_type=TradeIntentType.ENTER,
+        symbol="000001.SZ",
+        trade_date=date(2024, 1, 5),
+        method_name="baoma_entry",
+        reason_code="BAOMA_ENTRY_TRIGGERED",
+    )
+    exit_intent = TradeIntent(
+        intent_type=TradeIntentType.EXIT_LOSS,
+        symbol="000001.SZ",
+        trade_date=date(2024, 1, 8),
+        method_name="baoma_ma60_stop",
+        reason_code="BAOMA_MA60_STOP_TRIGGERED",
+    )
+    lifecycle_events = (
+        LifecycleExecutionEvent(
+            trade_date=date(2024, 1, 5),
+            symbol="000001.SZ",
+            side="buy",
+            status="accepted",
+            reason_code="BAOMA_ENTRY_TRIGGERED",
+            requested_quantity=300,
+            executed_quantity=300,
+            price=10.0,
+        ),
+        LifecycleExecutionEvent(
+            trade_date=date(2024, 1, 8),
+            symbol="000001.SZ",
+            side="sell",
+            status="accepted",
+            reason_code="BAOMA_MA60_STOP_TRIGGERED",
+            requested_quantity=300,
+            executed_quantity=300,
+            price=9.0,
+        ),
+    )
+
+    def fake_baoma_runner(*args, **kwargs):
+        captured["bars_by_symbol"] = args[0]
+        captured.update(kwargs)
+        return BaomaBusinessRunResult(
+            intents=(entry_intent, exit_intent),
+            lifecycle_events=lifecycle_events,
+            lifecycle_snapshots=(),
+            closed_trades=(
+                LifecycleClosedTrade(
+                    symbol="000001.SZ",
+                    entry_date=date(2024, 1, 5),
+                    exit_date=date(2024, 1, 8),
+                    entry_price=10.0,
+                    exit_price=9.0,
+                    quantity=300,
+                    exit_reason="BAOMA_MA60_STOP_TRIGGERED",
+                ),
+            ),
+            open_positions=(),
+        )
+
+    monkeypatch.setattr(run_plan_module, "run_baoma_v1_business", fake_baoma_runner)
+
+    result = run_plan_module.execute_run_plan(_baoma_route_run_plan(tmp_path), provider=provider)
+
+    assert result.engine == "baoma_v1_business"
+    assert result.closed_trades[0].exit_reason == "BAOMA_MA60_STOP_TRIGGERED"
+    assert result.lifecycle_events == lifecycle_events
+    assert [event.reason_code for event in result.execution_audit] == [
+        "BAOMA_ENTRY_TRIGGERED",
+        "BAOMA_MA60_STOP_TRIGGERED",
+    ]
+    assert captured["config"].total_asset_value == pytest.approx(1_200_000.0)
+    assert captured["config"].max_holding_count == 12
+    assert captured["config"].buy_slice_fraction == pytest.approx(0.25)
+    assert captured["config"].board_lot_size == 100
+    assert captured["config"].first_scale_out_return == pytest.approx(0.04)
+    assert captured["config"].second_scale_out_return == pytest.approx(0.12)
+    assert captured["config"].force_exit_at_end is True
+    assert captured["entry_method"].method_name == "baoma_entry"
+    assert captured["profit_exit_method"].method_name == "baoma_ma25_profit_exit"
+    assert captured["stop_loss_method"].method_name == "baoma_ma60_stop"
+    assert captured["add_on_method"].method_name == "baoma_add_on"
+
+
 def _run_plan(snapshot_root: Path, *, refresh_snapshots: bool) -> RunPlan:
     return RunPlan.from_mapping(
         {
@@ -383,6 +539,112 @@ def _run_plan(snapshot_root: Path, *, refresh_snapshots: bool) -> RunPlan:
                     "enabled": True,
                     "min_trades": 3,
                 },
+            },
+        }
+    )
+
+
+def _stock_pool_run_plan(tmp_path: Path, pool_path: Path) -> RunPlan:
+    return RunPlan.from_mapping(
+        {
+            "run": {
+                "id": "stock-pool-filter-test",
+                "from_date": "2024-01-02",
+                "to_date": "2024-01-11",
+            },
+            "data": {
+                "snapshot_root": tmp_path / "snapshots",
+                "provider": "tushare",
+                "price_adjustment": "qfq",
+                "refresh_snapshots": True,
+                "stock_pool_file": pool_path,
+            },
+            "strategy": {
+                "template": "trend_template_v1",
+                "entry_method": "kdj_oversold_entry",
+                "profit_taking_method": "kdj_overheated_exit",
+                "stop_loss_method": "fixed_percent_stop",
+                "sizing_rule": "equal_weight",
+            },
+            "broker": {
+                "initial_cash": 1000000,
+                "commission_rate": 0.0003,
+                "stamp_tax_rate": 0.001,
+                "transfer_fee_rate": 0.00001,
+                "slippage": {"type": "percent", "value": 0.0005},
+            },
+            "constraints": {
+                "ashare": {
+                    "enabled": False,
+                },
+            },
+            "execution": {
+                "engine": "business",
+                "stake": 100,
+            },
+            "analysis": {
+                "industry_attribution": {"enabled": False},
+                "market_regime": {"enabled": False},
+                "scenario_fit": {"enabled": False},
+            },
+        }
+    )
+
+
+def _baoma_route_run_plan(snapshot_root: Path) -> RunPlan:
+    return RunPlan.from_mapping(
+        {
+            "run": {
+                "id": "baoma-route-test",
+                "from_date": "2024-01-02",
+                "to_date": "2024-02-15",
+            },
+            "data": {
+                "snapshot_root": snapshot_root,
+                "provider": "tushare",
+                "price_adjustment": "qfq",
+                "refresh_snapshots": True,
+                "symbols": ["000001.SZ"],
+            },
+            "strategy": {
+                "template": "trend_template_v1",
+                "entry_method": "baoma_entry",
+                "profit_taking_method": "baoma_ma25_profit_exit",
+                "stop_loss_method": "baoma_ma60_stop",
+                "add_on_method": "baoma_add_on",
+                "sizing_rule": "equal_weight",
+                "sizing_params": {
+                    "max_holding_count": 12,
+                    "min_order_quantity": 100,
+                },
+            },
+            "constraints": {
+                "ashare": {
+                    "enabled": True,
+                    "board_lot_size": 100,
+                },
+            },
+            "broker": {
+                "initial_cash": 1_200_000,
+                "commission_rate": 0.0003,
+                "stamp_tax_rate": 0.001,
+                "transfer_fee_rate": 0.00001,
+                "slippage": {"type": "percent", "value": 0.0005},
+            },
+            "execution": {
+                "engine": "baoma_v1_business",
+                "stake": 100,
+                "baoma": {
+                    "buy_slice_fraction": 0.25,
+                    "first_scale_out_return": 0.04,
+                    "second_scale_out_return": 0.12,
+                    "force_exit_at_end": True,
+                },
+            },
+            "analysis": {
+                "industry_attribution": {"enabled": False},
+                "market_regime": {"enabled": False},
+                "scenario_fit": {"enabled": False},
             },
         }
     )
@@ -567,6 +829,22 @@ def _combo_fixture_bars(symbol: str) -> tuple[DailyBar, ...]:
             volume=1000,
         )
         for index, close in enumerate(closes)
+    )
+
+
+def _route_fixture_bars(symbol: str) -> tuple[DailyBar, ...]:
+    start_date = date(2023, 12, 1)
+    return tuple(
+        DailyBar(
+            symbol=symbol,
+            trade_date=start_date + timedelta(days=index),
+            open=10.0 + index * 0.01,
+            high=10.5 + index * 0.01,
+            low=9.5 + index * 0.01,
+            close=10.0 + index * 0.01,
+            volume=1000,
+        )
+        for index in range(90)
     )
 
 

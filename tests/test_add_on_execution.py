@@ -7,7 +7,7 @@ import pytest
 
 from attbacktrader.data import DailyBar
 from attbacktrader.engines.backtrader import BacktraderAShareSettings, run_trend_template_v1_portfolio_backtrader
-from attbacktrader.engines.business import run_trend_template_v1_portfolio_business
+from attbacktrader.engines.business import LifecycleState, run_trend_template_v1_portfolio_business
 from attbacktrader.strategies import TradeIntent, TradeIntentType
 from attbacktrader.strategies.templates import TrendTemplateV1
 
@@ -51,6 +51,40 @@ class _NeverExit:
         entry_price=None,
         current_price=None,
     ) -> TradeIntent:
+        return TradeIntent(
+            intent_type=TradeIntentType.HOLD,
+            symbol=symbol,
+            trade_date=trade_date,
+            method_name=self.method_name,
+            reason_code="NO_EXIT",
+        )
+
+
+@dataclass(frozen=True)
+class _DateExit:
+    exit_date: date
+    intent_type: TradeIntentType = TradeIntentType.EXIT_PROFIT
+    method_name: str = "date_exit"
+    required_indicators = frozenset()
+
+    def evaluate(
+        self,
+        *,
+        symbol,
+        trade_date,
+        row=None,
+        previous_row=None,
+        entry_price=None,
+        current_price=None,
+    ) -> TradeIntent:
+        if trade_date == self.exit_date:
+            return TradeIntent(
+                intent_type=self.intent_type,
+                symbol=symbol,
+                trade_date=trade_date,
+                method_name=self.method_name,
+                reason_code="DATE_EXIT",
+            )
         return TradeIntent(
             intent_type=TradeIntentType.HOLD,
             symbol=symbol,
@@ -129,6 +163,62 @@ def test_business_portfolio_executes_add_on_and_updates_position_average_price()
     assert open_position.entry_price == pytest.approx(11.0)
     assert result.final_cash == pytest.approx(7800.0)
     assert result.final_value == pytest.approx(10400.0)
+
+
+def test_business_portfolio_exposes_lifecycle_events_when_enabled() -> None:
+    bars = _bars("000001.SZ", closes=(10.0, 9.0, 8.0, 8.0))
+    strategy = TrendTemplateV1(
+        entry_method=_DateEntry(date(2024, 1, 1)),
+        profit_taking_method=_DateExit(date(2024, 1, 3)),
+        stop_loss_method=_NeverExit("stop"),
+        add_on_method=_DateAddOn(date(2024, 1, 2)),
+    )
+
+    result = run_trend_template_v1_portfolio_business(
+        strategy,
+        {"000001.SZ": bars},
+        initial_cash=10000.0,
+        stake=100,
+        lifecycle_enabled=True,
+    )
+
+    assert [
+        (event.trade_date, event.side, event.reason_code, event.executed_quantity, event.price)
+        for event in result.lifecycle_events
+    ] == [
+        (date(2024, 1, 1), "buy", "DATE_ENTRY", 100, 10.0),
+        (date(2024, 1, 2), "buy", "DATE_ADD_ON", 100, 9.0),
+        (date(2024, 1, 3), "sell", "DATE_EXIT", 200, 8.0),
+    ]
+    assert result.lifecycle_snapshots[-1].state == LifecycleState.CLOSED
+    assert result.lifecycle_snapshots[-1].total_quantity == 0
+
+
+def test_backtrader_portfolio_exposes_lifecycle_events_when_enabled() -> None:
+    bars = _bars("000001.SZ", closes=(10.0, 9.0, 8.0, 8.0))
+
+    result = run_trend_template_v1_portfolio_backtrader(
+        {"000001.SZ": bars},
+        initial_cash=10000.0,
+        stake=100,
+        entry_method=_DateEntry(date(2024, 1, 1)),
+        profit_taking_method=_DateExit(date(2024, 1, 3)),
+        stop_loss_method=_NeverExit("stop"),
+        add_on_method=_DateAddOn(date(2024, 1, 2)),
+        ashare_settings=BacktraderAShareSettings(enabled=False),
+        lifecycle_enabled=True,
+    )
+
+    assert [
+        (event.trade_date, event.side, event.reason_code, event.executed_quantity, event.price)
+        for event in result.lifecycle_events
+    ] == [
+        (date(2024, 1, 1), "buy", "DATE_ENTRY", 100, 10.0),
+        (date(2024, 1, 2), "buy", "DATE_ADD_ON", 100, 9.0),
+        (date(2024, 1, 3), "sell", "DATE_EXIT", 200, 8.0),
+    ]
+    assert result.lifecycle_snapshots[-1].state == LifecycleState.CLOSED
+    assert result.lifecycle_snapshots[-1].total_quantity == 0
 
 
 def test_backtrader_portfolio_executes_add_on_and_updates_position_average_price() -> None:

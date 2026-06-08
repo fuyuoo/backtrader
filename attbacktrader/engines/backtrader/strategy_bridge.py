@@ -18,6 +18,11 @@ from attbacktrader.constraints import (
 from attbacktrader.data import DailyBar
 from attbacktrader.data.tradability import TradabilityStatus
 from attbacktrader.engines.backtrader.execution import BacktraderAShareSettings
+from attbacktrader.engines.business.lifecycle import (
+    ExecutionLifecycleComponent,
+    LifecycleExecutionEvent,
+    LifecyclePositionSnapshot,
+)
 from attbacktrader.engines.ledger import EquityCurvePoint, ExecutionAuditEvent, PositionSnapshot
 from attbacktrader.features import (
     DEFAULT_INDICATOR_NAMES,
@@ -71,6 +76,8 @@ class TrendTemplateV1BacktraderStrategy(bt.Strategy):
         ("tradability_by_symbol", None),
         ("risk_group_by_symbol", None),
         ("entry_attribution_context", None),
+        ("lifecycle_enabled", False),
+        ("lifecycle_board_lot_size", 100),
     )
 
     def __init__(self) -> None:
@@ -113,6 +120,11 @@ class TrendTemplateV1BacktraderStrategy(bt.Strategy):
         self._add_on_count = 0
         self._broker_records: dict[date, _BrokerStateRecord] = {}
         self._execution_audit: list[ExecutionAuditEvent] = []
+        self._lifecycle_enabled = bool(self.p.lifecycle_enabled)
+        self._lifecycle_board_lot_size = int(self.p.lifecycle_board_lot_size)
+        self._lifecycles: dict[str, ExecutionLifecycleComponent] = {}
+        self._lifecycle_events: list[LifecycleExecutionEvent] = []
+        self._lifecycle_snapshots: list[LifecyclePositionSnapshot] = []
         self._daily_turnover_value_by_date: dict[date, float] = {}
         self._last_rebalance_date_by_symbol: dict[str, date] = {}
         self._reserved_buy_value_by_symbol: dict[str, float] = {}
@@ -450,10 +462,12 @@ class TrendTemplateV1BacktraderStrategy(bt.Strategy):
                     self._entry_date = executed_date
                     self._entry_price = executed_price
                     self._add_on_count = 0
+                _record_lifecycle_completed_order(self, order)
             else:
                 if self._entry_date is None or self._entry_price is None:
                     raise RuntimeError("sell completed without an open entry record")
 
+                _record_lifecycle_completed_order(self, order)
                 self._closed_trades.append(
                     ClosedTrade(
                         symbol=self._symbol,
@@ -505,6 +519,12 @@ class TrendTemplateV1BacktraderStrategy(bt.Strategy):
     def execution_audit(self) -> tuple[ExecutionAuditEvent, ...]:
         return tuple(self._execution_audit)
 
+    def lifecycle_events(self) -> tuple[LifecycleExecutionEvent, ...]:
+        return tuple(self._lifecycle_events)
+
+    def lifecycle_snapshots(self) -> tuple[LifecyclePositionSnapshot, ...]:
+        return tuple(self._lifecycle_snapshots)
+
 
 class TrendTemplateV1PortfolioBacktraderStrategy(bt.Strategy):
     params = (
@@ -521,6 +541,8 @@ class TrendTemplateV1PortfolioBacktraderStrategy(bt.Strategy):
         ("tradability_by_symbol", None),
         ("risk_group_by_symbol", None),
         ("entry_attribution_context", None),
+        ("lifecycle_enabled", False),
+        ("lifecycle_board_lot_size", 100),
     )
 
     def __init__(self) -> None:
@@ -562,6 +584,11 @@ class TrendTemplateV1PortfolioBacktraderStrategy(bt.Strategy):
         self._processed_keys: set[tuple[str, date]] = set()
         self._broker_records: dict[date, _BrokerStateRecord] = {}
         self._execution_audit: list[ExecutionAuditEvent] = []
+        self._lifecycle_enabled = bool(self.p.lifecycle_enabled)
+        self._lifecycle_board_lot_size = int(self.p.lifecycle_board_lot_size)
+        self._lifecycles: dict[str, ExecutionLifecycleComponent] = {}
+        self._lifecycle_events: list[LifecycleExecutionEvent] = []
+        self._lifecycle_snapshots: list[LifecyclePositionSnapshot] = []
         self._daily_turnover_value_by_date: dict[date, float] = {}
         self._last_rebalance_date_by_symbol: dict[str, date] = {}
         self._reserved_buy_value_by_symbol: dict[str, float] = {}
@@ -909,12 +936,14 @@ class TrendTemplateV1PortfolioBacktraderStrategy(bt.Strategy):
                 else:
                     self._entry_by_symbol[symbol] = (executed_date, executed_price)
                     self._add_on_count_by_symbol[symbol] = 0
+                _record_lifecycle_completed_order(self, order)
             else:
                 try:
                     entry_date, entry_price = self._entry_by_symbol.pop(symbol)
                 except KeyError as exc:
                     raise RuntimeError(f"sell completed without an open entry record for {symbol}") from exc
 
+                _record_lifecycle_completed_order(self, order)
                 self._closed_trades.append(
                     ClosedTrade(
                         symbol=symbol,
@@ -968,6 +997,63 @@ class TrendTemplateV1PortfolioBacktraderStrategy(bt.Strategy):
 
     def execution_audit(self) -> tuple[ExecutionAuditEvent, ...]:
         return tuple(self._execution_audit)
+
+    def lifecycle_events(self) -> tuple[LifecycleExecutionEvent, ...]:
+        return tuple(self._lifecycle_events)
+
+    def lifecycle_snapshots(self) -> tuple[LifecyclePositionSnapshot, ...]:
+        return tuple(self._lifecycle_snapshots)
+
+
+def _record_lifecycle_completed_order(strategy: bt.Strategy, order) -> None:
+    if not getattr(strategy, "_lifecycle_enabled", False):
+        return
+
+    executed_date = _executed_date(order)
+    executed_price = _executed_price(order)
+    executed_quantity = _executed_quantity(order)
+    if executed_date is None or executed_price is None or executed_quantity is None:
+        return
+
+    symbol = str(order.data._name)
+    lifecycle = _lifecycle_for_symbol(
+        strategy._lifecycles,
+        symbol=symbol,
+        board_lot_size=strategy._lifecycle_board_lot_size,
+    )
+    reason_code = str(order.info.reason_code)
+    quantity = int(executed_quantity)
+    if order.isbuy():
+        event = lifecycle.buy(
+            trade_date=executed_date,
+            price=executed_price,
+            quantity=quantity,
+            reason_code=reason_code,
+        )
+        lifecycle.advance_day(trade_date=executed_date, close_price=executed_price)
+    else:
+        lifecycle.enter_exit_watch(trade_date=executed_date, reason_code=reason_code)
+        event = lifecycle.confirm_full_exit(
+            trade_date=executed_date,
+            price=executed_price,
+            reason_code=reason_code,
+        )
+
+    strategy._lifecycle_events.append(event)
+    strategy._lifecycle_snapshots.append(lifecycle.snapshot(trade_date=executed_date))
+
+
+def _lifecycle_for_symbol(
+    lifecycles: dict[str, ExecutionLifecycleComponent],
+    *,
+    symbol: str,
+    board_lot_size: int,
+) -> ExecutionLifecycleComponent:
+    lifecycle = lifecycles.get(symbol)
+    if lifecycle is None:
+        lifecycle = ExecutionLifecycleComponent(symbol=symbol, board_lot_size=board_lot_size)
+        lifecycles[symbol] = lifecycle
+    return lifecycle
 
 
 def _rows_by_date(

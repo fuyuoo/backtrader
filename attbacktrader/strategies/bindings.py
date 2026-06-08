@@ -8,6 +8,10 @@ from typing import Any
 from attbacktrader.sizing import EqualWeightSizing
 from attbacktrader.strategies.methods import (
     AtrMultipleStop,
+    BaomaAddOn,
+    BaomaEntry,
+    BaomaMa25ProfitExit,
+    BaomaMa60Stop,
     FixedPercentStop,
     KdjOversoldAddOn,
     KdjOverheatedExit,
@@ -35,6 +39,7 @@ class BoundStrategyMethods:
 
 
 _ENTRY_METHODS = {
+    "baoma_entry": BaomaEntry,
     "kdj_oversold_entry": KdjOversoldEntry,
     "macd_bullish_crossover_entry": MacdBullishCrossoverEntry,
     "macd_weekly_bullish_crossover_entry": lambda **params: MacdBullishCrossoverEntry(
@@ -51,6 +56,7 @@ _ENTRY_METHODS = {
     "ma_macd_bullish_confirmation_entry": MovingAverageMacdBullishConfirmationEntry,
 }
 _PROFIT_TAKING_METHODS = {
+    "baoma_ma25_profit_exit": BaomaMa25ProfitExit,
     "kdj_overheated_exit": KdjOverheatedExit,
     "macd_bearish_crossover_exit": MacdBearishCrossoverExit,
     "macd_weekly_bearish_crossover_exit": lambda **params: MacdBearishCrossoverExit(
@@ -67,10 +73,12 @@ _PROFIT_TAKING_METHODS = {
     "ma_macd_weakening_exit": MovingAverageMacdWeakeningExit,
 }
 _STOP_LOSS_METHODS = {
+    "baoma_ma60_stop": BaomaMa60Stop,
     "fixed_percent_stop": lambda **params: FixedPercentStop(**({"loss_percent": 0.05} | params)),
     "atr_multiple_stop": AtrMultipleStop,
 }
 _ADD_ON_METHODS = {
+    "baoma_add_on": BaomaAddOn,
     "none": NoAddOn,
     "kdj_oversold_add_on": KdjOversoldAddOn,
 }

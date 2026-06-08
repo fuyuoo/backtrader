@@ -38,8 +38,11 @@ def test_build_run_execution_summary_keeps_terminal_output_compact(tmp_path) -> 
     ]
     assert summary["data_windows"]["earliest_requested_start_date"] == "2023-10-03"
     assert summary["data_windows"]["warmup_incomplete_count"] == 1
+    assert summary["attribution_factor_selection"]["include_count"] == 1
+    assert summary["attribution_factor_selection"]["not_include_count"] == 1
     assert summary["evidence"] == {"status": "ok", "error_count": 0, "warning_count": 0}
     assert summary["artifacts"]["report_zh"].endswith("report.zh.md")
+    assert summary["artifacts"]["attribution_factor_selection"].endswith("attribution_factor_selection.json")
 
     text = render_run_execution_summary_text_zh(summary)
 
@@ -47,6 +50,7 @@ def test_build_run_execution_summary_keeps_terminal_output_compact(tmp_path) -> 
     assert "累计收益: 5.00%" in text
     assert "不足一手，无法下单 (BOARD_LOT_TOO_SMALL): 2" in text
     assert "warmup 不完整 1" in text
+    assert "归因因子" in text
     assert "report.zh.md" in text
     assert "signal_audit" not in text
 
@@ -145,6 +149,19 @@ def _result():
                 ),
             ),
         ),
+        attribution_factor_selection={
+            "schema": "attbacktrader.attribution_factor_selection.v1",
+            "enabled": True,
+            "configured_source": "analysis.attribution.include",
+            "include": ("symbol.ma.price_above_ma25",),
+            "not_include": ("symbol.ma.ma60",),
+            "include_count": 1,
+            "not_include_count": 1,
+            "entry_attribution": {
+                "enabled": True,
+                "runtime_include": ("symbol.ma.price_above_ma25",),
+            },
+        },
         report=BacktestReport(
             report_id="summary-test",
             returns=ReturnSummary(
@@ -220,4 +237,5 @@ def _artifacts(root):
         trade_review_path=root / "trade_review.json",
         post_exit_analysis_path=root / "post_exit_analysis.json",
         evidence_validation_path=root / "evidence_validation.json",
+        attribution_factor_selection_path=root / "attribution_factor_selection.json",
     )

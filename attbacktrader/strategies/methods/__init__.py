@@ -3,6 +3,7 @@
 from attbacktrader.features import IndicatorRequirement
 
 from .add_on import KdjOversoldAddOn, NoAddOn
+from .baoma import BaomaAddOn, BaomaEntry, BaomaMa25ProfitExit, BaomaMa60Stop
 from .entry import (
     KdjOversoldEntry,
     MacdBullishCrossoverEntry,
@@ -31,6 +32,10 @@ def required_indicator_names(*methods) -> frozenset[str]:
 
 __all__ = [
     "AtrMultipleStop",
+    "BaomaAddOn",
+    "BaomaEntry",
+    "BaomaMa25ProfitExit",
+    "BaomaMa60Stop",
     "FixedPercentStop",
     "KdjOversoldAddOn",
     "KdjOverheatedExit",

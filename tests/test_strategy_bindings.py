@@ -28,6 +28,7 @@ def test_strategy_binding_builds_trend_template_methods() -> None:
     )
     assert allowed_strategy_component_values("trend_template_v1", "entry_method") == frozenset(
         {
+            "baoma_entry",
             "kdj_oversold_entry",
             "macd_bullish_crossover_entry",
             "macd_weekly_bullish_crossover_entry",
@@ -38,6 +39,7 @@ def test_strategy_binding_builds_trend_template_methods() -> None:
     )
     assert allowed_strategy_component_values("trend_template_v1", "profit_taking_method") == frozenset(
         {
+            "baoma_ma25_profit_exit",
             "kdj_overheated_exit",
             "macd_bearish_crossover_exit",
             "macd_weekly_bearish_crossover_exit",
@@ -48,6 +50,7 @@ def test_strategy_binding_builds_trend_template_methods() -> None:
     )
     assert allowed_strategy_component_values("trend_template_v1", "add_on_method") == frozenset(
         {
+            "baoma_add_on",
             "none",
             "kdj_oversold_add_on",
         }
@@ -125,6 +128,22 @@ def test_strategy_binding_reports_required_indicators_for_selected_methods() -> 
             sizing_rule="equal_weight",
         )
     ) == frozenset({IndicatorRequirement("macd", "D"), IndicatorRequirement("kdj", "D")})
+    assert required_indicators_for_strategy_config(
+        StrategyConfig(
+            template="trend_template_v1",
+            entry_method="baoma_entry",
+            profit_taking_method="baoma_ma25_profit_exit",
+            stop_loss_method="baoma_ma60_stop",
+            add_on_method="baoma_add_on",
+            sizing_rule="equal_weight",
+        )
+    ) == frozenset(
+        {
+            IndicatorRequirement("macd", "D"),
+            IndicatorRequirement("ma25", "D"),
+            IndicatorRequirement("ma60", "D"),
+        }
+    )
 
 
 def test_strategy_binding_accepts_parameterized_methods() -> None:

@@ -7,6 +7,11 @@ from datetime import date
 from typing import Any, Mapping, Sequence
 
 from attbacktrader.data import DailyBar
+from attbacktrader.engines.business.lifecycle import (
+    ExecutionLifecycleComponent,
+    LifecycleExecutionEvent,
+    LifecyclePositionSnapshot,
+)
 from attbacktrader.engines.ledger import EquityCurvePoint, PositionSnapshot
 from attbacktrader.features import (
     IndicatorFrame,
@@ -29,6 +34,8 @@ class BusinessPortfolioRunResult:
     final_value: float
     equity_curve: tuple[EquityCurvePoint, ...]
     position_snapshots: tuple[PositionSnapshot, ...]
+    lifecycle_events: tuple[LifecycleExecutionEvent, ...] = ()
+    lifecycle_snapshots: tuple[LifecyclePositionSnapshot, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -49,6 +56,8 @@ def run_trend_template_v1_portfolio_business(
     indicators_by_symbol: Mapping[str, IndicatorFrame] | None = None,
     risk_group_by_symbol: Mapping[str, str] | None = None,
     entry_attribution_context: EntryAttributionContext | None = None,
+    lifecycle_enabled: bool = False,
+    lifecycle_board_lot_size: int = 100,
 ) -> BusinessPortfolioRunResult:
     if initial_cash <= 0:
         raise ValueError("initial_cash must be positive")
@@ -56,6 +65,8 @@ def run_trend_template_v1_portfolio_business(
         raise ValueError("stake must be positive")
     if not bars_by_symbol:
         raise ValueError("bars_by_symbol cannot be empty")
+    if lifecycle_board_lot_size <= 0:
+        raise ValueError("lifecycle_board_lot_size must be positive")
 
     rows_by_key = _portfolio_rows_by_key(
         strategy_template,
@@ -75,6 +86,9 @@ def run_trend_template_v1_portfolio_business(
     closed_trades: list[ClosedTrade] = []
     equity_curve: list[EquityCurvePoint] = []
     position_snapshots: list[PositionSnapshot] = []
+    lifecycles: dict[str, ExecutionLifecycleComponent] = {}
+    lifecycle_events: list[LifecycleExecutionEvent] = []
+    lifecycle_snapshots: list[LifecyclePositionSnapshot] = []
     peak_value = float(initial_cash)
 
     for trade_date in dates:
@@ -146,6 +160,18 @@ def run_trend_template_v1_portfolio_business(
                     entry_date=trade_date,
                     entry_price=close,
                 )
+                if lifecycle_enabled:
+                    event = _lifecycle_for_symbol(
+                        lifecycles,
+                        symbol=symbol,
+                        board_lot_size=lifecycle_board_lot_size,
+                    ).buy(
+                        trade_date=trade_date,
+                        price=close,
+                        quantity=executable_quantity,
+                        reason_code=entry_intent.reason_code,
+                    )
+                    lifecycle_events.append(event)
                 daily_turnover_value[trade_date] = daily_turnover_value.get(trade_date, 0.0) + cost
                 last_rebalance_date_by_symbol[symbol] = trade_date
                 intents.append(entry_intent)
@@ -167,6 +193,20 @@ def run_trend_template_v1_portfolio_business(
             )
             intents.append(stop_intent)
             if stop_intent.intent_type == TradeIntentType.EXIT_LOSS:
+                if lifecycle_enabled:
+                    lifecycle = _lifecycle_for_symbol(
+                        lifecycles,
+                        symbol=symbol,
+                        board_lot_size=lifecycle_board_lot_size,
+                    )
+                    lifecycle.enter_exit_watch(trade_date=trade_date, reason_code=stop_intent.reason_code)
+                    lifecycle_events.append(
+                        lifecycle.confirm_full_exit(
+                            trade_date=trade_date,
+                            price=close,
+                            reason_code=stop_intent.reason_code,
+                        )
+                    )
                 cash += position.size * close
                 closed_trades.append(_close_trade(position, row.bar, stop_intent.reason_code))
                 positions.pop(symbol)
@@ -186,6 +226,20 @@ def run_trend_template_v1_portfolio_business(
             )
             intents.append(profit_intent)
             if profit_intent.intent_type == TradeIntentType.EXIT_PROFIT:
+                if lifecycle_enabled:
+                    lifecycle = _lifecycle_for_symbol(
+                        lifecycles,
+                        symbol=symbol,
+                        board_lot_size=lifecycle_board_lot_size,
+                    )
+                    lifecycle.enter_exit_watch(trade_date=trade_date, reason_code=profit_intent.reason_code)
+                    lifecycle_events.append(
+                        lifecycle.confirm_full_exit(
+                            trade_date=trade_date,
+                            price=close,
+                            reason_code=profit_intent.reason_code,
+                        )
+                    )
                 cash += position.size * close
                 closed_trades.append(_close_trade(position, row.bar, profit_intent.reason_code))
                 positions.pop(symbol)
@@ -259,12 +313,28 @@ def run_trend_template_v1_portfolio_business(
                 entry_price=((position.size * position.entry_price) + cost) / new_size,
                 add_on_count=position.add_on_count + 1,
             )
+            if lifecycle_enabled:
+                event = _lifecycle_for_symbol(
+                    lifecycles,
+                    symbol=symbol,
+                    board_lot_size=lifecycle_board_lot_size,
+                ).buy(
+                    trade_date=trade_date,
+                    price=close,
+                    quantity=executable_quantity,
+                    reason_code=add_on_intent.reason_code,
+                )
+                lifecycle_events.append(event)
             daily_turnover_value[trade_date] = daily_turnover_value.get(trade_date, 0.0) + cost
             last_rebalance_date_by_symbol[symbol] = trade_date
             intents.append(add_on_intent)
 
         snapshots = _position_snapshots(trade_date, positions, latest_prices)
         position_snapshots.extend(snapshots)
+        if lifecycle_enabled:
+            for lifecycle in sorted(lifecycles.values(), key=lambda item: item.symbol):
+                lifecycle.advance_day(trade_date=trade_date, close_price=latest_prices[lifecycle.symbol])
+                lifecycle_snapshots.append(lifecycle.snapshot(trade_date=trade_date))
         total_value = cash + sum(snapshot.market_value for snapshot in snapshots)
         peak_value = max(peak_value, total_value)
         drawdown = (peak_value - total_value) / peak_value if peak_value > 0 else 0.0
@@ -303,7 +373,22 @@ def run_trend_template_v1_portfolio_business(
         final_value=final_value,
         equity_curve=tuple(equity_curve),
         position_snapshots=tuple(position_snapshots),
+        lifecycle_events=tuple(lifecycle_events),
+        lifecycle_snapshots=tuple(lifecycle_snapshots),
     )
+
+
+def _lifecycle_for_symbol(
+    lifecycles: dict[str, ExecutionLifecycleComponent],
+    *,
+    symbol: str,
+    board_lot_size: int,
+) -> ExecutionLifecycleComponent:
+    lifecycle = lifecycles.get(symbol)
+    if lifecycle is None:
+        lifecycle = ExecutionLifecycleComponent(symbol=symbol, board_lot_size=board_lot_size)
+        lifecycles[symbol] = lifecycle
+    return lifecycle
 
 
 def _portfolio_rows_by_key(

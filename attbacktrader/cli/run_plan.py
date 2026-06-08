@@ -6,6 +6,7 @@ import argparse
 import json
 
 from attbacktrader.config import load_run_plan
+from attbacktrader.cli.tushare_options import add_tushare_rate_limit_args, tushare_rate_limit_config_from_args
 from attbacktrader.data.providers import TushareProvider, read_tushare_token
 from attbacktrader.reports import (
     build_run_execution_summary,
@@ -29,7 +30,10 @@ def main(argv: list[str] | None = None) -> int:
     if run_plan.data.refresh_snapshots:
         if run_plan.data.provider != "tushare":
             raise SystemExit(f"Unsupported data provider: {run_plan.data.provider}")
-        provider = TushareProvider(read_tushare_token(args.token_file))
+        provider = TushareProvider(
+            read_tushare_token(args.token_file),
+            rate_limit=tushare_rate_limit_config_from_args(args),
+        )
 
     result = execute_run_plan(run_plan, provider=provider)
     artifact_paths = None
@@ -60,7 +64,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run attbacktrader from a YAML run plan")
     parser.add_argument("--config", required=True, help="Path to run.yaml")
     parser.add_argument("--token-file", default=".secrets/tushare_token.txt")
-    parser.add_argument("--engine", choices=["business", "backtrader"], default=None, help="Override execution.engine")
+    add_tushare_rate_limit_args(parser)
+    parser.add_argument(
+        "--engine",
+        choices=["business", "backtrader", "baoma_v1_business"],
+        default=None,
+        help="Override execution.engine",
+    )
     parser.add_argument("--output-root", default=None, help="Override output.report_root for persisted artifacts")
     parser.add_argument("--no-persist", action="store_true", help="Run without writing reports/{run_id} artifacts")
     output_group = parser.add_mutually_exclusive_group()
