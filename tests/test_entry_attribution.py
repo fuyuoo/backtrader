@@ -46,6 +46,11 @@ def test_entry_attribution_context_builds_symbol_market_and_industry_evidence() 
     evidence = context.evidence_for("000001.SZ", bars[-1].trade_date)
 
     assert evidence is not None
+    assert evidence.values["symbol.kdj.k"] > 0
+    assert evidence.values["symbol.kdj.d"] > 0
+    assert evidence.values["symbol.kdj.j"] > 0
+    assert evidence.values["symbol.kdj.threshold"] == 13.0
+    assert evidence.checks["symbol.kdj.j_below_threshold"] is False
     assert evidence.values["symbol.ma.ma20"] > 0
     assert evidence.values["symbol.ma.ma25"] > 0
     assert evidence.values["symbol.ma.ma60"] > 0
@@ -56,9 +61,60 @@ def test_entry_attribution_context_builds_symbol_market_and_industry_evidence() 
     assert evidence.categories["symbol.ma.trend_state"] == "bullish"
     assert evidence.checks["market.hs300.bullish_trend"] is True
     assert evidence.values["market.hs300.ma20"] > evidence.values["market.hs300.ma60"]
+    assert evidence.values["market.hs300.kdj.k"] > 0
+    assert evidence.values["market.hs300.kdj.d"] > 0
+    assert evidence.values["market.hs300.kdj.j"] > 0
+    assert evidence.values["market.hs300.kdj.threshold"] == 13.0
+    assert evidence.checks["market.hs300.kdj.j_below_threshold"] is False
     assert evidence.categories["market.hs300.trend_state"] == "bullish"
     assert evidence.categories["industry.sw_l1.code"] == "801780.SI"
     assert evidence.checks["industry.kdj.j_below_threshold"] is True
+    assert evidence.categories["industry.kdj.j_bucket"] == "<13"
+    assert evidence.categories["industry.kdj.state"] == "oversold"
+    assert evidence.values["industry.ma.ma20"] < evidence.values["industry.ma.ma60"]
+    assert evidence.checks["industry.ma.price_above_ma20"] is False
+    assert evidence.checks["industry.ma.price_above_ma60"] is False
+    assert evidence.checks["industry.ma.ma20_above_ma60"] is False
+    assert evidence.checks["industry.ma.bullish_trend"] is False
+    assert evidence.categories["industry.ma.trend_state"] == "not_bullish"
+    assert "industry.relative.hs300.return_20d" in evidence.values
+    assert "industry.relative.hs300.return_60d" in evidence.values
+    assert evidence.values["industry.relative.hs300.excess_return_20d"] < 0
+    assert evidence.values["industry.relative.hs300.excess_return_60d"] < 0
+    assert evidence.checks["industry.relative.hs300.outperform_20d"] is False
+    assert evidence.checks["industry.relative.hs300.outperform_60d"] is False
+    assert evidence.categories["industry.relative.hs300.strength_state"] == "weak_underperform"
+
+
+def test_entry_attribution_uses_earliest_known_industry_membership_for_prior_dates() -> None:
+    bars = _daily_bars("000001.SZ", count=70, start_close=10.0, step=0.3)
+    industry_bars = _index_bars("801780.SI", count=70, start_close=50.0, step=-0.4)
+    future_membership = StockIndustryMembership(
+        symbol="000001.SZ",
+        stock_name="fixture",
+        level1_code="801780.SI",
+        level1_name="银行",
+        level2_code="801783.SI",
+        level2_name="银行 II",
+        level3_code="857831.SI",
+        level3_name="银行 III",
+        in_date=bars[-1].trade_date + timedelta(days=30),
+        out_date=None,
+        is_new=True,
+    )
+
+    context = build_entry_attribution_context(
+        bars_by_symbol={"000001.SZ": bars},
+        indicators_by_symbol={},
+        industry_index_bars_by_symbol={"801780.SI": industry_bars},
+        memberships_by_symbol={"000001.SZ": (future_membership,)},
+    )
+
+    evidence = context.evidence_for("000001.SZ", bars[-1].trade_date)
+
+    assert evidence is not None
+    assert evidence.categories["industry.sw_l1.code"] == "801780.SI"
+    assert "industry.kdj.j" in evidence.values
 
 
 def test_entry_attribution_context_does_not_default_missing_long_ma_factors() -> None:

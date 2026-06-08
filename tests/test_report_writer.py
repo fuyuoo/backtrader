@@ -35,6 +35,8 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert artifacts.result_diagnostics_path.exists()
     assert artifacts.trade_lifecycle_path.exists()
     assert artifacts.trade_lifecycle_chinese_markdown_path.exists()
+    assert artifacts.trade_attribution_path.exists()
+    assert artifacts.trade_attribution_chinese_markdown_path.exists()
     assert artifacts.trade_review_path.exists()
     assert artifacts.trade_review_chinese_markdown_path.exists()
     assert artifacts.environment_fit_path.exists()
@@ -48,6 +50,9 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert artifacts.positions_path.exists()
     assert artifacts.execution_audit_path.exists()
     assert artifacts.snapshots_path.exists()
+    assert artifacts.data_preflight_path.exists()
+    assert artifacts.stock_pool_filter_path.exists()
+    assert artifacts.attribution_factor_selection_path.exists()
 
     run_plan_payload = _read_json(artifacts.run_plan_path)
     report_payload = _read_json(artifacts.report_path)
@@ -56,6 +61,7 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     sizing_audit_payload = _read_json(artifacts.sizing_audit_path)
     result_diagnostics_payload = _read_json(artifacts.result_diagnostics_path)
     trade_lifecycle_payload = _read_json(artifacts.trade_lifecycle_path)
+    trade_attribution_payload = _read_json(artifacts.trade_attribution_path)
     trade_review_payload = _read_json(artifacts.trade_review_path)
     environment_fit_payload = _read_json(artifacts.environment_fit_path)
     strategy_environment_profile_payload = _read_json(artifacts.strategy_environment_profile_path)
@@ -65,9 +71,13 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     positions_payload = _read_json(artifacts.positions_path)
     execution_audit_payload = _read_json(artifacts.execution_audit_path)
     snapshots_payload = _read_json(artifacts.snapshots_path)
+    data_preflight_payload = json.loads(artifacts.data_preflight_path.read_text(encoding="utf-8"))
+    stock_pool_filter_payload = json.loads(artifacts.stock_pool_filter_path.read_text(encoding="utf-8"))
+    attribution_factor_selection_payload = _read_json(artifacts.attribution_factor_selection_path)
     report_markdown = artifacts.report_markdown_path.read_text(encoding="utf-8")
     report_chinese_markdown = artifacts.report_chinese_markdown_path.read_text(encoding="utf-8")
     trade_lifecycle_markdown = artifacts.trade_lifecycle_chinese_markdown_path.read_text(encoding="utf-8")
+    trade_attribution_markdown = artifacts.trade_attribution_chinese_markdown_path.read_text(encoding="utf-8")
     trade_review_markdown = artifacts.trade_review_chinese_markdown_path.read_text(encoding="utf-8")
     environment_fit_markdown = artifacts.environment_fit_chinese_markdown_path.read_text(encoding="utf-8")
     strategy_environment_profile_markdown = artifacts.strategy_environment_profile_chinese_markdown_path.read_text(
@@ -87,11 +97,15 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert "## 交易质量" in report_chinese_markdown
     assert "## 执行成本" in report_chinese_markdown
     assert len(trades_payload["closed_trades"]) == 2
-    assert signal_audit_payload[0]["method_name"] == "kdj_oversold_entry"
-    assert "reason_code" in signal_audit_payload[0]
-    assert "signal_values" in signal_audit_payload[0]
-    assert "checks" in signal_audit_payload[0]["signal_values"]
-    assert "attribution" in signal_audit_payload[0]["signal_values"]
+    assert run_plan_payload["output"]["artifact_detail"] == "compact"
+    assert signal_audit_payload["schema"] == "attbacktrader.compact_signal_audit.v1"
+    assert signal_audit_payload["raw_signal_audit_persisted"] is False
+    assert signal_audit_payload["total_count"] == len(result.signal_audit)
+    assert signal_audit_payload["samples"][0]["method_name"] == "kdj_oversold_entry"
+    assert "reason_code" in signal_audit_payload["samples"][0]
+    assert "signal_values" in signal_audit_payload["samples"][0]
+    assert "checks" in signal_audit_payload["samples"][0]["signal_values"]
+    assert "attribution" in signal_audit_payload["samples"][0]["signal_values"]
     assert sizing_audit_payload
     assert sizing_audit_payload[0]["sizing"]["method_name"] == "equal_weight"
     assert result_diagnostics_payload["symbols"][0]["symbol"] == "000001.SZ"
@@ -118,6 +132,12 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert trade_lifecycle_payload["lifecycles"][0]["events"][-1]["event_type"] == "exit"
     assert trade_lifecycle_payload["lifecycles"][0]["events"][0]["executions"]
     assert "# 交易生命周期审阅" in trade_lifecycle_markdown
+    assert trade_attribution_payload["schema"] == "attbacktrader.trade_attribution.v1"
+    assert trade_attribution_payload["trade_count"] == 2
+    assert trade_attribution_payload["entry_event_count"] == 2
+    assert "attributions" in trade_attribution_payload
+    assert "factor_summaries" in trade_attribution_payload
+    assert "# 交易后验归因" in trade_attribution_markdown
     assert trade_review_payload["trade_count"] == 2
     assert "sold_too_early_profiles" in trade_review_payload
     assert "stop_loss_rebound_profiles" in trade_review_payload
@@ -172,6 +192,34 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert snapshots_payload["symbols"][0]["snapshot_provenance"]["action"] == "created"
     assert snapshots_payload["symbols"][0]["indicator_snapshot_provenance"][0]["action"] == "created"
     assert snapshots_payload["symbols"][0]["data_quality_issues"] == []
+    assert "stock_pool_filter" in snapshots_payload
+    assert "attribution_factor_selection" in snapshots_payload
+    assert attribution_factor_selection_payload["schema"] == "attbacktrader.attribution_factor_selection.v1"
+    assert attribution_factor_selection_payload["configured_source"] == "default:all_applicable"
+    assert "symbol.ma.price_above_ma25" in attribution_factor_selection_payload["include"]
+    assert attribution_factor_selection_payload["not_include"] == []
+    assert snapshots_payload["attribution_factor_selection"]["include"] == attribution_factor_selection_payload["include"]
+    assert data_preflight_payload is None
+    assert stock_pool_filter_payload is None
+
+
+def test_write_run_artifacts_can_persist_full_raw_audit_for_debugging(tmp_path: Path) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    run_plan = _run_plan(tmp_path / "snapshots")
+    run_plan = run_plan.model_copy(
+        update={"output": run_plan.output.model_copy(update={"artifact_detail": "full"})}
+    )
+    result = execute_run_plan(run_plan, provider=FakeDailyProvider(bars))
+
+    artifacts = write_run_artifacts(run_plan, result, output_root=tmp_path / "reports")
+
+    result_payload = _read_json(artifacts.result_path)
+    signal_audit_payload = _read_json(artifacts.signal_audit_path)
+
+    assert result_payload["run_id"] == "writer-test"
+    assert "signal_audit" in result_payload
+    assert isinstance(signal_audit_payload, list)
+    assert signal_audit_payload[0]["method_name"] == "kdj_oversold_entry"
 
 
 def _read_json(path: Path) -> dict:

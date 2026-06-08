@@ -24,6 +24,7 @@ _ARTIFACT_SPECS: tuple[dict[str, Any], ...] = (
     {"artifact": "run_data_dictionary", "filename": "run_data_dictionary.json", "required": False},
     {"artifact": "run_data_overview", "filename": "run_data_overview.json", "required": False},
     {"artifact": "run_data_attribution_index", "filename": "run_data_attribution_index.json", "required": False},
+    {"artifact": "run_data_attribution_summary", "filename": "run_data_attribution_summary.json", "required": False},
     {"artifact": "review_packet_all", "filename": "review_packet.all.json", "required": False},
     {"artifact": "review_brief_all", "filename": "review_brief.all.json", "required": False},
     {"artifact": "ai_review_result_all", "filename": "ai_review_result.all.json", "required": False},

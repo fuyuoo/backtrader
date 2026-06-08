@@ -144,6 +144,7 @@ def render_backtest_report_markdown(run_plan: "RunPlan", result: "RunPlanExecuti
         f"| Profit/loss ratio | {_format_optional_number(report.trade_quality.profit_loss_ratio)} |",
         "",
     ]
+    _extend_stock_pool_filter_section(lines, result, zh=False)
 
     if report.portfolio_behavior is not None:
         portfolio = report.portfolio_behavior
@@ -350,6 +351,7 @@ def render_backtest_report_markdown_zh(run_plan: "RunPlan", result: "RunPlanExec
         f"| 盈亏比 | {_format_optional_number(report.trade_quality.profit_loss_ratio)} |",
         "",
     ]
+    _extend_stock_pool_filter_section(lines, result, zh=True)
 
     if report.portfolio_behavior is not None:
         portfolio = report.portfolio_behavior
@@ -1123,6 +1125,90 @@ def _diagnostics_for_result(result: "RunPlanExecutionResult"):
         execution_audit=result.execution_audit,
         open_positions=result.open_positions,
     )
+
+
+def _extend_stock_pool_filter_section(lines: list[str], result: "RunPlanExecutionResult", *, zh: bool) -> None:
+    stock_pool_filter = getattr(result, "stock_pool_filter", None)
+    if stock_pool_filter is None:
+        return
+
+    excluded_symbols = tuple(getattr(stock_pool_filter, "excluded_symbols", ()) or ())
+    warning_symbols = tuple(getattr(stock_pool_filter, "warning_symbols", ()) or ())
+    if zh:
+        lines.extend(
+            [
+                "## 股票池过滤",
+                "",
+                "| 项目 | 值 |",
+                "|---|---:|",
+                f"| 原始股票数 | {getattr(stock_pool_filter, 'original_count', 0)} |",
+                f"| 回测保留 | {getattr(stock_pool_filter, 'kept_count', 0)} |",
+                f"| 保留但带 warning | {getattr(stock_pool_filter, 'warning_count', 0)} |",
+                f"| 自动剔除 | {getattr(stock_pool_filter, 'excluded_count', 0)} |",
+                "",
+            ]
+        )
+        if excluded_symbols:
+            lines.extend(["| 剔除标的 | 状态 | 原因 |", "|---|---|---|"])
+            for item in excluded_symbols[:12]:
+                lines.append(
+                    "| "
+                    f"{getattr(item, 'symbol', '-')} | "
+                    f"{getattr(item, 'status', '-')} | "
+                    f"{_stock_pool_filter_reason(item)} |"
+                )
+            if len(excluded_symbols) > 12:
+                lines.append(f"| ... | ... | 另有 {len(excluded_symbols) - 12} 个，见 `stock_pool_filter.json` |")
+            lines.append("")
+        if warning_symbols:
+            lines.append(f"保留的 warning 标的共 {len(warning_symbols)} 个，完整清单见 `stock_pool_filter.json`。")
+            lines.append("")
+        return
+
+    lines.extend(
+        [
+            "## Stock Pool Filter",
+            "",
+            "| Item | Value |",
+            "|---|---:|",
+            f"| Original symbols | {getattr(stock_pool_filter, 'original_count', 0)} |",
+            f"| Kept for backtest | {getattr(stock_pool_filter, 'kept_count', 0)} |",
+            f"| Kept with warning | {getattr(stock_pool_filter, 'warning_count', 0)} |",
+            f"| Excluded | {getattr(stock_pool_filter, 'excluded_count', 0)} |",
+            "",
+        ]
+    )
+    if excluded_symbols:
+        lines.extend(["| Excluded symbol | Status | Reason |", "|---|---|---|"])
+        for item in excluded_symbols[:12]:
+            lines.append(
+                "| "
+                f"{getattr(item, 'symbol', '-')} | "
+                f"{getattr(item, 'status', '-')} | "
+                f"{_stock_pool_filter_reason(item)} |"
+            )
+        if len(excluded_symbols) > 12:
+            lines.append(f"| ... | ... | {len(excluded_symbols) - 12} more; see `stock_pool_filter.json` |")
+        lines.append("")
+    if warning_symbols:
+        lines.append(f"{len(warning_symbols)} warning symbols were kept; see `stock_pool_filter.json`.")
+        lines.append("")
+
+
+def _stock_pool_filter_reason(item) -> str:
+    error_message = getattr(item, "error_message", None)
+    if error_message:
+        return str(error_message)
+    indicator_alarms = tuple(getattr(item, "indicator_alarms", ()) or ())
+    if indicator_alarms:
+        return "; ".join(str(value) for value in indicator_alarms[:3])
+    issue_codes = tuple(getattr(item, "data_quality_issue_codes", ()) or ())
+    if issue_codes:
+        return "; ".join(str(value) for value in issue_codes[:3])
+    error_type = getattr(item, "error_type", None)
+    if error_type:
+        return str(error_type)
+    return "-"
 
 
 def _label_with_translation(label: str) -> str:

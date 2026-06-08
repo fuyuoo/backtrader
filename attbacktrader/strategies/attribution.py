@@ -14,10 +14,16 @@ from attbacktrader.strategies.intents import TradeIntent, TradeIntentType
 
 
 ENTRY_ATTRIBUTION_INDICATOR_REQUIREMENTS = (
+    IndicatorRequirement("kdj", "D"),
     IndicatorRequirement("ma20", "D"),
     IndicatorRequirement("ma25", "D"),
     IndicatorRequirement("ma60", "D"),
 )
+
+ATTRIBUTION_FACTOR_SELECTION_SCHEMA = "attbacktrader.attribution_factor_selection.v1"
+VALID_ATTRIBUTION_FACTOR_TYPES = {"check", "value", "category", "text"}
+VALID_ATTRIBUTION_SCOPES = {"symbol", "industry", "market", "sizing", "execution", "portfolio"}
+VALID_ATTRIBUTION_TIMINGS = {"entry", "exit", "holding", "post_exit"}
 
 
 @dataclass(frozen=True)
@@ -29,14 +35,37 @@ class EntryAttributionFactorDeclaration:
     scope: str
     dependencies: tuple[str, ...] = ()
     missing_behavior: str = "missing"
+    owner: str = "framework"
+    timings: tuple[str, ...] = ("entry",)
+    compatible_strategies: tuple[str, ...] = ()
+    compatible_methods: tuple[str, ...] = ()
+    source: str = "artifact_bound_lookup"
+    value_type: str | None = None
 
     def __post_init__(self) -> None:
-        if self.factor_type not in {"check", "value", "category"}:
-            raise ValueError("factor_type must be check, value, or category")
-        if self.scope not in {"symbol", "industry", "market", "sizing"}:
-            raise ValueError("scope must be symbol, industry, market, or sizing")
+        factor_type = str(self.factor_type)
+        if factor_type not in VALID_ATTRIBUTION_FACTOR_TYPES:
+            raise ValueError("factor_type must be check, value, category, or text")
+        if self.scope not in VALID_ATTRIBUTION_SCOPES:
+            raise ValueError("scope must be symbol, industry, market, sizing, execution, or portfolio")
         if self.missing_behavior != "missing":
             raise ValueError("entry attribution missing behavior must be missing")
+        timings = tuple(str(timing) for timing in self.timings)
+        if not timings:
+            raise ValueError("attribution factor timings cannot be empty")
+        invalid_timings = sorted(set(timings) - VALID_ATTRIBUTION_TIMINGS)
+        if invalid_timings:
+            raise ValueError(f"unsupported attribution factor timings: {invalid_timings}")
+        object.__setattr__(self, "factor_type", factor_type)
+        object.__setattr__(self, "timings", timings)
+        object.__setattr__(self, "dependencies", tuple(str(value) for value in self.dependencies))
+        object.__setattr__(self, "compatible_strategies", tuple(str(value) for value in self.compatible_strategies))
+        object.__setattr__(self, "compatible_methods", tuple(str(value) for value in self.compatible_methods))
+        if self.value_type is None:
+            object.__setattr__(self, "value_type", factor_type)
+
+
+AttributionFactorDeclaration = EntryAttributionFactorDeclaration
 
 
 @dataclass(frozen=True)
@@ -181,6 +210,60 @@ STANDARD_ENTRY_ATTRIBUTION_FACTORS = (
         dependencies=("kdj:D",),
     ),
     EntryAttributionFactorDeclaration(
+        key="symbol.macd.dea",
+        factor_type="value",
+        label_zh="个股 MACD DEA",
+        label_en="Symbol MACD DEA",
+        scope="symbol",
+        dependencies=("macd:D",),
+        owner="baoma_v1",
+        compatible_strategies=("baoma_v1",),
+        compatible_methods=("baoma_entry", "baoma_add_on"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.dea_positive",
+        factor_type="check",
+        label_zh="个股 DEA 上水",
+        label_en="Symbol DEA above zero",
+        scope="symbol",
+        dependencies=("macd:D",),
+        owner="baoma_v1",
+        compatible_strategies=("baoma_v1",),
+        compatible_methods=("baoma_entry", "baoma_add_on"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.dea_recent_waterline",
+        factor_type="check",
+        label_zh="个股 DEA 最近上水",
+        label_en="Symbol DEA recent waterline",
+        scope="symbol",
+        dependencies=("macd:D",),
+        owner="baoma_v1",
+        compatible_strategies=("baoma_v1",),
+        compatible_methods=("baoma_entry", "baoma_add_on"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.dea_waterline_age_trading_days",
+        factor_type="value",
+        label_zh="个股 DEA 上水天数",
+        label_en="Symbol DEA waterline age in trading days",
+        scope="symbol",
+        dependencies=("macd:D",),
+        owner="baoma_v1",
+        compatible_strategies=("baoma_v1",),
+        compatible_methods=("baoma_entry", "baoma_add_on"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.dea_waterline_max_age_days",
+        factor_type="value",
+        label_zh="个股 DEA 上水天数阈值",
+        label_en="Symbol DEA waterline max age days",
+        scope="symbol",
+        owner="baoma_v1",
+        compatible_strategies=("baoma_v1",),
+        compatible_methods=("baoma_entry", "baoma_add_on"),
+    ),
+    EntryAttributionFactorDeclaration(
         key="symbol.ma.ma20",
         factor_type="value",
         label_zh="个股 MA20",
@@ -284,6 +367,134 @@ STANDARD_ENTRY_ATTRIBUTION_FACTORS = (
         dependencies=("industry_index_bars", "kdj:D"),
     ),
     EntryAttributionFactorDeclaration(
+        key="industry.kdj.j_bucket",
+        factor_type="category",
+        label_zh="行业 KDJ J 分桶",
+        label_en="Industry KDJ J bucket",
+        scope="industry",
+        dependencies=("industry_index_bars", "kdj:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.kdj.state",
+        factor_type="category",
+        label_zh="行业 KDJ 状态",
+        label_en="Industry KDJ state",
+        scope="industry",
+        dependencies=("industry_index_bars", "kdj:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.ma.ma20",
+        factor_type="value",
+        label_zh="行业 MA20",
+        label_en="Industry MA20",
+        scope="industry",
+        dependencies=("industry_index_bars", "ma20:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.ma.ma60",
+        factor_type="value",
+        label_zh="行业 MA60",
+        label_en="Industry MA60",
+        scope="industry",
+        dependencies=("industry_index_bars", "ma60:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.ma.price_above_ma20",
+        factor_type="check",
+        label_zh="行业价格在 MA20 上方",
+        label_en="Industry price above MA20",
+        scope="industry",
+        dependencies=("industry_index_bars", "close", "ma20:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.ma.price_above_ma60",
+        factor_type="check",
+        label_zh="行业价格在 MA60 上方",
+        label_en="Industry price above MA60",
+        scope="industry",
+        dependencies=("industry_index_bars", "close", "ma60:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.ma.ma20_above_ma60",
+        factor_type="check",
+        label_zh="行业 MA20 高于 MA60",
+        label_en="Industry MA20 above MA60",
+        scope="industry",
+        dependencies=("industry_index_bars", "ma20:D", "ma60:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.ma.bullish_trend",
+        factor_type="check",
+        label_zh="行业均线多头趋势",
+        label_en="Industry MA bullish trend",
+        scope="industry",
+        dependencies=("industry_index_bars", "close", "ma20:D", "ma60:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.ma.trend_state",
+        factor_type="category",
+        label_zh="行业均线趋势状态",
+        label_en="Industry MA trend state",
+        scope="industry",
+        dependencies=("industry_index_bars", "close", "ma20:D", "ma60:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.relative.hs300.return_20d",
+        factor_type="value",
+        label_zh="行业 20 日收益",
+        label_en="Industry 20-day return",
+        scope="industry",
+        dependencies=("industry_index_bars", "000300.SH"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.relative.hs300.return_60d",
+        factor_type="value",
+        label_zh="行业 60 日收益",
+        label_en="Industry 60-day return",
+        scope="industry",
+        dependencies=("industry_index_bars", "000300.SH"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.relative.hs300.excess_return_20d",
+        factor_type="value",
+        label_zh="行业相对沪深300 20 日超额收益",
+        label_en="Industry 20-day excess return vs CSI 300",
+        scope="industry",
+        dependencies=("industry_index_bars", "000300.SH"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.relative.hs300.excess_return_60d",
+        factor_type="value",
+        label_zh="行业相对沪深300 60 日超额收益",
+        label_en="Industry 60-day excess return vs CSI 300",
+        scope="industry",
+        dependencies=("industry_index_bars", "000300.SH"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.relative.hs300.outperform_20d",
+        factor_type="check",
+        label_zh="行业 20 日强于沪深300",
+        label_en="Industry 20-day outperform CSI 300",
+        scope="industry",
+        dependencies=("industry_index_bars", "000300.SH"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.relative.hs300.outperform_60d",
+        factor_type="check",
+        label_zh="行业 60 日强于沪深300",
+        label_en="Industry 60-day outperform CSI 300",
+        scope="industry",
+        dependencies=("industry_index_bars", "000300.SH"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.relative.hs300.strength_state",
+        factor_type="category",
+        label_zh="行业相对沪深300强弱状态",
+        label_en="Industry relative strength state vs CSI 300",
+        scope="industry",
+        dependencies=("industry_index_bars", "000300.SH"),
+    ),
+    EntryAttributionFactorDeclaration(
         key="market.hs300.close",
         factor_type="value",
         label_zh="沪深300收盘价",
@@ -324,6 +535,46 @@ STANDARD_ENTRY_ATTRIBUTION_FACTORS = (
         dependencies=("000300.SH", "close", "ma20:D", "ma60:D"),
     ),
     EntryAttributionFactorDeclaration(
+        key="market.hs300.kdj.k",
+        factor_type="value",
+        label_zh="沪深300 KDJ K",
+        label_en="CSI 300 KDJ K",
+        scope="market",
+        dependencies=("000300.SH", "kdj:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="market.hs300.kdj.d",
+        factor_type="value",
+        label_zh="沪深300 KDJ D",
+        label_en="CSI 300 KDJ D",
+        scope="market",
+        dependencies=("000300.SH", "kdj:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="market.hs300.kdj.j",
+        factor_type="value",
+        label_zh="沪深300 KDJ J",
+        label_en="CSI 300 KDJ J",
+        scope="market",
+        dependencies=("000300.SH", "kdj:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="market.hs300.kdj.threshold",
+        factor_type="value",
+        label_zh="沪深300 KDJ 阈值",
+        label_en="CSI 300 KDJ threshold",
+        scope="market",
+        dependencies=("000300.SH", "kdj:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="market.hs300.kdj.j_below_threshold",
+        factor_type="check",
+        label_zh="沪深300 KDJ J 低于阈值",
+        label_en="CSI 300 KDJ J below threshold",
+        scope="market",
+        dependencies=("000300.SH", "kdj:D"),
+    ),
+    EntryAttributionFactorDeclaration(
         key="sizing.risk_group",
         factor_type="category",
         label_zh="仓位风险组",
@@ -331,6 +582,8 @@ STANDARD_ENTRY_ATTRIBUTION_FACTORS = (
         scope="sizing",
     ),
 )
+
+STANDARD_ATTRIBUTION_FACTORS = STANDARD_ENTRY_ATTRIBUTION_FACTORS
 
 
 def entry_attribution_factor_declarations() -> tuple[EntryAttributionFactorDeclaration, ...]:
@@ -343,6 +596,82 @@ def entry_attribution_declaration_by_key() -> dict[str, EntryAttributionFactorDe
 
 def entry_attribution_factor_keys() -> tuple[str, ...]:
     return tuple(declaration.key for declaration in STANDARD_ENTRY_ATTRIBUTION_FACTORS)
+
+
+def attribution_factor_declarations() -> tuple[AttributionFactorDeclaration, ...]:
+    return STANDARD_ATTRIBUTION_FACTORS
+
+
+def attribution_declaration_by_key() -> dict[str, AttributionFactorDeclaration]:
+    return {declaration.key: declaration for declaration in STANDARD_ATTRIBUTION_FACTORS}
+
+
+def attribution_factor_keys() -> tuple[str, ...]:
+    return tuple(declaration.key for declaration in STANDARD_ATTRIBUTION_FACTORS)
+
+
+def resolve_attribution_factor_selection(
+    include: Sequence[str],
+    *,
+    applicable_factor_keys: Sequence[str] | None = None,
+    configured_source: str,
+) -> dict[str, Any]:
+    declarations = attribution_declaration_by_key()
+    applicable = tuple(str(key) for key in (applicable_factor_keys or attribution_factor_keys()))
+    include_keys = tuple(str(key) for key in include)
+    duplicate_include = sorted({key for key in include_keys if include_keys.count(key) > 1})
+    if duplicate_include:
+        raise ValueError(f"attribution include factors cannot contain duplicates: {duplicate_include}")
+
+    invalid_applicable = sorted(key for key in applicable if key not in declarations)
+    if invalid_applicable:
+        raise ValueError(f"unknown applicable attribution factors: {invalid_applicable}")
+
+    invalid_include = sorted(key for key in include_keys if key not in declarations)
+    if invalid_include:
+        raise ValueError(f"unknown attribution include factors: {invalid_include}")
+
+    not_applicable = sorted(set(include_keys) - set(applicable))
+    if not_applicable:
+        raise ValueError(f"attribution include factors are not applicable: {not_applicable}")
+
+    include_set = frozenset(include_keys)
+    not_include = tuple(key for key in applicable if key not in include_set)
+
+    return {
+        "schema": ATTRIBUTION_FACTOR_SELECTION_SCHEMA,
+        "configured_source": configured_source,
+        "applicable": applicable,
+        "include": include_keys,
+        "not_include": not_include,
+        "include_count": len(include_keys),
+        "not_include_count": len(not_include),
+        "factors": tuple(
+            {
+                **attribution_factor_declaration_payload(declarations[key]),
+                "selected": key in include_set,
+            }
+            for key in applicable
+        ),
+    }
+
+
+def attribution_factor_declaration_payload(declaration: AttributionFactorDeclaration) -> dict[str, Any]:
+    return {
+        "key": declaration.key,
+        "owner": declaration.owner,
+        "timings": declaration.timings,
+        "factor_type": declaration.factor_type,
+        "value_type": declaration.value_type,
+        "label_zh": declaration.label_zh,
+        "label_en": declaration.label_en,
+        "scope": declaration.scope,
+        "source": declaration.source,
+        "dependencies": declaration.dependencies,
+        "missing_behavior": declaration.missing_behavior,
+        "compatible_strategies": declaration.compatible_strategies,
+        "compatible_methods": declaration.compatible_methods,
+    }
 
 
 def entry_attribution_payload(
@@ -505,6 +834,8 @@ def build_entry_attribution_context(
     market_fast_period: int = 20,
     market_slow_period: int = 60,
     industry_kdj_threshold: float = 13.0,
+    symbol_kdj_threshold: float = 13.0,
+    market_kdj_threshold: float = 13.0,
     enabled_factor_keys: Sequence[str] | None = None,
     entry_filter: EntryAttributionFilterRule | None = None,
 ) -> EntryAttributionContext:
@@ -517,9 +848,11 @@ def build_entry_attribution_context(
         market_symbol=market_symbol,
         fast_period=market_fast_period,
         slow_period=market_slow_period,
+        kdj_threshold=market_kdj_threshold,
     )
     industry_evidence_by_symbol = _industry_kdj_evidence_by_symbol(
         industry_index_bars_by_symbol,
+        market_bars=benchmark_bars_by_symbol.get(market_symbol, ()),
         threshold=industry_kdj_threshold,
     )
 
@@ -541,6 +874,7 @@ def build_entry_attribution_context(
                         for period, values_by_date in ma_values_by_period.items()
                         if bar.trade_date in values_by_date
                     },
+                    kdj_threshold=symbol_kdj_threshold,
                 ),
                 _latest_evidence_on_or_before(market_evidence_by_date, bar.trade_date),
                 _industry_evidence_for_symbol_date(
@@ -566,10 +900,22 @@ def _symbol_evidence(
     frame: IndicatorFrame | None,
     *,
     ma_values: Mapping[int, float],
+    kdj_threshold: float,
 ) -> EntryAttributionEvidence:
     values: dict[str, Any] = {"symbol.close": bar.close}
     checks: dict[str, bool] = {}
     categories: dict[str, str] = {}
+
+    if frame is not None:
+        try:
+            kdj = frame.kdj_at(bar.trade_date)
+            values["symbol.kdj.k"] = kdj.k
+            values["symbol.kdj.d"] = kdj.d
+            values["symbol.kdj.j"] = kdj.j
+            values["symbol.kdj.threshold"] = kdj_threshold
+            checks["symbol.kdj.j_below_threshold"] = kdj.j < kdj_threshold
+        except KeyError:
+            pass
 
     resolved_ma_values = {
         period: _symbol_ma_value(bar.trade_date, frame, period=period, fallback=ma_values.get(period))
@@ -629,6 +975,7 @@ def _market_trend_evidence_by_date(
     market_symbol: str,
     fast_period: int,
     slow_period: int,
+    kdj_threshold: float,
 ) -> dict[date, EntryAttributionEvidence]:
     ordered_bars = tuple(sorted(bars, key=lambda value: value.trade_date))
     if not ordered_bars:
@@ -637,10 +984,15 @@ def _market_trend_evidence_by_date(
     closes = [bar.close for bar in ordered_bars]
     fast_values = calculate_sma(closes, period=fast_period)
     slow_values = calculate_sma(closes, period=slow_period)
+    kdj_values = calculate_kdj(
+        [bar.high for bar in ordered_bars],
+        [bar.low for bar in ordered_bars],
+        closes,
+    )
     prefix = f"market.{_market_key(market_symbol)}"
     evidence_by_date: dict[date, EntryAttributionEvidence] = {}
 
-    for bar, fast_ma, slow_ma in zip(ordered_bars, fast_values, slow_values):
+    for bar, fast_ma, slow_ma, kdj in zip(ordered_bars, fast_values, slow_values, kdj_values):
         values: dict[str, Any] = {f"{prefix}.close": bar.close}
         checks: dict[str, bool] = {}
         categories: dict[str, str] = {}
@@ -653,6 +1005,11 @@ def _market_trend_evidence_by_date(
             bullish = bar.close > fast_ma.value > slow_ma.value
             checks[f"{prefix}.bullish_trend"] = bullish
             categories[f"{prefix}.trend_state"] = "bullish" if bullish else "not_bullish"
+        values[f"{prefix}.kdj.k"] = kdj.k
+        values[f"{prefix}.kdj.d"] = kdj.d
+        values[f"{prefix}.kdj.j"] = kdj.j
+        values[f"{prefix}.kdj.threshold"] = kdj_threshold
+        checks[f"{prefix}.kdj.j_below_threshold"] = kdj.j < kdj_threshold
 
         evidence_by_date[bar.trade_date] = EntryAttributionEvidence(
             checks=checks,
@@ -666,33 +1023,131 @@ def _market_trend_evidence_by_date(
 def _industry_kdj_evidence_by_symbol(
     industry_index_bars_by_symbol: Mapping[str, Sequence[IndexBar]],
     *,
+    market_bars: Sequence[IndexBar],
     threshold: float,
 ) -> dict[str, dict[date, EntryAttributionEvidence]]:
     evidence_by_symbol: dict[str, dict[date, EntryAttributionEvidence]] = {}
+    market_returns_20d = _return_values_by_date(market_bars, period=20)
+    market_returns_60d = _return_values_by_date(market_bars, period=60)
 
     for industry_symbol, bars in industry_index_bars_by_symbol.items():
         ordered_bars = tuple(sorted(bars, key=lambda value: value.trade_date))
         if not ordered_bars:
             continue
+        closes = [bar.close for bar in ordered_bars]
         kdj_values = calculate_kdj(
             [bar.high for bar in ordered_bars],
             [bar.low for bar in ordered_bars],
-            [bar.close for bar in ordered_bars],
+            closes,
         )
-        evidence_by_symbol[industry_symbol] = {
-            bar.trade_date: EntryAttributionEvidence(
-                checks={"industry.kdj.j_below_threshold": kdj.j < threshold},
-                values={
-                    "industry.kdj.k": kdj.k,
-                    "industry.kdj.d": kdj.d,
-                    "industry.kdj.j": kdj.j,
-                },
-                categories={"industry.sw_l1.code": industry_symbol},
+        ma20_values = calculate_sma(closes, period=20)
+        ma60_values = calculate_sma(closes, period=60)
+        industry_returns_20d = _return_values_by_date(ordered_bars, period=20)
+        industry_returns_60d = _return_values_by_date(ordered_bars, period=60)
+        evidence_by_date: dict[date, EntryAttributionEvidence] = {}
+        for bar, kdj, ma20, ma60 in zip(ordered_bars, kdj_values, ma20_values, ma60_values):
+            values: dict[str, Any] = {
+                "industry.kdj.k": kdj.k,
+                "industry.kdj.d": kdj.d,
+                "industry.kdj.j": kdj.j,
+            }
+            checks: dict[str, bool] = {"industry.kdj.j_below_threshold": kdj.j < threshold}
+            categories: dict[str, str] = {
+                "industry.sw_l1.code": industry_symbol,
+                "industry.kdj.j_bucket": _kdj_j_bucket(kdj.j),
+                "industry.kdj.state": _kdj_state(kdj.j),
+            }
+            if ma20 is not None:
+                values["industry.ma.ma20"] = ma20.value
+                checks["industry.ma.price_above_ma20"] = bar.close > ma20.value
+            if ma60 is not None:
+                values["industry.ma.ma60"] = ma60.value
+                checks["industry.ma.price_above_ma60"] = bar.close > ma60.value
+            if ma20 is not None and ma60 is not None:
+                checks["industry.ma.ma20_above_ma60"] = ma20.value > ma60.value
+                bullish = bar.close > ma20.value > ma60.value
+                checks["industry.ma.bullish_trend"] = bullish
+                categories["industry.ma.trend_state"] = "bullish" if bullish else "not_bullish"
+
+            industry_return_20d = industry_returns_20d.get(bar.trade_date)
+            market_return_20d = _latest_number_on_or_before(market_returns_20d, bar.trade_date)
+            if industry_return_20d is not None:
+                values["industry.relative.hs300.return_20d"] = industry_return_20d
+            if industry_return_20d is not None and market_return_20d is not None:
+                excess_20d = industry_return_20d - market_return_20d
+                values["industry.relative.hs300.excess_return_20d"] = excess_20d
+                checks["industry.relative.hs300.outperform_20d"] = excess_20d > 0
+
+            industry_return_60d = industry_returns_60d.get(bar.trade_date)
+            market_return_60d = _latest_number_on_or_before(market_returns_60d, bar.trade_date)
+            if industry_return_60d is not None:
+                values["industry.relative.hs300.return_60d"] = industry_return_60d
+            if industry_return_60d is not None and market_return_60d is not None:
+                excess_60d = industry_return_60d - market_return_60d
+                values["industry.relative.hs300.excess_return_60d"] = excess_60d
+                checks["industry.relative.hs300.outperform_60d"] = excess_60d > 0
+                categories["industry.relative.hs300.strength_state"] = _relative_strength_state(excess_60d)
+
+            evidence_by_date[bar.trade_date] = EntryAttributionEvidence(
+                checks=checks,
+                values=values,
+                categories=categories,
             )
-            for bar, kdj in zip(ordered_bars, kdj_values)
-        }
+        evidence_by_symbol[industry_symbol] = evidence_by_date
 
     return evidence_by_symbol
+
+
+def _return_values_by_date(bars: Sequence[IndexBar], *, period: int) -> dict[date, float]:
+    ordered_bars = tuple(sorted(bars, key=lambda value: value.trade_date))
+    returns: dict[date, float] = {}
+    for index, bar in enumerate(ordered_bars):
+        if index < period:
+            continue
+        base_close = ordered_bars[index - period].close
+        if base_close <= 0:
+            continue
+        returns[bar.trade_date] = bar.close / base_close - 1.0
+    return returns
+
+
+def _latest_number_on_or_before(values_by_date: Mapping[date, float], trade_date: date) -> float | None:
+    available_dates = [candidate_date for candidate_date in values_by_date if candidate_date <= trade_date]
+    if not available_dates:
+        return None
+    return values_by_date[max(available_dates)]
+
+
+def _kdj_j_bucket(value: float) -> str:
+    if value < 13:
+        return "<13"
+    if value < 30:
+        return "13-30"
+    if value < 50:
+        return "30-50"
+    if value < 80:
+        return "50-80"
+    return ">=80"
+
+
+def _kdj_state(value: float) -> str:
+    if value < 13:
+        return "oversold"
+    if value < 50:
+        return "recovering"
+    if value < 80:
+        return "strong"
+    return "overheated"
+
+
+def _relative_strength_state(excess_return: float) -> str:
+    if excess_return >= 0.05:
+        return "strong_outperform"
+    if excess_return > 0:
+        return "outperform"
+    if excess_return <= -0.05:
+        return "weak_underperform"
+    return "underperform"
 
 
 def _industry_evidence_for_symbol_date(
@@ -722,6 +1177,9 @@ def _membership_on(
     active_memberships = tuple(membership for membership in memberships if membership.active_on(trade_date))
     if active_memberships:
         return sorted(active_memberships, key=lambda value: (value.in_date, value.level1_code))[-1]
+    future_memberships = tuple(membership for membership in memberships if trade_date < membership.in_date)
+    if future_memberships:
+        return sorted(future_memberships, key=lambda value: (value.in_date, value.level1_code))[0]
     return None
 
 

@@ -6,18 +6,22 @@ from attbacktrader.cli import run_data_drilldown as run_data_drilldown_cli
 from attbacktrader.cli import run_data_drilldown_batch as run_data_drilldown_batch_cli
 from attbacktrader.cli import run_data_overview as run_data_overview_cli
 from attbacktrader.cli import run_data_attribution_index as run_data_attribution_index_cli
+from attbacktrader.cli import run_data_attribution_summary as run_data_attribution_summary_cli
 from attbacktrader.reports import (
     build_run_data_attribution_index,
+    build_run_data_attribution_summary,
     build_run_data_dictionary,
     build_run_data_drilldown,
     build_run_data_drilldown_batch,
     build_run_data_overview,
     render_run_data_attribution_index_markdown_zh,
+    render_run_data_attribution_summary_markdown_zh,
     render_run_data_dictionary_markdown_zh,
     render_run_data_drilldown_markdown_zh,
     render_run_data_drilldown_batch_markdown_zh,
     render_run_data_overview_markdown_zh,
     write_run_data_attribution_index,
+    write_run_data_attribution_summary,
     write_run_data_dictionary,
     write_run_data_drilldown,
     write_run_data_drilldown_batch,
@@ -35,9 +39,11 @@ def test_run_data_dictionary_describes_artifacts_and_reason_labels(tmp_path: Pat
     assert dictionary["schema"] == "attbacktrader.run_data_dictionary.v1"
     assert dictionary["run_id"] == "run-data-test"
     assert dictionary["reason_code_labels"]["BOARD_LOT_TOO_SMALL"] == "不足一手，无法下单"
+    assert any(artifact["artifact"] == "trade_attribution" for artifact in dictionary["artifacts"])
     assert any(artifact["artifact"] == "trade_review" for artifact in dictionary["artifacts"])
     assert any(artifact["artifact"] == "strategy_environment_profile" for artifact in dictionary["artifacts"])
     assert "回测数据字典" in markdown
+    assert "trade_attribution.json" in markdown
     assert "trade_review.json" in markdown
     assert "strategy_environment_profile.json" in markdown
     assert json_path.exists()
@@ -57,12 +63,42 @@ def test_run_data_overview_summarizes_counts_and_translated_blocks(tmp_path: Pat
     assert overview["trades"]["open_position_count"] == 1
     assert overview["signals"]["signal_intent_count"] == 3
     assert overview["execution"]["event_count"] == 3
+    assert overview["trade_attribution"]["factor_summary_count"] == 1
     assert overview["review"]["opportunity_count"] == 1
     assert overview["signals"]["blocked_by_counts"][0]["label_zh"] == "不足一手，无法下单"
     assert "回测数据总览" in markdown
     assert "BOARD_LOT_TOO_SMALL" in markdown
     assert json_path.exists()
     assert markdown_path.exists()
+
+
+def test_run_data_overview_accepts_compact_signal_audit(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    _write_json(
+        run_dir / "signal_audit.json",
+        {
+            "schema": "attbacktrader.compact_signal_audit.v1",
+            "artifact_detail": "compact",
+            "raw_signal_audit_persisted": False,
+            "total_count": 491587,
+            "intent_type_counts": [{"key": "hold", "count": 480000}, {"key": "enter", "count": 1000}],
+            "reason_code_counts": [{"key": "KDJ_J_BELOW_13", "count": 1000}],
+            "blocked_by_counts": [{"key": "BOARD_LOT_TOO_SMALL", "count": 31, "label_zh": "不足一手，无法下单"}],
+            "method_counts": [{"key": "kdj_oversold_entry", "count": 1000}],
+            "date_range": {"start": "2024-01-01", "end": "2024-01-31"},
+            "samples": [],
+        },
+    )
+
+    overview = build_run_data_overview(run_dir, top_symbols=2)
+
+    assert overview["signals"]["artifact_detail"] == "compact"
+    assert overview["signals"]["signal_intent_count"] == 491587
+    assert overview["signals"]["blocked_by_counts"][0]["key"] == "BOARD_LOT_TOO_SMALL"
+    signal_artifact = next(row for row in overview["artifacts"] if row["artifact"] == "signal_audit")
+    assert signal_artifact["count"] == 491587
+    attribution_artifact = next(row for row in overview["artifacts"] if row["artifact"] == "trade_attribution")
+    assert attribution_artifact["count"]["trades"] == 2
 
 
 def test_run_data_drilldown_wraps_review_sample_with_human_summary(tmp_path: Path) -> None:
@@ -121,10 +157,75 @@ def test_run_data_attribution_index_filters_entry_checks(tmp_path: Path) -> None
     json_path, markdown_path = write_run_data_attribution_index(index, output_dir=tmp_path / "index")
 
     assert index["schema"] == "attbacktrader.run_data_attribution_index.v1"
+    assert index["source_artifacts"]["trade_attribution"] is True
     assert index["match_count"] == 1
     assert index["matching_samples"][0]["sample_id"] == "trade.1"
     assert any(field["field"] == "symbol.ma.bullish_trend" for field in index["fields"])
     assert "回测归因字段索引" in markdown
+    assert json_path.exists()
+    assert markdown_path.exists()
+
+
+def test_run_data_attribution_index_filters_trade_attribution_industry_and_add_on_factors(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+
+    industry_index = build_run_data_attribution_index(
+        run_dir,
+        filters=[
+            "entry.industry.kdj.j_below_threshold=true",
+            "entry.industry.sw_l1.code=801780.SI",
+        ],
+    )
+    add_on_index = build_run_data_attribution_index(
+        run_dir,
+        filters=["add_on.symbol.ma.price_above_ma60=true"],
+    )
+    opportunity_index = build_run_data_attribution_index(
+        run_dir,
+        filters=["opportunity.blocked_by=BOARD_LOT_TOO_SMALL"],
+    )
+    numeric_index = build_run_data_attribution_index(
+        run_dir,
+        filters=["entry.industry.kdj.j<13"],
+    )
+    numeric_miss_index = build_run_data_attribution_index(
+        run_dir,
+        filters=["entry.industry.kdj.j>=13"],
+    )
+
+    assert industry_index["match_count"] == 1
+    assert industry_index["matching_samples"][0]["sample_id"] == "trade.1"
+    assert industry_index["matching_samples"][0]["fields"]["industry.sw_l1.code"] == "801780.SI"
+    assert numeric_index["filters"][0]["operator"] == "<"
+    assert numeric_index["match_count"] == 1
+    assert numeric_miss_index["match_count"] == 0
+    assert add_on_index["match_count"] == 1
+    assert add_on_index["matching_samples"][0]["scope"] == "add_on"
+    assert add_on_index["matching_samples"][0]["sample_id"] == "trade.1"
+    assert opportunity_index["match_count"] == 1
+    assert opportunity_index["matching_samples"][0]["sample_id"] == "opportunity.1"
+
+
+def test_run_data_attribution_summary_compacts_top_and_bottom_factor_candidates(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+
+    summary = build_run_data_attribution_summary(run_dir, min_sample_count=1, top_n=20)
+    markdown = render_run_data_attribution_summary_markdown_zh(summary)
+    json_path, markdown_path = write_run_data_attribution_summary(summary, output_dir=tmp_path / "summary")
+
+    assert summary["schema"] == "attbacktrader.run_data_attribution_summary.v1"
+    assert summary["overall"]["trade_count"] == 1
+    assert summary["preferred_candidates"]
+    assert summary["avoid_candidates"]
+    assert summary["preferred_combination_candidates"]
+    assert summary["preferred_candidates"][0]["query_filter"]
+    assert any(
+        "entry.industry.kdj.j<13" in candidate["query_filters"]
+        and "entry.symbol.ma.bullish_trend=true" in candidate["query_filters"]
+        for candidate in summary["preferred_combination_candidates"] + summary["avoid_combination_candidates"]
+    )
+    assert "回测归因摘要" in markdown
+    assert "适合组合候选" in markdown
     assert json_path.exists()
     assert markdown_path.exists()
 
@@ -174,21 +275,36 @@ def test_run_data_clis_write_outputs(tmp_path: Path, capsys) -> None:
         ]
     )
     index_stdout = json.loads(capsys.readouterr().out)
+    summary_exit = run_data_attribution_summary_cli.main(
+        [
+            "--run-dir",
+            str(run_dir),
+            "--min-sample-count",
+            "1",
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+    summary_stdout = json.loads(capsys.readouterr().out)
 
     assert dictionary_exit == 0
     assert overview_exit == 0
     assert drilldown_exit == 0
     assert batch_exit == 0
     assert index_exit == 0
+    assert summary_exit == 0
     assert dictionary_stdout["artifacts"]["run_data_dictionary_json_path"] == str(output_dir / "run_data_dictionary.json")
     assert overview_stdout["closed_trade_count"] == 2
     assert drilldown_stdout["sample_id"] == "trade.1"
     assert batch_stdout["sample_ids"] == ["trade.1", "opportunity.1"]
     assert index_stdout["matching_sample_ids"] == ["trade.1"]
+    assert summary_stdout["preferred_count"] > 0
+    assert summary_stdout["preferred_combination_count"] > 0
     assert (output_dir / "run_data_overview.zh.md").exists()
     assert (output_dir / "run_data_drilldown.trade.1.zh.md").exists()
     assert (output_dir / "run_data_drilldown_batch.zh.md").exists()
     assert (output_dir / "run_data_attribution_index.zh.md").exists()
+    assert (output_dir / "run_data_attribution_summary.zh.md").exists()
 
 
 def _run_dir(root: Path) -> Path:
@@ -408,6 +524,65 @@ def _run_dir(root: Path) -> Path:
                     "exit_reason": "FIXED_5_PERCENT_STOP",
                     "return_pct": -0.06,
                     "events": [],
+                }
+            ],
+        },
+    )
+    _write_json(
+        path / "trade_attribution.json",
+        {
+            "schema": "attbacktrader.trade_attribution.v1",
+            "trade_count": 2,
+            "entry_event_count": 2,
+            "exit_event_count": 2,
+            "add_on_event_count": 1,
+            "attributions": [
+                {
+                    "trade_index": 1,
+                    "symbol": "000001.SZ",
+                    "outcome": "loss",
+                    "entry_date": "2024-01-05",
+                    "exit_date": "2024-01-10",
+                    "exit_reason": "FIXED_5_PERCENT_STOP",
+                    "return_pct": -0.06,
+                    "entry": {
+                        "trade_date": "2024-01-05",
+                        "factors": [
+                            {"key": "symbol.ma.bullish_trend", "value": True, "missing": False},
+                            {"key": "market.hs300.bullish_trend", "value": False, "missing": False},
+                            {"key": "industry.kdj.j_below_threshold", "value": True, "missing": False},
+                            {"key": "industry.kdj.j", "value": 10.0, "missing": False},
+                            {"key": "industry.sw_l1.code", "value": "801780.SI", "missing": False},
+                        ],
+                    },
+                    "exit": {
+                        "trade_date": "2024-01-10",
+                        "factors": [
+                            {"key": "symbol.ma.price_above_ma25", "value": False, "missing": False},
+                        ],
+                    },
+                    "add_ons": [
+                        {
+                            "trade_date": "2024-01-07",
+                            "factors": [
+                                {"key": "symbol.ma.price_above_ma60", "value": True, "missing": False},
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "factor_summaries": [
+                {
+                    "timing": "entry",
+                    "key": "symbol.ma.bullish_trend",
+                    "value_kind": "check",
+                    "sample_count": 1,
+                    "missing_count": 0,
+                    "win_count": 0,
+                    "loss_count": 1,
+                    "win_rate": 0.0,
+                    "average_return_pct": -0.06,
+                    "value_buckets": [{"value": "true", "count": 1, "trade_indexes": [1]}],
                 }
             ],
         },

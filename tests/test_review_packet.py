@@ -43,6 +43,25 @@ def test_review_packet_includes_environment_fit_for_ai_review(tmp_path: Path) ->
     assert "环境适配与利润贡献" in markdown
 
 
+def test_review_packet_includes_attribution_summary_for_ai_review(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+
+    packet = build_review_packet(run_dir, focus="attribution_summary", top=3)
+    markdown = render_review_packet_markdown_zh(packet)
+
+    assert packet["focus"] == "attribution_summary"
+    assert packet["source_artifacts"]["run_data_attribution_summary"]["exists"] is True
+    assert packet["sections"][0]["name"] == "attribution_summary"
+    assert packet["sections"][0]["summaries"][0]["candidate_group"] == "preferred_combination_candidates"
+    assert packet["sections"][0]["summaries"][0]["query_filters"] == [
+        "entry.industry.kdj.j<13",
+        "entry.symbol.ma.bullish_trend=true",
+    ]
+    assert packet["sections"][0]["samples"][0]["trade_index"] == 7
+    assert "后验归因环境候选" in markdown
+    assert "entry.industry.kdj.j<13" in markdown
+
+
 def test_review_packet_cli_writes_focused_opportunity_packet(tmp_path: Path, capsys) -> None:
     run_dir = _run_dir(tmp_path)
     output_dir = tmp_path / "out"
@@ -333,6 +352,56 @@ def _run_dir(root: Path) -> Path:
                     },
                 }
             ],
+        },
+    )
+    _write_json(
+        path / "run_data_attribution_summary.json",
+        {
+            "schema": "attbacktrader.run_data_attribution_summary.v1",
+            "run_id": "packet-run",
+            "source_dir": str(path),
+            "source_artifact": "trade_attribution.json",
+            "parameters": {"min_sample_count": 1, "top_n": 5, "combination_size": 2},
+            "overall": {"trade_count": 1, "win_rate": 1.0, "average_return_pct": 0.12},
+            "coverage": {"by_timing": {"entry": {"factor_count": 3}}},
+            "preferred_combination_candidates": [
+                {
+                    "timing": "entry",
+                    "field": "industry.kdj.j && symbol.ma.bullish_trend",
+                    "value": "<13 && true",
+                    "sample_count": 1,
+                    "win_count": 1,
+                    "loss_count": 0,
+                    "win_rate": 1.0,
+                    "average_return_pct": 0.12,
+                    "delta_win_rate": 0.0,
+                    "delta_average_return_pct": 0.0,
+                    "trade_indexes": [7],
+                    "query_filters": [
+                        "entry.industry.kdj.j<13",
+                        "entry.symbol.ma.bullish_trend=true",
+                    ],
+                    "query_filter": "entry.industry.kdj.j<13 && entry.symbol.ma.bullish_trend=true",
+                }
+            ],
+            "avoid_combination_candidates": [],
+            "preferred_candidates": [
+                {
+                    "timing": "entry",
+                    "field": "symbol.ma.bullish_trend",
+                    "value": "true",
+                    "sample_count": 1,
+                    "win_rate": 1.0,
+                    "average_return_pct": 0.12,
+                    "trade_indexes": [7],
+                    "query_filter": "entry.symbol.ma.bullish_trend=true",
+                }
+            ],
+            "avoid_candidates": [],
+            "largest_win_rate_edges": [],
+            "largest_average_return_edges": [],
+            "high_missing_factors": [],
+            "ai_usage_rules": ["候选可用 query_filters 回到 run_data_attribution_index 复核。"],
         },
     )
     return path

@@ -72,6 +72,8 @@ def build_run_execution_summary(
             for benchmark in report.benchmark_comparison
         ],
         "scenario_fit": _scenario_fit_summary(report.scenario_fit),
+        "stock_pool_filter": _stock_pool_filter_summary(result),
+        "attribution_factor_selection": _attribution_factor_selection_summary(result),
         "data_windows": _data_window_summary(result),
         "evidence": evidence_validation,
         "artifacts": _artifact_summary(artifact_paths),
@@ -180,6 +182,37 @@ def render_run_execution_summary_text_zh(summary: Mapping[str, Any]) -> str:
                     "- "
                     f"最早请求 {data_windows.get('earliest_requested_start_date')}，"
                     f"warmup 不完整 {data_windows.get('warmup_incomplete_count')}"
+                ),
+            ]
+        )
+
+    stock_pool_filter = _mapping(summary.get("stock_pool_filter"))
+    if stock_pool_filter:
+        lines.extend(
+            [
+                "",
+                "股票池过滤",
+                (
+                    "- "
+                    f"原始 {stock_pool_filter.get('original_count')}，"
+                    f"保留 {stock_pool_filter.get('kept_count')}，"
+                    f"warning {stock_pool_filter.get('warning_count')}，"
+                    f"剔除 {stock_pool_filter.get('excluded_count')}"
+                ),
+            ]
+        )
+
+    attribution_selection = _mapping(summary.get("attribution_factor_selection"))
+    if attribution_selection:
+        lines.extend(
+            [
+                "",
+                "归因因子",
+                (
+                    "- "
+                    f"来源 {attribution_selection.get('configured_source')}，"
+                    f"已选择 {attribution_selection.get('include_count')}，"
+                    f"未选择 {attribution_selection.get('not_include_count')}"
                 ),
             ]
         )
@@ -313,6 +346,42 @@ def _data_window_items(result: "RunPlanExecutionResult") -> tuple[dict[str, Any]
     return tuple(item for item in items if item["symbol"])
 
 
+def _stock_pool_filter_summary(result: "RunPlanExecutionResult") -> dict[str, Any] | None:
+    stock_pool_filter = getattr(result, "stock_pool_filter", None)
+    if stock_pool_filter is None:
+        return None
+    return {
+        "source_pool_file": str(getattr(stock_pool_filter, "source_pool_file", "")),
+        "original_count": getattr(stock_pool_filter, "original_count", None),
+        "kept_count": getattr(stock_pool_filter, "kept_count", None),
+        "warning_count": getattr(stock_pool_filter, "warning_count", None),
+        "excluded_count": getattr(stock_pool_filter, "excluded_count", None),
+        "excluded_symbols": [
+            getattr(item, "symbol", None)
+            for item in _sequence(getattr(stock_pool_filter, "excluded_symbols", ()))
+        ],
+    }
+
+
+def _attribution_factor_selection_summary(result: "RunPlanExecutionResult") -> dict[str, Any] | None:
+    selection = getattr(result, "attribution_factor_selection", None)
+    selection_map = _mapping(selection)
+    if not selection_map:
+        return None
+    include = _sequence(selection_map.get("include"))
+    not_include = _sequence(selection_map.get("not_include"))
+    return {
+        "schema": selection_map.get("schema"),
+        "enabled": selection_map.get("enabled"),
+        "configured_source": selection_map.get("configured_source"),
+        "include_count": selection_map.get("include_count", len(include)),
+        "not_include_count": selection_map.get("not_include_count", len(not_include)),
+        "include": [str(key) for key in include],
+        "not_include": [str(key) for key in not_include],
+        "entry_attribution": selection_map.get("entry_attribution"),
+    }
+
+
 def _data_window_item(
     *,
     kind: str,
@@ -346,9 +415,19 @@ def _artifact_summary(artifact_paths: "RunArtifactPaths | None") -> dict[str, st
         "trades": str(artifact_paths.trades_path),
         "environment_fit": str(artifact_paths.environment_fit_path),
         "trade_review": str(artifact_paths.trade_review_path),
+        "trade_attribution": _path_string(getattr(artifact_paths, "trade_attribution_path", None)),
         "post_exit_analysis": str(artifact_paths.post_exit_analysis_path),
         "evidence_validation": str(artifact_paths.evidence_validation_path),
+        "data_preflight": _path_string(getattr(artifact_paths, "data_preflight_path", None)),
+        "stock_pool_filter": _path_string(getattr(artifact_paths, "stock_pool_filter_path", None)),
+        "attribution_factor_selection": _path_string(
+            getattr(artifact_paths, "attribution_factor_selection_path", None)
+        ),
     }
+
+
+def _path_string(value: Any) -> str:
+    return str(value) if value is not None else ""
 
 
 def _read_evidence_validation(artifact_paths: "RunArtifactPaths | None") -> dict[str, Any] | None:

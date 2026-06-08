@@ -44,10 +44,11 @@ def test_ai_review_findings_builds_structured_task_from_packet(tmp_path: Path) -
     assert findings["schema"] == "attbacktrader.ai_review_findings.v1"
     assert findings["run_id"] == "ai-review-run"
     assert findings["ai_task"]["required_output_schema"]["summary_zh"] == "string"
-    assert findings["finding_count"] == 6
+    assert findings["finding_count"] == 7
     assert findings["findings"][2]["direction"] == "opportunity_review"
     assert findings["findings"][2]["sample_refs"][0]["sample_index"] == 2
     assert findings["findings"][4]["direction"] == "environment_fit_review"
+    assert findings["findings"][5]["direction"] == "attribution_summary_review"
     assert json_path.exists()
     assert "AI 复盘 Findings" in markdown_path.read_text(encoding="utf-8")
 
@@ -87,7 +88,7 @@ def test_expand_samples_and_brief_build_skill_ready_inputs(tmp_path: Path) -> No
     assert "AI 批量样本展开" in batch_markdown_path.read_text(encoding="utf-8")
     assert brief["schema"] == "attbacktrader.ai_review_brief.v1"
     assert brief["skill_contract"]["expected_output_schema"]["summary_zh"] == "string"
-    assert brief["section_count"] == 6
+    assert brief["section_count"] == 7
     assert brief["environment_fit_summary"]["best_by_net_pnl_label_zh"] == "行业 KDJ J 低于阈值=是"
     assert brief["environment_fit_summary"]["low_sample_combination_count"] == 1
     assert brief["sections"][0]["expanded_samples"][0]["sample_id"] == "trade.7"
@@ -129,8 +130,12 @@ def test_ai_review_result_persists_brief_output_schema(tmp_path: Path) -> None:
     assert result["schema"] == "attbacktrader.ai_review_result.v1"
     assert result["reviewer"] == "unit-test"
     assert result["status"] == "draft_from_brief"
-    assert result["finding_result_count"] == 6
+    assert result["finding_result_count"] == 7
     assert result["findings"][0]["supporting_sample_ids"] == ["trade.7"]
+    attribution_result = next(
+        finding for finding in result["findings"] if finding["finding_id"] == "attribution-summary-001"
+    )
+    assert "top_candidate" in attribution_result["metrics"]
     assert json_path.exists()
     assert "AI 复盘结果" in markdown_path.read_text(encoding="utf-8")
 
@@ -145,7 +150,7 @@ def test_ai_review_result_can_embed_environment_fit_comparison(tmp_path: Path) -
     result = build_ai_review_result(brief, environment_fit_comparison=comparison, reviewer="unit-test")
     json_path, markdown_path = write_ai_review_result(result, output_dir=tmp_path / "comparison-result")
 
-    assert result["finding_result_count"] == 7
+    assert result["finding_result_count"] == 8
     comparison_finding = result["findings"][-1]
     assert comparison_finding["finding_id"] == "environment-fit-comparison-001"
     assert comparison_finding["sample_refs"][0]["trade_index"] == 7

@@ -446,6 +446,7 @@ def build_ai_review_result(
                 "supporting_sample_ids": [
                     _as_mapping(sample).get("sample_id") for sample in _as_sequence(section_map.get("expanded_samples"))
                 ],
+                "metrics": section_map.get("metrics", {}),
                 "risk_zh": section_map.get("caveat_zh"),
                 "next_check_zh": section_map.get("next_action_zh"),
             }
@@ -1778,6 +1779,8 @@ def _build_findings(packet: Mapping[str, Any], *, top: int) -> list[dict[str, An
             findings.append(_add_on_finding(section_map, top=top))
         elif name == "environment_fit":
             findings.append(_environment_fit_finding(section_map, top=top))
+        elif name == "attribution_summary":
+            findings.append(_attribution_summary_finding(section_map, top=top))
     return findings
 
 
@@ -1926,6 +1929,39 @@ def _environment_fit_finding(section: Mapping[str, Any], *, top: int) -> dict[st
         "sample_refs": _trade_refs(samples[:top]),
         "next_action_zh": "优先阅读 environment_fit.zh.md 首页，再按 trade_index 反查最佳/最差环境中的代表交易。",
         "caveat_zh": "环境适配是统计复盘线索，不是因果结论，也不是自动调参建议。",
+    }
+
+
+def _attribution_summary_finding(section: Mapping[str, Any], *, top: int) -> dict[str, Any]:
+    summaries = [_as_mapping(item) for item in _as_sequence(section.get("summaries"))]
+    preferred_combo = [
+        item for item in summaries if item.get("candidate_group") == "preferred_combination_candidates"
+    ]
+    avoid_combo = [
+        item for item in summaries if item.get("candidate_group") == "avoid_combination_candidates"
+    ]
+    top_candidate = preferred_combo[0] if preferred_combo else (summaries[0] if summaries else {})
+    query_filters = _as_sequence(top_candidate.get("query_filters"))
+    samples = _as_sequence(section.get("samples"))
+    return {
+        "finding_id": "attribution-summary-001",
+        "direction": "attribution_summary_review",
+        "title_zh": "后验归因环境候选复核入口",
+        "summary_zh": (
+            f"该 section 汇总后验归因候选 {len(summaries)} 个，"
+            f"适合组合 {len(preferred_combo)} 个，规避组合 {len(avoid_combo)} 个；"
+            f"首个候选 filter={list(query_filters)}。"
+        ),
+        "metrics": {
+            "summary_count": len(summaries),
+            "preferred_combination_count": len(preferred_combo),
+            "avoid_combination_count": len(avoid_combo),
+            "top_candidate": top_candidate,
+        },
+        "evidence_refs": [{"artifact": "review_packet", "section": section.get("name")}],
+        "sample_refs": _trade_refs(samples[:top]),
+        "next_action_zh": "先用 top_candidate.query_filters 调 run_data_attribution_index 复核匹配样本，再按 trade_index 下钻代表交易。",
+        "caveat_zh": "候选来自已成交交易后验统计，只能说明环境线索，不能直接改买卖规则或过滤交易。",
     }
 
 

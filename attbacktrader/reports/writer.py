@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import date, datetime
@@ -26,6 +27,10 @@ from attbacktrader.reports.strategy_environment_profile import (
     build_strategy_environment_profile_from_artifacts,
     render_strategy_environment_profile_markdown_zh,
 )
+from attbacktrader.reports.trade_attribution import (
+    build_trade_attribution_report,
+    render_trade_attribution_markdown_zh,
+)
 from attbacktrader.reports.trade_review import build_trade_review_report, render_trade_review_markdown_zh
 
 if TYPE_CHECKING:
@@ -47,6 +52,8 @@ class RunArtifactPaths:
     result_diagnostics_path: Path
     trade_lifecycle_path: Path
     trade_lifecycle_chinese_markdown_path: Path
+    trade_attribution_path: Path
+    trade_attribution_chinese_markdown_path: Path
     trade_review_path: Path
     trade_review_chinese_markdown_path: Path
     environment_fit_path: Path
@@ -60,6 +67,9 @@ class RunArtifactPaths:
     positions_path: Path
     execution_audit_path: Path
     snapshots_path: Path
+    data_preflight_path: Path
+    stock_pool_filter_path: Path
+    attribution_factor_selection_path: Path
 
 
 def write_run_artifacts(
@@ -84,6 +94,8 @@ def write_run_artifacts(
         result_diagnostics_path=output_dir / "result_diagnostics.json",
         trade_lifecycle_path=output_dir / "trade_lifecycle.json",
         trade_lifecycle_chinese_markdown_path=output_dir / "trade_lifecycle.zh.md",
+        trade_attribution_path=output_dir / "trade_attribution.json",
+        trade_attribution_chinese_markdown_path=output_dir / "trade_attribution.zh.md",
         trade_review_path=output_dir / "trade_review.json",
         trade_review_chinese_markdown_path=output_dir / "trade_review.zh.md",
         environment_fit_path=output_dir / "environment_fit.json",
@@ -97,10 +109,16 @@ def write_run_artifacts(
         positions_path=output_dir / "positions.json",
         execution_audit_path=output_dir / "execution_audit.json",
         snapshots_path=output_dir / "snapshots.json",
+        data_preflight_path=output_dir / "data_preflight.json",
+        stock_pool_filter_path=output_dir / "stock_pool_filter.json",
+        attribution_factor_selection_path=output_dir / "attribution_factor_selection.json",
     )
 
+    artifact_detail = getattr(run_plan.output, "artifact_detail", "compact")
+    signal_audit_sample_limit = int(getattr(run_plan.output, "signal_audit_sample_limit", 200))
+
     _write_json(artifact_paths.run_plan_path, run_plan)
-    _write_json(artifact_paths.result_path, result)
+    _write_json(artifact_paths.result_path, _result_payload(result, artifact_detail=artifact_detail))
     _write_json(artifact_paths.report_path, result.report)
     artifact_paths.report_markdown_path.write_text(
         render_backtest_report_markdown(run_plan, result),
@@ -117,13 +135,26 @@ def write_run_artifacts(
             "open_positions": result.open_positions,
         },
     )
-    _write_json(artifact_paths.signal_audit_path, result.signal_audit)
+    _write_json(
+        artifact_paths.signal_audit_path,
+        _signal_audit_payload(
+            result,
+            artifact_detail=artifact_detail,
+            sample_limit=signal_audit_sample_limit,
+        ),
+    )
     _write_json(artifact_paths.sizing_audit_path, _sizing_audit(result))
     _write_json(artifact_paths.result_diagnostics_path, _result_diagnostics(result))
     trade_lifecycle = _trade_lifecycle(result)
     _write_json(artifact_paths.trade_lifecycle_path, trade_lifecycle)
     artifact_paths.trade_lifecycle_chinese_markdown_path.write_text(
         render_trade_lifecycle_markdown_zh(trade_lifecycle),
+        encoding="utf-8",
+    )
+    trade_attribution = _trade_attribution(result, trade_lifecycle)
+    _write_json(artifact_paths.trade_attribution_path, trade_attribution)
+    artifact_paths.trade_attribution_chinese_markdown_path.write_text(
+        render_trade_attribution_markdown_zh(trade_attribution),
         encoding="utf-8",
     )
     trade_review = _trade_review(result, trade_lifecycle)
@@ -162,12 +193,17 @@ def write_run_artifacts(
     _write_json(artifact_paths.positions_path, result.position_snapshots)
     _write_json(artifact_paths.execution_audit_path, result.execution_audit)
     _write_json(artifact_paths.snapshots_path, _snapshot_index(result))
+    _write_json(artifact_paths.data_preflight_path, result.data_preflight_report)
+    _write_json(artifact_paths.stock_pool_filter_path, result.stock_pool_filter)
+    _write_json(artifact_paths.attribution_factor_selection_path, result.attribution_factor_selection)
 
     return artifact_paths
 
 
 def _snapshot_index(result: RunPlanExecutionResult) -> dict[str, Any]:
     return {
+        "stock_pool_filter": result.stock_pool_filter,
+        "attribution_factor_selection": result.attribution_factor_selection,
         "data_windows": _data_windows(result),
         "symbols": [
             {
@@ -191,6 +227,92 @@ def _snapshot_index(result: RunPlanExecutionResult) -> dict[str, Any]:
         "industry_classification": result.industry_classification_result,
         "industry_memberships": result.industry_membership_results,
     }
+
+
+def _result_payload(result: RunPlanExecutionResult, *, artifact_detail: str) -> Any:
+    if artifact_detail == "full":
+        return result
+    return {
+        "schema": "attbacktrader.compact_result.v1",
+        "artifact_detail": "compact",
+        "raw_result_persisted": False,
+        "run_id": result.run_id,
+        "engine": result.engine,
+        "adjustment": result.adjustment,
+        "symbols": result.symbols,
+        "counts": {
+            "symbol_count": len(result.symbols),
+            "closed_trade_count": len(result.closed_trades),
+            "open_position_count": len(result.open_positions),
+            "signal_intent_count": len(result.signal_audit),
+            "execution_event_count": len(result.execution_audit),
+            "lifecycle_event_count": len(result.lifecycle_events),
+            "lifecycle_snapshot_count": len(result.lifecycle_snapshots),
+            "equity_point_count": len(result.equity_curve),
+            "position_snapshot_count": len(result.position_snapshots),
+        },
+        "final_cash": result.final_cash,
+        "final_value": result.final_value,
+        "report": result.report,
+        "post_exit_analysis_summary": {
+            "trade_count": result.post_exit_analysis.trade_count,
+            "window_days": result.post_exit_analysis.window_days,
+            "configured_window_days": result.post_exit_analysis.configured_window_days,
+            "sold_too_early_threshold": result.post_exit_analysis.sold_too_early_threshold,
+            "rebound_thresholds": result.post_exit_analysis.rebound_thresholds,
+        },
+        "attribution_factor_selection": result.attribution_factor_selection,
+        "raw_detail_note": (
+            "Full result persistence is disabled by output.artifact_detail=compact. "
+            "Use report/trades/snapshots/evidence_validation and derived review artifacts for AI review, "
+            "or set output.artifact_detail=full for debugging."
+        ),
+    }
+
+
+def _signal_audit_payload(
+    result: RunPlanExecutionResult,
+    *,
+    artifact_detail: str,
+    sample_limit: int,
+) -> Any:
+    if artifact_detail == "full":
+        return result.signal_audit
+
+    intents = tuple(result.signal_audit)
+    return {
+        "schema": "attbacktrader.compact_signal_audit.v1",
+        "artifact_detail": "compact",
+        "raw_signal_audit_persisted": False,
+        "total_count": len(intents),
+        "sample_limit": sample_limit,
+        "intent_type_counts": _counter_rows(getattr(intent.intent_type, "value", str(intent.intent_type)) for intent in intents),
+        "reason_code_counts": _counter_rows(intent.reason_code for intent in intents),
+        "blocked_by_counts": _counter_rows(intent.blocked_by for intent in intents if intent.blocked_by),
+        "method_counts": _counter_rows(intent.method_name for intent in intents),
+        "date_range": _date_range_for_intents(intents),
+        "samples": tuple(intents[:sample_limit]),
+        "raw_detail_note": (
+            "Full signal audit persistence is disabled by output.artifact_detail=compact. "
+            "Use sizing_audit/execution_audit/trade_lifecycle/trade_review for drill-down, "
+            "or set output.artifact_detail=full for debugging."
+        ),
+    }
+
+
+def _counter_rows(values) -> tuple[dict[str, Any], ...]:
+    counts = Counter(str(value) for value in values)
+    return tuple(
+        {"key": key, "count": count}
+        for key, count in counts.most_common()
+    )
+
+
+def _date_range_for_intents(intents) -> dict[str, str | None]:
+    dates = sorted(intent.trade_date for intent in intents)
+    if not dates:
+        return {"start": None, "end": None}
+    return {"start": dates[0].isoformat(), "end": dates[-1].isoformat()}
 
 
 def _data_windows(result: RunPlanExecutionResult) -> dict[str, Any]:
@@ -296,6 +418,17 @@ def _trade_lifecycle(result: RunPlanExecutionResult):
         closed_trades=result.closed_trades,
         signal_audit=result.signal_audit,
         execution_audit=result.execution_audit,
+    )
+
+
+def _trade_attribution(result: RunPlanExecutionResult, trade_lifecycle):
+    selection = result.attribution_factor_selection
+    include = ()
+    if isinstance(selection, Mapping):
+        include = tuple(str(key) for key in selection.get("include", ()) if key)
+    return build_trade_attribution_report(
+        trade_lifecycle,
+        selected_factor_keys=include,
     )
 
 

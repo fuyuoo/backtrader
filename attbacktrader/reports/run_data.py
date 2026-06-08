@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from itertools import combinations
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -15,6 +16,20 @@ RUN_DATA_OVERVIEW_SCHEMA = "attbacktrader.run_data_overview.v1"
 RUN_DATA_DRILLDOWN_SCHEMA = "attbacktrader.run_data_drilldown.v1"
 RUN_DATA_DRILLDOWN_BATCH_SCHEMA = "attbacktrader.run_data_drilldown_batch.v1"
 RUN_DATA_ATTRIBUTION_INDEX_SCHEMA = "attbacktrader.run_data_attribution_index.v1"
+RUN_DATA_ATTRIBUTION_SUMMARY_SCHEMA = "attbacktrader.run_data_attribution_summary.v1"
+
+_ATTRIBUTION_FILTER_OPERATORS = (">=", "<=", "!=", "=", ">", "<")
+_NUMERIC_BUCKET_FIELD_NAMES = (
+    "industry.kdj.j",
+    "symbol.kdj.j",
+    "market.hs300.kdj.j",
+    "symbol.macd.dea",
+    "industry.macd.dea",
+    "market.hs300.macd.dea",
+    "symbol.macd.dea_waterline_age_trading_days",
+    "industry.macd.dea_waterline_age_trading_days",
+    "market.hs300.macd.dea_waterline_age_trading_days",
+)
 
 REASON_CODE_LABELS = {
     "BOARD_LOT_TOO_SMALL": "不足一手，无法下单",
@@ -69,15 +84,15 @@ _ARTIFACT_SPECS: tuple[dict[str, Any], ...] = (
     {
         "artifact": "result",
         "filename": "result.json",
-        "role_zh": "原始运行结果的完整持久化，体积较大，通常不是 AI 首选入口。",
-        "row_shape_zh": "单个大对象。",
+        "role_zh": "运行结果入口。默认 compact 模式只保存摘要；full 模式才保存完整原始运行结果。",
+        "row_shape_zh": "单个对象。compact 模式为摘要对象，full 模式为完整大对象。",
         "primary_ids": ["run_id"],
         "fields": [
             {"path": "run_id", "meaning_zh": "运行标识。"},
             {"path": "symbols", "meaning_zh": "参与回测的标的。"},
-            {"path": "closed_trades", "meaning_zh": "闭合交易原始列表。"},
-            {"path": "signal_audit", "meaning_zh": "信号意图原始列表。"},
-            {"path": "execution_audit", "meaning_zh": "执行事件原始列表。"},
+            {"path": "counts.*", "meaning_zh": "compact 模式下的关键数量。"},
+            {"path": "report", "meaning_zh": "compact 模式内嵌核心报告。"},
+            {"path": "raw_detail_note", "meaning_zh": "若未持久化完整明细，说明如何打开 full 模式。"},
         ],
     },
     {
@@ -116,10 +131,14 @@ _ARTIFACT_SPECS: tuple[dict[str, Any], ...] = (
     {
         "artifact": "signal_audit",
         "filename": "signal_audit.json",
-        "role_zh": "策略决策证据。记录每天每个标的的 hold/enter/exit/add_on 意图和检查项。",
-        "row_shape_zh": "数组，每行一个信号意图。",
+        "role_zh": "策略决策证据。默认 compact 模式保存计数、日期范围和样本；full 模式保存全量意图数组。",
+        "row_shape_zh": "compact 模式为单个摘要对象；full 模式为数组，每行一个信号意图。",
         "primary_ids": ["symbol+trade_date+intent_type+reason_code"],
         "fields": [
+            {"path": "total_count", "meaning_zh": "compact 模式下的全量信号意图数量。"},
+            {"path": "intent_type_counts", "meaning_zh": "compact 模式下按意图类型计数。"},
+            {"path": "reason_code_counts", "meaning_zh": "compact 模式下按原因代码计数。"},
+            {"path": "samples", "meaning_zh": "compact 模式下保留的前 N 条样本。"},
             {"path": "[].intent_type", "meaning_zh": "意图类型：hold、enter、exit_loss、exit_profit、add_on。"},
             {"path": "[].symbol", "meaning_zh": "股票代码。"},
             {"path": "[].trade_date", "meaning_zh": "信号日期。"},
@@ -219,6 +238,22 @@ _ARTIFACT_SPECS: tuple[dict[str, Any], ...] = (
         ],
     },
     {
+        "artifact": "trade_attribution",
+        "filename": "trade_attribution.json",
+        "role_zh": "统一后验归因入口，从闭合交易生命周期反查入场、出场和加仓时点因子并按盈亏统计。",
+        "row_shape_zh": "单个对象，attributions 是每笔闭合交易归因，factor_summaries 是按 timing+factor 聚合。",
+        "primary_ids": ["attributions[].trade_index", "factor_summaries[].timing+key"],
+        "fields": [
+            {"path": "trade_count", "meaning_zh": "参与后验归因的闭合交易数量。"},
+            {"path": "attributions[].entry.factors", "meaning_zh": "入场当天反查到的因子；缺失因子显式 missing。"},
+            {"path": "attributions[].exit.factors", "meaning_zh": "出场当天反查到的因子；缺失因子显式 missing。"},
+            {"path": "attributions[].add_ons[].factors", "meaning_zh": "加仓当天反查到的因子。"},
+            {"path": "factor_summaries[].win_rate", "meaning_zh": "该 timing+factor 下非缺失样本的胜率。"},
+            {"path": "factor_summaries[].average_return_pct", "meaning_zh": "该 timing+factor 下非缺失样本的平均整笔交易收益。"},
+            {"path": "factor_summaries[].value_buckets", "meaning_zh": "该因子不同取值的样本、胜率和代表 trade_index。"},
+        ],
+    },
+    {
         "artifact": "trade_review",
         "filename": "trade_review.json",
         "role_zh": "复盘分析入口，包含交易归因、卖飞、机会成本、加仓点和 profile 汇总。",
@@ -310,6 +345,7 @@ _OVERVIEW_ARTIFACTS = {
     "positions": "positions.json",
     "snapshots": "snapshots.json",
     "trade_lifecycle": "trade_lifecycle.json",
+    "trade_attribution": "trade_attribution.json",
     "trade_review": "trade_review.json",
     "environment_fit": "environment_fit.json",
     "strategy_environment_profile": "strategy_environment_profile.json",
@@ -348,7 +384,10 @@ def build_run_data_dictionary(run_dir: str | Path | None = None) -> dict[str, An
         "artifact_count": len(artifacts),
         "artifacts": artifacts,
         "sample_lookup": {
-            "trade": "trade_index -> trade_review.trades / trade_lifecycle.lifecycles / post_exit_analysis.observations",
+            "trade": (
+                "trade_index -> trade_attribution.attributions / trade_review.trades / "
+                "trade_lifecycle.lifecycles / post_exit_analysis.observations"
+            ),
             "opportunity": "sample_index -> trade_review.opportunities",
             "add_on": "sample_index -> trade_review.add_on_entry_points",
         },
@@ -357,7 +396,7 @@ def build_run_data_dictionary(run_dir: str | Path | None = None) -> dict[str, An
             "先读取 evidence_validation；status 不是 ok 时先修证据链。",
             "优先从 run_data_overview 看总量，再用 trade_index 或 sample_index 下钻。",
             "不要重新计算指标、不要重跑策略、不要把缺失值补成 0 或 False。",
-            "signal_audit 是决策证据，execution_audit 是执行证据，trade_review 是下游复盘视图。",
+            "signal_audit 是决策证据，execution_audit 是执行证据，trade_lifecycle/trade_attribution 是后验归因证据。",
             "卖飞、机会成本和止损后反弹都是后验线索，不是交易因果结论。",
         ],
     }
@@ -467,9 +506,11 @@ def build_run_data_overview(
     report = _as_mapping(artifacts.get("report"))
     validation = _as_mapping(artifacts.get("evidence_validation"))
     trades_artifact = _as_mapping(artifacts.get("trades"))
+    trade_attribution = _as_mapping(artifacts.get("trade_attribution"))
     trade_review = _as_mapping(artifacts.get("trade_review"))
     post_exit = _as_mapping(artifacts.get("post_exit_analysis"))
-    signal_audit = _as_sequence(artifacts.get("signal_audit"))
+    signal_audit_artifact = artifacts.get("signal_audit")
+    signal_audit = _as_sequence(signal_audit_artifact)
     sizing_audit = _as_sequence(artifacts.get("sizing_audit"))
     execution_audit = _as_sequence(artifacts.get("execution_audit"))
     equity_curve = _as_sequence(artifacts.get("equity_curve"))
@@ -513,13 +554,7 @@ def build_run_data_overview(
             "symbol_trade_counts": _value_counts(closed_trades, "symbol", top=top_symbols),
             "open_positions": list(open_positions),
         },
-        "signals": {
-            "signal_intent_count": len(signal_audit),
-            "intent_type_counts": _value_counts(signal_audit, "intent_type"),
-            "reason_code_counts": _reason_counts(signal_audit, "reason_code"),
-            "blocked_by_counts": _reason_counts(_rows_with_value(signal_audit, "blocked_by"), "blocked_by"),
-            "date_range": _date_range(signal_audit, "trade_date"),
-        },
+        "signals": _signal_audit_summary(signal_audit_artifact, signal_audit),
         "sizing": {
             "decision_count": len(sizing_audit),
             "blocked_by_counts": _reason_counts(_rows_with_value(sizing_audit, "blocked_by"), "blocked_by"),
@@ -544,6 +579,13 @@ def build_run_data_overview(
             "stop_loss_rebound_profile_count": len(_as_sequence(trade_review.get("stop_loss_rebound_profiles"))),
             "opportunity_cost_summary_count": len(_as_sequence(trade_review.get("opportunity_cost_summaries"))),
             "add_on_entry_summary_count": len(_as_sequence(trade_review.get("add_on_entry_summaries"))),
+        },
+        "trade_attribution": {
+            "trade_count": trade_attribution.get("trade_count"),
+            "entry_event_count": trade_attribution.get("entry_event_count"),
+            "exit_event_count": trade_attribution.get("exit_event_count"),
+            "add_on_event_count": trade_attribution.get("add_on_event_count"),
+            "factor_summary_count": len(_as_sequence(trade_attribution.get("factor_summaries"))),
         },
         "post_exit": {
             "window_days": post_exit.get("window_days"),
@@ -575,6 +617,7 @@ def render_run_data_overview_markdown_zh(overview: Mapping[str, Any]) -> str:
     signals = _as_mapping(overview.get("signals"))
     execution = _as_mapping(overview.get("execution"))
     review = _as_mapping(overview.get("review"))
+    trade_attribution = _as_mapping(overview.get("trade_attribution"))
 
     lines = [
         "# 回测数据总览",
@@ -641,7 +684,13 @@ def render_run_data_overview_markdown_zh(overview: Mapping[str, Any]) -> str:
             "",
             "## 复盘层",
             "```json",
-            _to_pretty_json({"review": review, "post_exit": overview.get("post_exit")}),
+            _to_pretty_json(
+                {
+                    "trade_attribution": trade_attribution,
+                    "review": review,
+                    "post_exit": overview.get("post_exit"),
+                }
+            ),
             "```",
             "",
             "## 下钻入口",
@@ -929,8 +978,9 @@ def build_run_data_attribution_index(
         raise FileNotFoundError(f"Run artifact directory does not exist: {run_path}")
 
     run_plan = _as_mapping(_load_json_if_exists(run_path / "run_plan.json"))
+    trade_attribution = _as_mapping(_load_json_if_exists(run_path / "trade_attribution.json"))
     trade_review = _as_mapping(_load_json_if_exists(run_path / "trade_review.json"))
-    rows = _attribution_rows(trade_review)
+    rows = _attribution_rows(trade_attribution=trade_attribution, trade_review=trade_review)
     parsed_filters = [_parse_attribution_filter(item) for item in filters]
     matches = [row for row in rows if _row_matches_filters(row, parsed_filters)]
     fields = _field_summaries(rows, top_samples_per_value=top_samples_per_value)
@@ -943,24 +993,36 @@ def build_run_data_attribution_index(
                 "raw": parsed["raw"],
                 "scope": parsed["scope"],
                 "field": parsed["field"],
+                "operator": parsed["operator"],
                 "value": parsed["value"],
             }
             for parsed in parsed_filters
         ],
         "row_count": len(rows),
         "field_count": len(fields),
+        "source_artifacts": {
+            "trade_attribution": bool(trade_attribution),
+            "trade_review": bool(trade_review),
+        },
         "match_count": len(matches),
         "matching_samples": matches[:max_samples],
         "fields": fields,
         "query_examples": [
             "entry.symbol.ma.bullish_trend=true",
             "entry.market.hs300.bullish_trend=false",
+            "entry.industry.kdj.j_below_threshold=true",
+            "entry.industry.kdj.j<13",
+            "entry.symbol.macd.dea_waterline_age_trading_days<=14",
+            "add_on.symbol.ma.price_above_ma60=true",
+            "exit.industry.sw_l1.code=801880.SI",
             "exit.current_price_at_or_below_stop=true",
             "opportunity.blocked_by=BOARD_LOT_TOO_SMALL",
         ],
         "ai_usage_rules": [
-            "该索引只来自已落盘的 trade_review 检查项、分类项和上下文字段。",
-            "筛选条件只做等值匹配；多个 --filter 是同一行内的 AND 条件。",
+            "优先使用 trade_attribution 的后验归因因子；旧报告缺失该文件时回退到 trade_review。",
+            "opportunity 样本仍来自 trade_review.opportunities。",
+            "筛选条件支持 =、!=、>、>=、<、<=；多个 --filter 是同一行内的 AND 条件。",
+            "数值比较只在字段值和筛选值都能转成数字时成立；字段缺失不会被当成 0。",
             "复盘结论应引用 matching_samples 中的 sample_id、trade_index 或 sample_index。",
             "字段缺失就是缺失，不要当成 false、0 或中性值。",
         ],
@@ -1036,6 +1098,534 @@ def write_run_data_attribution_index(
     return json_path, markdown_path
 
 
+def build_run_data_attribution_summary(
+    run_dir: str | Path,
+    *,
+    min_sample_count: int = 30,
+    top_n: int = 20,
+    combination_size: int = 2,
+) -> dict[str, Any]:
+    """Build a compact AI-first summary from persisted trade attribution factors."""
+
+    if min_sample_count <= 0:
+        raise ValueError("min_sample_count must be greater than 0")
+    if top_n <= 0:
+        raise ValueError("top_n must be greater than 0")
+    if combination_size < 2:
+        raise ValueError("combination_size must be at least 2")
+    run_path = Path(run_dir)
+    if not run_path.exists():
+        raise FileNotFoundError(f"Run artifact directory does not exist: {run_path}")
+
+    run_plan = _as_mapping(_load_json_if_exists(run_path / "run_plan.json"))
+    trade_attribution = _as_mapping(_load_json_if_exists(run_path / "trade_attribution.json"))
+    if not trade_attribution:
+        raise FileNotFoundError(f"trade_attribution.json does not exist: {run_path / 'trade_attribution.json'}")
+
+    overall = _trade_attribution_overall(trade_attribution)
+    summaries = [_factor_summary_item(summary) for summary in _as_sequence(trade_attribution.get("factor_summaries"))]
+    bucket_candidates = _bucket_candidates(
+        summaries,
+        overall=overall,
+        min_sample_count=min_sample_count,
+    )
+    combination_candidates = _combination_candidates(
+        _trade_attribution_rows(trade_attribution),
+        overall=overall,
+        min_sample_count=min_sample_count,
+        combination_size=combination_size,
+    )
+    return {
+        "schema": RUN_DATA_ATTRIBUTION_SUMMARY_SCHEMA,
+        "run_id": _run_id(run_path, run_plan),
+        "source_dir": str(run_path),
+        "source_artifact": "trade_attribution.json",
+        "parameters": {
+            "min_sample_count": min_sample_count,
+            "top_n": top_n,
+            "combination_size": combination_size,
+            "candidate_value_kinds": ("check", "category", "text"),
+            "numeric_bucket_fields": _NUMERIC_BUCKET_FIELD_NAMES,
+        },
+        "overall": overall,
+        "coverage": _attribution_coverage(summaries),
+        "preferred_candidates": bucket_candidates["preferred"][:top_n],
+        "avoid_candidates": bucket_candidates["avoid"][:top_n],
+        "preferred_combination_candidates": combination_candidates["preferred"][:top_n],
+        "avoid_combination_candidates": combination_candidates["avoid"][:top_n],
+        "largest_win_rate_edges": bucket_candidates["win_rate_edges"][:top_n],
+        "largest_average_return_edges": bucket_candidates["average_return_edges"][:top_n],
+        "high_missing_factors": _high_missing_factors(summaries, top_n=top_n),
+        "ai_usage_rules": [
+            "这是 AI 首读摘要，用于发现候选环境，不代表因果结论。",
+            "preferred/avoid 只来自已成交交易的后验归因，后续应按 trade_index 下钻样本。",
+            "缺失率高的因子不能直接得出环境结论；先检查 coverage。",
+            "单因子和组合候选里的 query_filter/query_filters 可直接复制到 run_data_attribution_index 验证样本。",
+        ],
+    }
+
+
+def render_run_data_attribution_summary_markdown_zh(summary: Mapping[str, Any]) -> str:
+    """Render compact attribution summary in Chinese Markdown."""
+
+    overall = _as_mapping(summary.get("overall"))
+    lines = [
+        "# 回测归因摘要",
+        "",
+        f"- schema: `{summary.get('schema')}`",
+        f"- run_id: `{summary.get('run_id')}`",
+        f"- source_dir: `{summary.get('source_dir')}`",
+        f"- trade_count: `{overall.get('trade_count')}`",
+        f"- win_rate: `{overall.get('win_rate')}`",
+        f"- average_return_pct: `{overall.get('average_return_pct')}`",
+        "",
+        "## 覆盖率",
+        "```json",
+        _to_pretty_json(summary.get("coverage", {})),
+        "```",
+        "",
+        "## 适合候选",
+        _candidate_table(_as_sequence(summary.get("preferred_candidates"))),
+        "",
+        "## 规避候选",
+        _candidate_table(_as_sequence(summary.get("avoid_candidates"))),
+        "",
+        "## 适合组合候选",
+        _candidate_table(_as_sequence(summary.get("preferred_combination_candidates"))),
+        "",
+        "## 规避组合候选",
+        _candidate_table(_as_sequence(summary.get("avoid_combination_candidates"))),
+        "",
+        "## 胜率差异最大",
+        _candidate_table(_as_sequence(summary.get("largest_win_rate_edges"))),
+        "",
+        "## 平均收益差异最大",
+        _candidate_table(_as_sequence(summary.get("largest_average_return_edges"))),
+        "",
+        "## 高缺失因子",
+        "```json",
+        _to_pretty_json(summary.get("high_missing_factors", [])),
+        "```",
+        "",
+        "## AI 使用规则",
+    ]
+    for rule in _as_sequence(summary.get("ai_usage_rules")):
+        lines.append(f"- {rule}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_run_data_attribution_summary(
+    summary: Mapping[str, Any],
+    *,
+    output_dir: str | Path | None = None,
+) -> tuple[Path, Path]:
+    """Write compact attribution summary JSON and Chinese Markdown."""
+
+    target_dir = Path(output_dir) if output_dir is not None else Path(str(summary["source_dir"]))
+    target_dir.mkdir(parents=True, exist_ok=True)
+    json_path = target_dir / "run_data_attribution_summary.json"
+    markdown_path = target_dir / "run_data_attribution_summary.zh.md"
+    json_path.write_text(_to_pretty_json(summary), encoding="utf-8")
+    markdown_path.write_text(render_run_data_attribution_summary_markdown_zh(summary), encoding="utf-8")
+    return json_path, markdown_path
+
+
+def _trade_attribution_overall(trade_attribution: Mapping[str, Any]) -> dict[str, Any]:
+    attributions = [_as_mapping(item) for item in _as_sequence(trade_attribution.get("attributions"))]
+    returns = [
+        float(item["return_pct"])
+        for item in attributions
+        if item.get("return_pct") is not None
+    ]
+    win_count = sum(1 for item in attributions if item.get("outcome") == "win")
+    loss_count = sum(1 for item in attributions if item.get("outcome") == "loss")
+    return {
+        "trade_count": len(attributions),
+        "win_count": win_count,
+        "loss_count": loss_count,
+        "win_rate": win_count / len(attributions) if attributions else None,
+        "average_return_pct": sum(returns) / len(returns) if returns else None,
+    }
+
+
+def _factor_summary_item(summary: Any) -> dict[str, Any]:
+    summary_map = _as_mapping(summary)
+    sample_count = int(summary_map.get("sample_count") or 0)
+    missing_count = int(summary_map.get("missing_count") or 0)
+    present_count = max(0, sample_count - missing_count)
+    return {
+        "timing": summary_map.get("timing"),
+        "key": summary_map.get("key"),
+        "value_kind": summary_map.get("value_kind"),
+        "sample_count": sample_count,
+        "missing_count": missing_count,
+        "present_count": present_count,
+        "missing_ratio": missing_count / sample_count if sample_count else None,
+        "win_rate": summary_map.get("win_rate"),
+        "average_return_pct": summary_map.get("average_return_pct"),
+        "value_buckets": _as_sequence(summary_map.get("value_buckets")),
+    }
+
+
+def _bucket_candidates(
+    summaries: Sequence[Mapping[str, Any]],
+    *,
+    overall: Mapping[str, Any],
+    min_sample_count: int,
+) -> dict[str, list[dict[str, Any]]]:
+    overall_win_rate = _optional_float(overall.get("win_rate"))
+    overall_average_return = _optional_float(overall.get("average_return_pct"))
+    candidates: list[dict[str, Any]] = []
+    for summary in summaries:
+        if summary.get("value_kind") not in {"check", "category", "text"}:
+            continue
+        timing = summary.get("timing")
+        key = summary.get("key")
+        for bucket in _as_sequence(summary.get("value_buckets")):
+            bucket_map = _as_mapping(bucket)
+            count = int(bucket_map.get("count") or 0)
+            if count < min_sample_count:
+                continue
+            win_rate = _optional_float(bucket_map.get("win_rate"))
+            average_return = _optional_float(bucket_map.get("average_return_pct"))
+            delta_win_rate = (
+                win_rate - overall_win_rate
+                if win_rate is not None and overall_win_rate is not None
+                else None
+            )
+            delta_average_return = (
+                average_return - overall_average_return
+                if average_return is not None and overall_average_return is not None
+                else None
+            )
+            candidates.append(
+                {
+                    "timing": timing,
+                    "field": key,
+                    "value": bucket_map.get("value"),
+                    "sample_count": count,
+                    "win_count": bucket_map.get("win_count"),
+                    "loss_count": bucket_map.get("loss_count"),
+                    "win_rate": win_rate,
+                    "average_return_pct": average_return,
+                    "delta_win_rate": delta_win_rate,
+                    "delta_average_return_pct": delta_average_return,
+                    "trade_indexes": _as_sequence(bucket_map.get("trade_indexes"))[:50],
+                    "query_filter": f"{timing}.{key}={bucket_map.get('value')}",
+                }
+            )
+
+    return {
+        "preferred": sorted(
+            candidates,
+            key=lambda item: (
+                -_score_optional(item.get("delta_average_return_pct")),
+                -_score_optional(item.get("delta_win_rate")),
+                -int(item.get("sample_count") or 0),
+            ),
+        ),
+        "avoid": sorted(
+            candidates,
+            key=lambda item: (
+                _score_optional(item.get("delta_average_return_pct")),
+                _score_optional(item.get("delta_win_rate")),
+                -int(item.get("sample_count") or 0),
+            ),
+        ),
+        "win_rate_edges": sorted(
+            candidates,
+            key=lambda item: (
+                -abs(_score_optional(item.get("delta_win_rate"))),
+                -int(item.get("sample_count") or 0),
+            ),
+        ),
+        "average_return_edges": sorted(
+            candidates,
+            key=lambda item: (
+                -abs(_score_optional(item.get("delta_average_return_pct"))),
+                -int(item.get("sample_count") or 0),
+            ),
+        ),
+    }
+
+
+def _combination_candidates(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    overall: Mapping[str, Any],
+    min_sample_count: int,
+    combination_size: int,
+) -> dict[str, list[dict[str, Any]]]:
+    overall_win_rate = _optional_float(overall.get("win_rate"))
+    overall_average_return = _optional_float(overall.get("average_return_pct"))
+    buckets: dict[tuple[str, tuple[str, ...]], dict[str, Any]] = {}
+    for row in rows:
+        row_map = _as_mapping(row)
+        if row_map.get("sample_kind") != "trade":
+            continue
+        scope = row_map.get("scope")
+        fields = _as_mapping(row_map.get("fields"))
+        trade_index = row_map.get("trade_index")
+        outcome = fields.get("trade.outcome")
+        return_pct = _optional_float(fields.get("trade.return_pct"))
+        conditions = _conditions_for_row(row_map)
+        if len(conditions) < combination_size:
+            continue
+        for combo in combinations(conditions, combination_size):
+            query_filters = tuple(
+                filter_text
+                for condition in combo
+                for filter_text in _as_sequence(condition.get("query_filters"))
+            )
+            key = (str(scope), tuple(sorted(query_filters)))
+            bucket = buckets.setdefault(
+                key,
+                {
+                    "timing": scope,
+                    "conditions": combo,
+                    "query_filters": tuple(sorted(query_filters)),
+                    "sample_count": 0,
+                    "win_count": 0,
+                    "loss_count": 0,
+                    "returns": [],
+                    "trade_indexes": [],
+                },
+            )
+            bucket["sample_count"] += 1
+            if outcome == "win":
+                bucket["win_count"] += 1
+            elif outcome == "loss":
+                bucket["loss_count"] += 1
+            if return_pct is not None:
+                bucket["returns"].append(return_pct)
+            if trade_index is not None and len(bucket["trade_indexes"]) < 50:
+                bucket["trade_indexes"].append(trade_index)
+
+    candidates: list[dict[str, Any]] = []
+    for bucket in buckets.values():
+        count = int(bucket["sample_count"])
+        if count < min_sample_count:
+            continue
+        win_count = int(bucket["win_count"])
+        returns = bucket["returns"]
+        win_rate = win_count / count if count else None
+        average_return = sum(returns) / len(returns) if returns else None
+        delta_win_rate = (
+            win_rate - overall_win_rate
+            if win_rate is not None and overall_win_rate is not None
+            else None
+        )
+        delta_average_return = (
+            average_return - overall_average_return
+            if average_return is not None and overall_average_return is not None
+            else None
+        )
+        query_filters = list(bucket["query_filters"])
+        candidates.append(
+            {
+                "timing": bucket["timing"],
+                "field": " && ".join(str(_as_mapping(condition).get("field")) for condition in bucket["conditions"]),
+                "value": " && ".join(str(_as_mapping(condition).get("label")) for condition in bucket["conditions"]),
+                "conditions": [_as_mapping(condition) for condition in bucket["conditions"]],
+                "sample_count": count,
+                "win_count": win_count,
+                "loss_count": int(bucket["loss_count"]),
+                "win_rate": win_rate,
+                "average_return_pct": average_return,
+                "delta_win_rate": delta_win_rate,
+                "delta_average_return_pct": delta_average_return,
+                "trade_indexes": bucket["trade_indexes"],
+                "query_filters": query_filters,
+                "query_filter": " && ".join(query_filters),
+            }
+        )
+
+    return {
+        "preferred": sorted(
+            candidates,
+            key=lambda item: (
+                -_score_optional(item.get("delta_average_return_pct")),
+                -_score_optional(item.get("delta_win_rate")),
+                -int(item.get("sample_count") or 0),
+            ),
+        ),
+        "avoid": sorted(
+            candidates,
+            key=lambda item: (
+                _score_optional(item.get("delta_average_return_pct")),
+                _score_optional(item.get("delta_win_rate")),
+                -int(item.get("sample_count") or 0),
+            ),
+        ),
+    }
+
+
+def _conditions_for_row(row: Mapping[str, Any]) -> list[dict[str, Any]]:
+    scope = str(row.get("scope"))
+    conditions: list[dict[str, Any]] = []
+    for field, value in sorted(_as_mapping(row.get("fields")).items()):
+        if str(field).startswith("trade."):
+            continue
+        condition = _condition_for_field(scope=scope, field=str(field), value=value)
+        if condition is not None:
+            conditions.append(condition)
+    return conditions[:24]
+
+
+def _condition_for_field(*, scope: str, field: str, value: Any) -> dict[str, Any] | None:
+    numeric_condition = _numeric_bucket_condition(scope=scope, field=field, value=value)
+    if numeric_condition is not None:
+        return numeric_condition
+    if isinstance(value, bool):
+        label = _condition_value_label(value)
+        return _condition(scope=scope, field=field, label=label, query_filters=(f"{scope}.{field}={label}",))
+    if isinstance(value, (int, float)):
+        return None
+    if value is None or isinstance(value, (list, tuple, dict)):
+        return None
+    label = _condition_value_label(value)
+    return _condition(scope=scope, field=field, label=label, query_filters=(f"{scope}.{field}={label}",))
+
+
+def _numeric_bucket_condition(*, scope: str, field: str, value: Any) -> dict[str, Any] | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    if field.endswith(".kdj.j") or field == "industry.kdj.j":
+        if number < 13:
+            return _condition(scope=scope, field=field, label="<13", query_filters=(f"{scope}.{field}<13",))
+        if number < 50:
+            return _condition(
+                scope=scope,
+                field=field,
+                label="[13,50)",
+                query_filters=(f"{scope}.{field}>=13", f"{scope}.{field}<50"),
+            )
+        if number < 80:
+            return _condition(
+                scope=scope,
+                field=field,
+                label="[50,80)",
+                query_filters=(f"{scope}.{field}>=50", f"{scope}.{field}<80"),
+            )
+        return _condition(scope=scope, field=field, label=">=80", query_filters=(f"{scope}.{field}>=80",))
+    if field.endswith(".dea_waterline_age_trading_days"):
+        if number <= 5:
+            return _condition(scope=scope, field=field, label="<=5", query_filters=(f"{scope}.{field}<=5",))
+        if number <= 14:
+            return _condition(
+                scope=scope,
+                field=field,
+                label="(5,14]",
+                query_filters=(f"{scope}.{field}>5", f"{scope}.{field}<=14"),
+            )
+        return _condition(scope=scope, field=field, label=">14", query_filters=(f"{scope}.{field}>14",))
+    if field.endswith(".macd.dea"):
+        if number > 0:
+            return _condition(scope=scope, field=field, label=">0", query_filters=(f"{scope}.{field}>0",))
+        return _condition(scope=scope, field=field, label="<=0", query_filters=(f"{scope}.{field}<=0",))
+    return None
+
+
+def _condition(*, scope: str, field: str, label: str, query_filters: Sequence[str]) -> dict[str, Any]:
+    return {
+        "scope": scope,
+        "field": field,
+        "label": label,
+        "query_filters": tuple(query_filters),
+    }
+
+
+def _condition_value_label(value: Any) -> str:
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return str(value)
+
+
+def _attribution_coverage(summaries: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    by_timing: dict[str, dict[str, Any]] = {}
+    for summary in summaries:
+        timing = str(summary.get("timing"))
+        bucket = by_timing.setdefault(
+            timing,
+            {
+                "factor_count": 0,
+                "fully_missing_factor_count": 0,
+                "partially_or_fully_present_factor_count": 0,
+            },
+        )
+        bucket["factor_count"] += 1
+        if int(summary.get("present_count") or 0) == 0:
+            bucket["fully_missing_factor_count"] += 1
+        else:
+            bucket["partially_or_fully_present_factor_count"] += 1
+    return {"by_timing": by_timing}
+
+
+def _high_missing_factors(summaries: Sequence[Mapping[str, Any]], *, top_n: int) -> list[dict[str, Any]]:
+    rows = [
+        {
+            "timing": summary.get("timing"),
+            "field": summary.get("key"),
+            "sample_count": summary.get("sample_count"),
+            "missing_count": summary.get("missing_count"),
+            "missing_ratio": summary.get("missing_ratio"),
+        }
+        for summary in summaries
+        if _optional_float(summary.get("missing_ratio")) not in (None, 0.0)
+    ]
+    return sorted(
+        rows,
+        key=lambda item: (
+            -_score_optional(item.get("missing_ratio")),
+            -int(item.get("missing_count") or 0),
+            str(item.get("field")),
+        ),
+    )[:top_n]
+
+
+def _candidate_table(candidates: Sequence[Any]) -> str:
+    lines = [
+        "| timing | field | value | 样本 | 胜率差 | 收益差 | filter |",
+        "|---|---|---|---:|---:|---:|---|",
+    ]
+    for candidate in candidates:
+        item = _as_mapping(candidate)
+        lines.append(
+            "| "
+            f"`{item.get('timing')}` | "
+            f"`{item.get('field')}` | "
+            f"`{item.get('value')}` | "
+            f"{item.get('sample_count')} | "
+            f"{_format_decimal(item.get('delta_win_rate'))} | "
+            f"{_format_decimal(item.get('delta_average_return_pct'))} | "
+            f"`{item.get('query_filter')}` |"
+        )
+    return "\n".join(lines)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _score_optional(value: Any) -> float:
+    return float(value) if value is not None else 0.0
+
+
+def _format_decimal(value: Any) -> str:
+    if value is None:
+        return "-"
+    return f"{float(value):.4f}"
+
+
 def _compact_drilldown(drilldown: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "sample_kind": drilldown.get("sample_kind"),
@@ -1046,7 +1636,68 @@ def _compact_drilldown(drilldown: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _attribution_rows(trade_review: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _attribution_rows(*, trade_attribution: Mapping[str, Any], trade_review: Mapping[str, Any]) -> list[dict[str, Any]]:
+    rows = _trade_attribution_rows(trade_attribution)
+    if rows:
+        rows.extend(_opportunity_attribution_rows(trade_review))
+        return rows
+    return _trade_review_attribution_rows(trade_review)
+
+
+def _trade_attribution_rows(trade_attribution: Mapping[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for attribution in _as_sequence(trade_attribution.get("attributions")):
+        attribution_map = _as_mapping(attribution)
+        context = _drop_empty(
+            {
+                "trade.outcome": attribution_map.get("outcome"),
+                "trade.exit_reason": attribution_map.get("exit_reason"),
+                "trade.return_pct": attribution_map.get("return_pct"),
+            }
+        )
+        for scope in ("entry", "exit"):
+            event = _as_mapping(attribution_map.get(scope))
+            fields = _merge_fields(context, _factor_fields(event))
+            if fields:
+                rows.append(
+                    _attribution_row(
+                        scope=scope,
+                        sample_kind="trade",
+                        sample=attribution_map,
+                        date_value=event.get("trade_date") or attribution_map.get(f"{scope}_date"),
+                        fields=fields,
+                    )
+                )
+        for event in _as_sequence(attribution_map.get("add_ons")):
+            event_map = _as_mapping(event)
+            fields = _merge_fields(context, _factor_fields(event_map))
+            if fields:
+                rows.append(
+                    _attribution_row(
+                        scope="add_on",
+                        sample_kind="trade",
+                        sample=attribution_map,
+                        date_value=event_map.get("trade_date"),
+                        fields=fields,
+                    )
+                )
+    return rows
+
+
+def _factor_fields(event: Mapping[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for factor in _as_sequence(event.get("factors")):
+        factor_map = _as_mapping(factor)
+        if factor_map.get("missing") is True:
+            continue
+        key = factor_map.get("key")
+        if key is None:
+            continue
+        fields[str(key)] = _jsonable_value(factor_map.get("value"))
+    return fields
+
+
+def _trade_review_attribution_rows(trade_review: Mapping[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for trade in _as_sequence(trade_review.get("trades")):
         trade_map = _as_mapping(trade)
@@ -1081,6 +1732,33 @@ def _attribution_rows(trade_review: Mapping[str, Any]) -> list[dict[str, Any]]:
                 )
             )
 
+    rows.extend(_opportunity_attribution_rows(trade_review))
+
+    for add_on in _as_sequence(trade_review.get("add_on_entry_points")):
+        add_on_map = _as_mapping(add_on)
+        context = _drop_empty(
+            {
+                "trade.outcome": add_on_map.get("outcome"),
+                "reason_code": add_on_map.get("reason_code"),
+                "follow_up.complete": _as_mapping(add_on_map.get("follow_up")).get("complete"),
+            }
+        )
+        fields = _merge_fields(context, _as_mapping(add_on_map.get("checks")), _as_mapping(add_on_map.get("categories")))
+        if fields:
+            rows.append(
+                _attribution_row(
+                    scope="add_on",
+                    sample_kind="add_on",
+                    sample=add_on_map,
+                    date_value=add_on_map.get("add_on_date"),
+                    fields=fields,
+                )
+            )
+    return rows
+
+
+def _opportunity_attribution_rows(trade_review: Mapping[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     for opportunity in _as_sequence(trade_review.get("opportunities")):
         opportunity_map = _as_mapping(opportunity)
         context = _drop_empty(
@@ -1100,27 +1778,6 @@ def _attribution_rows(trade_review: Mapping[str, Any]) -> list[dict[str, Any]]:
                     sample_kind="opportunity",
                     sample=opportunity_map,
                     date_value=opportunity_map.get("trade_date"),
-                    fields=fields,
-                )
-            )
-
-    for add_on in _as_sequence(trade_review.get("add_on_entry_points")):
-        add_on_map = _as_mapping(add_on)
-        context = _drop_empty(
-            {
-                "trade.outcome": add_on_map.get("outcome"),
-                "reason_code": add_on_map.get("reason_code"),
-                "follow_up.complete": _as_mapping(add_on_map.get("follow_up")).get("complete"),
-            }
-        )
-        fields = _merge_fields(context, _as_mapping(add_on_map.get("checks")), _as_mapping(add_on_map.get("categories")))
-        if fields:
-            rows.append(
-                _attribution_row(
-                    scope="add_on",
-                    sample_kind="add_on",
-                    sample=add_on_map,
-                    date_value=add_on_map.get("add_on_date"),
                     fields=fields,
                 )
             )
@@ -1189,11 +1846,18 @@ def _field_summaries(rows: Sequence[Mapping[str, Any]], *, top_samples_per_value
 
 
 def _parse_attribution_filter(text: str) -> dict[str, Any]:
-    if "=" not in text:
-        raise ValueError(f"Attribution filter must use field=value syntax: {text}")
-    left, raw_value = text.split("=", 1)
+    operator = None
+    left = ""
+    raw_value = ""
+    for candidate in _ATTRIBUTION_FILTER_OPERATORS:
+        if candidate in text:
+            left, raw_value = text.split(candidate, 1)
+            operator = candidate
+            break
+    if operator is None:
+        raise ValueError(f"Attribution filter must use field=value or numeric comparison syntax: {text}")
     if not left or not raw_value:
-        raise ValueError(f"Attribution filter must use field=value syntax: {text}")
+        raise ValueError(f"Attribution filter must use field=value or numeric comparison syntax: {text}")
     scope = None
     field = left
     for candidate in ("entry", "exit", "add_on", "opportunity"):
@@ -1208,6 +1872,7 @@ def _parse_attribution_filter(text: str) -> dict[str, Any]:
         "raw": text,
         "scope": scope,
         "field": field,
+        "operator": operator,
         "value": _parse_filter_value(raw_value),
     }
 
@@ -1225,7 +1890,11 @@ def _row_matches_filters(row: Mapping[str, Any], filters: Sequence[Mapping[str, 
             return False
         if field not in fields:
             return False
-        if not _values_equal(fields[field], filter_map.get("value")):
+        if not _field_matches_filter(
+            fields[field],
+            str(filter_map.get("operator") or "="),
+            filter_map.get("value"),
+        ):
             return False
     return True
 
@@ -1297,6 +1966,26 @@ def _values_equal(left: Any, right: Any) -> bool:
     if left == right:
         return True
     return str(left) == str(right)
+
+
+def _field_matches_filter(value: Any, operator: str, expected: Any) -> bool:
+    if operator == "=":
+        return _values_equal(value, expected)
+    if operator == "!=":
+        return not _values_equal(value, expected)
+    left = _optional_float(value)
+    right = _optional_float(expected)
+    if left is None or right is None:
+        return False
+    if operator == ">":
+        return left > right
+    if operator == ">=":
+        return left >= right
+    if operator == "<":
+        return left < right
+    if operator == "<=":
+        return left <= right
+    raise ValueError(f"Unsupported attribution filter operator: {operator}")
 
 
 def _stable_value_key(value: Any) -> str:
@@ -1402,6 +2091,11 @@ def _artifact_count(artifact: str, payload: Any) -> Any:
         }
     if artifact == "trade_lifecycle":
         return len(_as_sequence(payload_map.get("lifecycles")))
+    if artifact == "trade_attribution":
+        return {
+            "trades": payload_map.get("trade_count"),
+            "factor_summaries": len(_as_sequence(payload_map.get("factor_summaries"))),
+        }
     if artifact == "trade_review":
         return {
             "trades": len(_as_sequence(payload_map.get("trades"))),
@@ -1431,7 +2125,34 @@ def _artifact_count(artifact: str, payload: Any) -> Any:
         }
     if artifact == "evidence_validation":
         return payload_map.get("counts")
+    if artifact == "signal_audit" and payload_map.get("schema") == "attbacktrader.compact_signal_audit.v1":
+        return payload_map.get("total_count")
+    if artifact == "result" and payload_map.get("schema") == "attbacktrader.compact_result.v1":
+        return payload_map.get("counts")
     return None
+
+
+def _signal_audit_summary(signal_audit_artifact: Any, signal_audit_rows: Sequence[Any]) -> dict[str, Any]:
+    signal_audit_map = _as_mapping(signal_audit_artifact)
+    if signal_audit_map.get("schema") == "attbacktrader.compact_signal_audit.v1":
+        return {
+            "signal_intent_count": signal_audit_map.get("total_count"),
+            "intent_type_counts": _as_sequence(signal_audit_map.get("intent_type_counts")),
+            "reason_code_counts": _as_sequence(signal_audit_map.get("reason_code_counts")),
+            "blocked_by_counts": _as_sequence(signal_audit_map.get("blocked_by_counts")),
+            "method_counts": _as_sequence(signal_audit_map.get("method_counts")),
+            "date_range": signal_audit_map.get("date_range"),
+            "artifact_detail": "compact",
+            "sample_count": len(_as_sequence(signal_audit_map.get("samples"))),
+        }
+    return {
+        "signal_intent_count": len(signal_audit_rows),
+        "intent_type_counts": _value_counts(signal_audit_rows, "intent_type"),
+        "reason_code_counts": _reason_counts(signal_audit_rows, "reason_code"),
+        "blocked_by_counts": _reason_counts(_rows_with_value(signal_audit_rows, "blocked_by"), "blocked_by"),
+        "date_range": _date_range(signal_audit_rows, "trade_date"),
+        "artifact_detail": "full",
+    }
 
 
 def _sample_summary(kind: str, sample: Mapping[str, Any], related: Mapping[str, Any]) -> dict[str, Any]:
