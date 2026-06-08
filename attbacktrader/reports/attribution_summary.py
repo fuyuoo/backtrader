@@ -8,8 +8,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from attbacktrader.strategies.attribution import attribution_declaration_by_key
+
 
 ATTRIBUTION_SUMMARY_SCHEMA = "attbacktrader.attribution_summary.v1"
+_ATTRIBUTION_DECLARATIONS = attribution_declaration_by_key()
 
 _FOCUS_MATRIX_IDS = (
     "entry_kdj_stack",
@@ -275,8 +278,8 @@ def _matrix_focus(matrix: Mapping[str, Any], *, top_n: int) -> dict[str, Any]:
         "matrix_id": matrix.get("matrix_id"),
         "title": matrix.get("title"),
         "shown_row_count": len(rows),
-        "positive_rows": tuple(_compact_row(row) for row in positive_rows),
-        "negative_rows": tuple(_compact_row(row) for row in negative_rows),
+        "positive_rows": tuple(_compact_row(row, matrix=matrix) for row in positive_rows),
+        "negative_rows": tuple(_compact_row(row, matrix=matrix) for row in negative_rows),
     }
 
 
@@ -474,7 +477,7 @@ def _top_rows_from_matrices(
     for matrix_id in matrix_ids:
         matrix = _as_mapping(matrix_by_id.get(matrix_id))
         for row in _as_sequence(matrix.get("rows")):
-            compact = _compact_row(_as_mapping(row))
+            compact = _compact_row(_as_mapping(row), matrix=matrix)
             compact["matrix_id"] = matrix_id
             compact["matrix_title"] = matrix.get("title")
             rows.append(compact)
@@ -482,10 +485,14 @@ def _top_rows_from_matrices(
     return tuple(sorted(rows, key=key_func)[:top_n])
 
 
-def _compact_row(row: Mapping[str, Any]) -> dict[str, Any]:
+def _compact_row(row: Mapping[str, Any], *, matrix: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    dimensions = dict(_as_mapping(row.get("dimensions")))
+    sample_count = row.get("sample_count")
     return {
-        "dimensions": dict(_as_mapping(row.get("dimensions"))),
-        "sample_count": row.get("sample_count"),
+        "dimensions": dimensions,
+        "dimension_labels_zh": _dimension_labels_zh(dimensions, matrix=matrix),
+        "sample_count": sample_count,
+        "sample_risk": _sample_risk(sample_count),
         "win_rate": row.get("win_rate"),
         "average_return_pct": row.get("average_return_pct"),
         "average_win_pct": row.get("average_win_pct"),
@@ -538,8 +545,8 @@ def _append_rows_table(lines: list[str], rows: Sequence[Any]) -> None:
     lines.extend(
         [
             "",
-            "| 分桶 | 样本 | 胜率 | 平均收益 | 止损率 | 5日最高均值 | >=5% | >=10% |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|",
+            "| 分桶 | 样本 | 样本风险 | 胜率 | 平均收益 | 止损率 | 5日最高均值 | >=5% | >=10% |",
+            "|---|---:|---|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in rows:
@@ -548,6 +555,7 @@ def _append_rows_table(lines: list[str], rows: Sequence[Any]) -> None:
             "| "
             f"{_format_dimensions(row_map.get('dimensions'))} | "
             f"{row_map.get('sample_count')} | "
+            f"{_sample_risk_label(row_map.get('sample_risk'))} | "
             f"{_format_percent(row_map.get('win_rate'))} | "
             f"{_format_percent(row_map.get('average_return_pct'))} | "
             f"{_format_percent(row_map.get('stop_loss_rate'))} | "
@@ -592,6 +600,15 @@ def _optional_float(value: Any) -> float | None:
         return None
 
 
+def _optional_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _mean(values: Sequence[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
@@ -604,7 +621,99 @@ def _format_dimensions(value: Any) -> str:
     dimensions = _as_mapping(value)
     if not dimensions:
         return "-"
-    return " / ".join(f"{key}={item}" for key, item in dimensions.items())
+    return " / ".join(_dimension_pair_label_zh(key, item) for key, item in dimensions.items())
+
+
+def _dimension_pair_label_zh(key: Any, value: Any) -> str:
+    label = _dimension_label_zh(key)
+    value_label = _dimension_value_label_zh(value)
+    if str(value).startswith(("<", ">")):
+        return f"{label} {value_label}"
+    return f"{label}={value_label}"
+
+
+def _dimension_labels_zh(
+    dimensions: Mapping[str, Any],
+    *,
+    matrix: Mapping[str, Any] | None,
+) -> dict[str, str]:
+    matrix_dimensions = _matrix_dimension_factor_keys(matrix)
+    labels: dict[str, str] = {}
+    for key in dimensions:
+        factor_key = matrix_dimensions.get(key)
+        declaration = _ATTRIBUTION_DECLARATIONS.get(factor_key or "")
+        labels[str(key)] = declaration.label_zh if declaration is not None else _dimension_label_zh(key)
+    return labels
+
+
+def _matrix_dimension_factor_keys(matrix: Mapping[str, Any] | None) -> dict[str, str]:
+    matrix_map = _as_mapping(matrix)
+    result: dict[str, str] = {}
+    for item in _as_sequence(matrix_map.get("dimensions")):
+        item_map = _as_mapping(item)
+        name = item_map.get("name")
+        factor_key = item_map.get("factor_key")
+        if name is not None and factor_key is not None:
+            result[str(name)] = str(factor_key)
+    return result
+
+
+def _dimension_label_zh(key: Any) -> str:
+    text = str(key)
+    return {
+        "dea_age": "DEA 上水天数",
+        "symbol_kdj_j": "个股 KDJ J",
+        "symbol_weekly_kdj_j": "个股周线 KDJ J",
+        "industry_kdj_j": "行业 KDJ J",
+        "industry_weekly_kdj_j": "行业周线 KDJ J",
+        "market_hs300_kdj_j": "沪深300 KDJ J",
+        "symbol_macd_zone": "个股日线 MACD 能量区间",
+        "symbol_weekly_macd_zone": "个股周线 MACD 能量区间",
+        "industry_macd_zone": "行业日线 MACD 能量区间",
+        "industry_weekly_macd_zone": "行业周线 MACD 能量区间",
+        "industry_trend_state": "行业均线趋势状态",
+        "industry_relative_strength": "行业相对沪深300强弱状态",
+    }.get(text, text)
+
+
+def _dimension_value_label_zh(value: Any) -> str:
+    text = str(value)
+    return {
+        "missing": "缺失",
+        "true": "是",
+        "false": "否",
+        "bullish": "多头",
+        "not_bullish": "非多头",
+        "strong_outperform": "强于沪深300",
+        "outperform": "略强于沪深300",
+        "weak_underperform": "略弱于沪深300",
+        "underperform": "弱于沪深300",
+        "red_bar_wrapping_lines": "红柱包住 DIF/DEA",
+        "red_bar_one_line_escape": "红柱一线飘出",
+        "red_bar_two_line_escape": "红柱两线飘出",
+        "red_bar_uncategorized": "红柱未分型",
+        "green_bar_or_zero": "绿柱或零轴",
+    }.get(text, text)
+
+
+def _sample_risk(value: Any) -> str:
+    count = _optional_int(value)
+    if count is None:
+        return "unknown"
+    if count < 30:
+        return "low_sample"
+    if count < 100:
+        return "medium_sample"
+    return "sufficient_sample"
+
+
+def _sample_risk_label(value: Any) -> str:
+    return {
+        "low_sample": "低样本，仅作线索",
+        "medium_sample": "中样本，需复核",
+        "sufficient_sample": "样本较足",
+        "unknown": "未知",
+    }.get(str(value), str(value))
 
 
 def _format_percent(value: Any) -> str:

@@ -73,7 +73,7 @@ def test_attribution_summary_builds_ai_readable_cards(tmp_path: Path) -> None:
                     "entry_symbol_daily_weekly_kdj",
                     "入场 个股日线 KDJ J x 个股周线 KDJ J",
                     [
-                        _row({"symbol_kdj_j": ">=80", "symbol_weekly_kdj_j": ">=80"}, 11, 0.6, 0.15, 0.3),
+                        _row({"symbol_kdj_j": ">=80", "symbol_weekly_kdj_j": ">=80"}, 31, 0.6, 0.15, 0.3),
                         _row({"symbol_kdj_j": "<13", "symbol_weekly_kdj_j": "13-30"}, 6, 0.1, -0.04, 0.9),
                     ],
                 ),
@@ -175,6 +175,8 @@ def test_attribution_summary_builds_ai_readable_cards(tmp_path: Path) -> None:
         "entry_industry_daily_weekly_kdj",
     )
     assert chapters["weekly_kdj"]["positive_rows"][0]["matrix_id"] == "entry_symbol_daily_weekly_kdj"
+    assert chapters["weekly_kdj"]["positive_rows"][0]["dimension_labels_zh"]["symbol_kdj_j"] == "个股 KDJ J"
+    assert chapters["weekly_kdj"]["positive_rows"][0]["sample_risk"] == "medium_sample"
     assert chapters["macd_energy_zone"]["matrix_ids"] == (
         "entry_symbol_daily_weekly_macd_zone",
         "entry_industry_daily_weekly_macd_zone",
@@ -188,6 +190,10 @@ def test_attribution_summary_builds_ai_readable_cards(tmp_path: Path) -> None:
     assert "周期因子专章" in markdown
     assert "周线 KDJ 联动" in markdown
     assert "MACD 日周能量区间" in markdown
+    assert "个股 KDJ J >=80 / 个股周线 KDJ J >=80" in markdown
+    assert "个股日线 MACD 能量区间=红柱包住 DIF/DEA" in markdown
+    assert "低样本，仅作线索" in markdown
+    assert "中样本，需复核" in markdown
     assert "重点结论卡片" in markdown
     assert json_path.exists()
     assert markdown_path.exists()
