@@ -256,6 +256,14 @@ _Avoid_: Scale-out, partial sell, cost reduction
 A decision-layer MACD state where DEA has moved above the zero line and remains above it until DEA returns to zero or below. It is strategy evidence, not a separate reusable indicator.
 _Avoid_: MACD calculation, permanent bullish state
 
+**MACD Attribution Bar**:
+The MACD bar value used for attribution language and bucket classification, aligned with common Chinese charting software as twice the distance between DIF and DEA.
+_Avoid_: Raw indicator histogram, unstated MACD scaling
+
+**MACD Energy Zone**:
+A daily or weekly attribution category that explains where DIF, DEA, and the MACD attribution bar sit relative to each other and whether red-bar energy is expanding or weakening.
+_Avoid_: Buy signal, sell signal, causal proof
+
 **Stop-Loss Method**:
 A code-backed method bound to a strategy template that determines when the strategy should exit a losing position.
 _Avoid_: Stop-loss setting

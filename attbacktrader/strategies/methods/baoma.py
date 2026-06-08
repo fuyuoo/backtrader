@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from attbacktrader.features import IndicatorRequirement, MarketFeatureRow, ma_indicator_name
+from attbacktrader.features import (
+    IndicatorRequirement,
+    MarketFeatureRow,
+    completed_indicator_before_event,
+    ma_indicator_name,
+)
 from attbacktrader.strategies.attribution import entry_attribution_payload
 from attbacktrader.strategies.intents import TradeIntent, TradeIntentType
 
@@ -214,7 +219,11 @@ class BaomaMa60Stop:
 
     @property
     def required_indicators(self) -> frozenset[IndicatorRequirement]:
-        return frozenset({IndicatorRequirement(ma_indicator_name(self.ma_period), self.timeframe)})
+        return frozenset(
+            {
+                IndicatorRequirement(ma_indicator_name(self.ma_period), self.timeframe),
+            }
+        )
 
     def evaluate(
         self,
@@ -275,7 +284,11 @@ class BaomaMa25ProfitExit:
 
     @property
     def required_indicators(self) -> frozenset[IndicatorRequirement]:
-        return frozenset({IndicatorRequirement(ma_indicator_name(self.ma_period), self.timeframe)})
+        return frozenset(
+            {
+                IndicatorRequirement(ma_indicator_name(self.ma_period), self.timeframe),
+            }
+        )
 
     def evaluate(
         self,
@@ -366,9 +379,23 @@ def _baoma_entry_signal_values(
         "close": previous_row.bar.close if previous_row is not None else None,
         "open": previous_row.bar.open if previous_row is not None else None,
         "ma60": None,
+        "dif": None,
         "dea": None,
+        "macd_bar": None,
+        "macd_energy_zone": None,
         "dea_waterline_start_date": None,
         "dea_waterline_age_trading_days": None,
+        "weekly_macd_indicator_date": None,
+        "weekly_macd_dif": None,
+        "weekly_macd_dea": None,
+        "weekly_macd_bar": None,
+        "weekly_macd_energy_zone": None,
+        "weekly_kdj_indicator_date": None,
+        "weekly_kdj_k": None,
+        "weekly_kdj_d": None,
+        "weekly_kdj_j": None,
+        "weekly_kdj_j_bucket": None,
+        "weekly_kdj_state": None,
     }
     checks = {
         "row_available": row is not None,
@@ -396,7 +423,10 @@ def _baoma_entry_signal_values(
         checks["macd_available"] = waterline["macd_available"]
         checks["dea_positive"] = waterline["dea_positive"]
         checks["dea_waterline_found"] = waterline["dea_waterline_found"]
+        values["dif"] = waterline["dif"]
         values["dea"] = waterline["dea"]
+        values["macd_bar"] = waterline["macd_bar"]
+        values["macd_energy_zone"] = waterline["macd_energy_zone"]
         values["dea_waterline_start_date"] = waterline["dea_waterline_start_date"]
         values["dea_waterline_age_trading_days"] = waterline["dea_waterline_age_trading_days"]
         age = waterline["dea_waterline_age_trading_days"]
@@ -407,6 +437,8 @@ def _baoma_entry_signal_values(
             and age <= dea_max_age_trading_days
         )
         checks["previous_bearish_candle"] = previous_row.bar.close < previous_row.bar.open
+        values.update(_weekly_macd_signal_values(previous_row, event_date=previous_row.trade_date))
+        values.update(_weekly_kdj_signal_values(previous_row, event_date=previous_row.trade_date))
 
     checks["required_values_available"] = checks["row_available"] and checks["previous_row_available"] and checks["ma60_available"] and checks["macd_available"]
     values["checks"] = checks
@@ -417,7 +449,10 @@ def _baoma_entry_signal_values(
 def _dea_waterline(row: MarketFeatureRow, *, timeframe: str) -> dict[str, object]:
     result: dict[str, object] = {
         "macd_available": False,
+        "dif": None,
         "dea": None,
+        "macd_bar": None,
+        "macd_energy_zone": None,
         "dea_positive": False,
         "dea_waterline_found": False,
         "dea_waterline_start_date": None,
@@ -429,7 +464,10 @@ def _dea_waterline(row: MarketFeatureRow, *, timeframe: str) -> dict[str, object
         return result
 
     result["macd_available"] = True
+    result["dif"] = current_macd.line
     result["dea"] = current_macd.signal
+    result["macd_bar"] = _macd_attribution_bar(current_macd.line, current_macd.signal)
+    result["macd_energy_zone"] = _macd_energy_zone(current_macd.line, current_macd.signal)
     result["dea_positive"] = current_macd.signal > 0
     if current_macd.signal <= 0:
         return result
@@ -474,8 +512,23 @@ def _ma_exit_signal_values(
         "ma_period": ma_period,
         "previous_close": previous_row.bar.close if previous_row is not None else None,
         "current_close": row.bar.close if row is not None else None,
+        "dif": None,
+        "dea": None,
+        "macd_bar": None,
+        "macd_energy_zone": None,
         "previous_ma": None,
         "current_ma": None,
+        "weekly_macd_indicator_date": None,
+        "weekly_macd_dif": None,
+        "weekly_macd_dea": None,
+        "weekly_macd_bar": None,
+        "weekly_macd_energy_zone": None,
+        "weekly_kdj_indicator_date": None,
+        "weekly_kdj_k": None,
+        "weekly_kdj_d": None,
+        "weekly_kdj_j": None,
+        "weekly_kdj_j_bucket": None,
+        "weekly_kdj_state": None,
     }
     checks = {
         "row_available": row is not None,
@@ -501,6 +554,16 @@ def _ma_exit_signal_values(
             checks["current_price_below_ma"] = row.bar.close < current_ma.value
         except KeyError:
             pass
+        try:
+            macd = row.indicators.macd_at(timeframe)
+            values["dif"] = macd.line
+            values["dea"] = macd.signal
+            values["macd_bar"] = _macd_attribution_bar(macd.line, macd.signal)
+            values["macd_energy_zone"] = _macd_energy_zone(macd.line, macd.signal)
+        except KeyError:
+            pass
+        values.update(_weekly_macd_signal_values(row, event_date=row.trade_date))
+        values.update(_weekly_kdj_signal_values(row, event_date=row.trade_date))
 
     checks["required_values_available"] = (
         checks["row_available"]
@@ -532,10 +595,26 @@ def _baoma_attribution_payload(
             "symbol.close": signal_values["close"],
             "symbol.open": signal_values["open"],
             "symbol.ma.ma60": signal_values["ma60"],
+            "symbol.macd.dif": signal_values["dif"],
             "symbol.macd.dea": signal_values["dea"],
+            "symbol.macd.macd_bar": signal_values["macd_bar"],
             "symbol.macd.dea_waterline_age_trading_days": signal_values["dea_waterline_age_trading_days"],
             "symbol.macd.dea_waterline_max_age_days": signal_values["dea_max_age_trading_days"],
+            "symbol.macd.week.indicator_date": signal_values["weekly_macd_indicator_date"],
+            "symbol.macd.week.dif": signal_values["weekly_macd_dif"],
+            "symbol.macd.week.dea": signal_values["weekly_macd_dea"],
+            "symbol.macd.week.macd_bar": signal_values["weekly_macd_bar"],
+            "symbol.kdj.week.indicator_date": signal_values["weekly_kdj_indicator_date"],
+            "symbol.kdj.week.k": signal_values["weekly_kdj_k"],
+            "symbol.kdj.week.d": signal_values["weekly_kdj_d"],
+            "symbol.kdj.week.j": signal_values["weekly_kdj_j"],
             **dict(extra_values or {}),
+        },
+        categories={
+            "symbol.macd.energy_zone": signal_values["macd_energy_zone"],
+            "symbol.macd.week.energy_zone": signal_values["weekly_macd_energy_zone"],
+            "symbol.kdj.week.j_bucket": signal_values["weekly_kdj_j_bucket"],
+            "symbol.kdj.week.state": signal_values["weekly_kdj_state"],
         },
     )
 
@@ -547,6 +626,17 @@ def _ma_exit_attribution_payload(signal_values: dict[str, object]) -> dict[str, 
         "symbol.close.current": signal_values["current_close"],
         "symbol.ma.previous": signal_values["previous_ma"],
         "symbol.ma.current": signal_values["current_ma"],
+        "symbol.macd.dif": signal_values["dif"],
+        "symbol.macd.dea": signal_values["dea"],
+        "symbol.macd.macd_bar": signal_values["macd_bar"],
+        "symbol.macd.week.indicator_date": signal_values["weekly_macd_indicator_date"],
+        "symbol.macd.week.dif": signal_values["weekly_macd_dif"],
+        "symbol.macd.week.dea": signal_values["weekly_macd_dea"],
+        "symbol.macd.week.macd_bar": signal_values["weekly_macd_bar"],
+        "symbol.kdj.week.indicator_date": signal_values["weekly_kdj_indicator_date"],
+        "symbol.kdj.week.k": signal_values["weekly_kdj_k"],
+        "symbol.kdj.week.d": signal_values["weekly_kdj_d"],
+        "symbol.kdj.week.j": signal_values["weekly_kdj_j"],
     }
     if "adjusted_remaining_cost_basis" in signal_values:
         values["position.adjusted_remaining_cost_basis"] = signal_values["adjusted_remaining_cost_basis"]
@@ -557,4 +647,92 @@ def _ma_exit_attribution_payload(signal_values: dict[str, object]) -> dict[str, 
             "position.profit_exit_confirmed_profitable": checks.get("confirmed_profitable", False),
         },
         values=values,
+        categories={
+            "symbol.macd.energy_zone": signal_values["macd_energy_zone"],
+            "symbol.macd.week.energy_zone": signal_values["weekly_macd_energy_zone"],
+            "symbol.kdj.week.j_bucket": signal_values["weekly_kdj_j_bucket"],
+            "symbol.kdj.week.state": signal_values["weekly_kdj_state"],
+        },
     )
+
+
+def _weekly_kdj_signal_values(row: MarketFeatureRow, *, event_date: date) -> dict[str, object]:
+    try:
+        evidence = completed_indicator_before_event(
+            row.indicators.frame,
+            name="kdj",
+            timeframe="W",
+            event_date=event_date,
+        )
+    except KeyError:
+        return {}
+    kdj = evidence.value
+    return {
+        "weekly_kdj_indicator_date": evidence.indicator_date.isoformat(),
+        "weekly_kdj_k": kdj.k,
+        "weekly_kdj_d": kdj.d,
+        "weekly_kdj_j": kdj.j,
+        "weekly_kdj_j_bucket": _kdj_j_bucket(kdj.j),
+        "weekly_kdj_state": _kdj_state(kdj.j),
+    }
+
+
+def _weekly_macd_signal_values(row: MarketFeatureRow, *, event_date: date) -> dict[str, object]:
+    try:
+        evidence = completed_indicator_before_event(
+            row.indicators.frame,
+            name="macd",
+            timeframe="W",
+            event_date=event_date,
+        )
+    except KeyError:
+        return {}
+    macd = evidence.value
+    return {
+        "weekly_macd_indicator_date": evidence.indicator_date.isoformat(),
+        "weekly_macd_dif": macd.line,
+        "weekly_macd_dea": macd.signal,
+        "weekly_macd_bar": _macd_attribution_bar(macd.line, macd.signal),
+        "weekly_macd_energy_zone": _macd_energy_zone(macd.line, macd.signal),
+    }
+
+
+def _kdj_j_bucket(value: float) -> str:
+    if value < 13:
+        return "<13"
+    if value < 30:
+        return "13-30"
+    if value < 50:
+        return "30-50"
+    if value < 80:
+        return "50-80"
+    return ">=80"
+
+
+def _kdj_state(value: float) -> str:
+    if value < 13:
+        return "oversold"
+    if value < 50:
+        return "recovering"
+    if value < 80:
+        return "strong"
+    return "overheated"
+
+
+def _macd_attribution_bar(dif: float, dea: float) -> float:
+    return 2.0 * (dif - dea)
+
+
+def _macd_energy_zone(dif: float, dea: float) -> str:
+    macd_bar = _macd_attribution_bar(dif, dea)
+    if macd_bar <= 0:
+        return "green_bar_or_zero"
+    dif_above_bar = dif > macd_bar
+    dea_above_bar = dea > macd_bar
+    if not dif_above_bar and not dea_above_bar and macd_bar > dif and macd_bar > dea:
+        return "red_bar_wrapping_lines"
+    if dif_above_bar and dea_above_bar:
+        return "red_bar_two_line_escape"
+    if dif_above_bar != dea_above_bar:
+        return "red_bar_one_line_escape"
+    return "red_bar_uncategorized"

@@ -8,8 +8,15 @@ from datetime import date
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from attbacktrader.data import DailyBar, IndexBar, StockIndustryMembership
-from attbacktrader.features import IndicatorFrame, IndicatorRequirement, calculate_kdj, calculate_sma
+from attbacktrader.data import DailyBar, IndexBar, StockIndustryMembership, resample_daily_bars
+from attbacktrader.features import (
+    IndicatorFrame,
+    IndicatorRequirement,
+    calculate_kdj,
+    calculate_macd,
+    calculate_sma,
+    completed_indicator_before_event,
+)
 from attbacktrader.strategies.intents import TradeIntent, TradeIntentType
 
 
@@ -23,7 +30,7 @@ ENTRY_ATTRIBUTION_INDICATOR_REQUIREMENTS = (
 ATTRIBUTION_FACTOR_SELECTION_SCHEMA = "attbacktrader.attribution_factor_selection.v1"
 VALID_ATTRIBUTION_FACTOR_TYPES = {"check", "value", "category", "text"}
 VALID_ATTRIBUTION_SCOPES = {"symbol", "industry", "market", "sizing", "execution", "portfolio"}
-VALID_ATTRIBUTION_TIMINGS = {"entry", "exit", "holding", "post_exit"}
+VALID_ATTRIBUTION_TIMINGS = {"entry", "add_on", "exit", "holding", "post_exit"}
 
 
 @dataclass(frozen=True)
@@ -210,6 +217,60 @@ STANDARD_ENTRY_ATTRIBUTION_FACTORS = (
         dependencies=("kdj:D",),
     ),
     EntryAttributionFactorDeclaration(
+        key="symbol.kdj.week.indicator_date",
+        factor_type="value",
+        label_zh="个股周线 KDJ 指标日期",
+        label_en="Symbol weekly KDJ indicator date",
+        scope="symbol",
+        dependencies=("kdj:W",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.kdj.week.k",
+        factor_type="value",
+        label_zh="个股周线 KDJ K",
+        label_en="Symbol weekly KDJ K",
+        scope="symbol",
+        dependencies=("kdj:W",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.kdj.week.d",
+        factor_type="value",
+        label_zh="个股周线 KDJ D",
+        label_en="Symbol weekly KDJ D",
+        scope="symbol",
+        dependencies=("kdj:W",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.kdj.week.j",
+        factor_type="value",
+        label_zh="个股周线 KDJ J",
+        label_en="Symbol weekly KDJ J",
+        scope="symbol",
+        dependencies=("kdj:W",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.kdj.week.j_bucket",
+        factor_type="category",
+        label_zh="个股周线 KDJ J 分桶",
+        label_en="Symbol weekly KDJ J bucket",
+        scope="symbol",
+        dependencies=("kdj:W",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.kdj.week.state",
+        factor_type="category",
+        label_zh="个股周线 KDJ 状态",
+        label_en="Symbol weekly KDJ state",
+        scope="symbol",
+        dependencies=("kdj:W",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
         key="symbol.macd.dea",
         factor_type="value",
         label_zh="个股 MACD DEA",
@@ -219,6 +280,78 @@ STANDARD_ENTRY_ATTRIBUTION_FACTORS = (
         owner="baoma_v1",
         compatible_strategies=("baoma_v1",),
         compatible_methods=("baoma_entry", "baoma_add_on"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.dif",
+        factor_type="value",
+        label_zh="个股 MACD DIF",
+        label_en="Symbol MACD DIF",
+        scope="symbol",
+        dependencies=("macd:D",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.macd_bar",
+        factor_type="value",
+        label_zh="个股 MACD 归因柱",
+        label_en="Symbol MACD attribution bar",
+        scope="symbol",
+        dependencies=("macd:D",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.energy_zone",
+        factor_type="category",
+        label_zh="个股日线 MACD 能量区间",
+        label_en="Symbol daily MACD energy zone",
+        scope="symbol",
+        dependencies=("macd:D",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.week.indicator_date",
+        factor_type="value",
+        label_zh="个股周线 MACD 指标日期",
+        label_en="Symbol weekly MACD indicator date",
+        scope="symbol",
+        dependencies=("macd:W",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.week.dif",
+        factor_type="value",
+        label_zh="个股周线 MACD DIF",
+        label_en="Symbol weekly MACD DIF",
+        scope="symbol",
+        dependencies=("macd:W",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.week.dea",
+        factor_type="value",
+        label_zh="个股周线 MACD DEA",
+        label_en="Symbol weekly MACD DEA",
+        scope="symbol",
+        dependencies=("macd:W",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.week.macd_bar",
+        factor_type="value",
+        label_zh="个股周线 MACD 归因柱",
+        label_en="Symbol weekly MACD attribution bar",
+        scope="symbol",
+        dependencies=("macd:W",),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="symbol.macd.week.energy_zone",
+        factor_type="category",
+        label_zh="个股周线 MACD 能量区间",
+        label_en="Symbol weekly MACD energy zone",
+        scope="symbol",
+        dependencies=("macd:W",),
+        timings=("entry", "add_on", "exit"),
     ),
     EntryAttributionFactorDeclaration(
         key="symbol.macd.dea_positive",
@@ -381,6 +514,141 @@ STANDARD_ENTRY_ATTRIBUTION_FACTORS = (
         label_en="Industry KDJ state",
         scope="industry",
         dependencies=("industry_index_bars", "kdj:D"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.kdj.week.indicator_date",
+        factor_type="value",
+        label_zh="行业周线 KDJ 指标日期",
+        label_en="Industry weekly KDJ indicator date",
+        scope="industry",
+        dependencies=("industry_index_bars", "kdj:W"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.kdj.week.k",
+        factor_type="value",
+        label_zh="行业周线 KDJ K",
+        label_en="Industry weekly KDJ K",
+        scope="industry",
+        dependencies=("industry_index_bars", "kdj:W"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.kdj.week.d",
+        factor_type="value",
+        label_zh="行业周线 KDJ D",
+        label_en="Industry weekly KDJ D",
+        scope="industry",
+        dependencies=("industry_index_bars", "kdj:W"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.kdj.week.j",
+        factor_type="value",
+        label_zh="行业周线 KDJ J",
+        label_en="Industry weekly KDJ J",
+        scope="industry",
+        dependencies=("industry_index_bars", "kdj:W"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.kdj.week.j_bucket",
+        factor_type="category",
+        label_zh="行业周线 KDJ J 分桶",
+        label_en="Industry weekly KDJ J bucket",
+        scope="industry",
+        dependencies=("industry_index_bars", "kdj:W"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.kdj.week.state",
+        factor_type="category",
+        label_zh="行业周线 KDJ 状态",
+        label_en="Industry weekly KDJ state",
+        scope="industry",
+        dependencies=("industry_index_bars", "kdj:W"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.macd.dif",
+        factor_type="value",
+        label_zh="行业 MACD DIF",
+        label_en="Industry MACD DIF",
+        scope="industry",
+        dependencies=("industry_index_bars", "macd:D"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.macd.dea",
+        factor_type="value",
+        label_zh="行业 MACD DEA",
+        label_en="Industry MACD DEA",
+        scope="industry",
+        dependencies=("industry_index_bars", "macd:D"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.macd.macd_bar",
+        factor_type="value",
+        label_zh="行业 MACD 归因柱",
+        label_en="Industry MACD attribution bar",
+        scope="industry",
+        dependencies=("industry_index_bars", "macd:D"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.macd.energy_zone",
+        factor_type="category",
+        label_zh="行业日线 MACD 能量区间",
+        label_en="Industry daily MACD energy zone",
+        scope="industry",
+        dependencies=("industry_index_bars", "macd:D"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.macd.week.indicator_date",
+        factor_type="value",
+        label_zh="行业周线 MACD 指标日期",
+        label_en="Industry weekly MACD indicator date",
+        scope="industry",
+        dependencies=("industry_index_bars", "macd:W"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.macd.week.dif",
+        factor_type="value",
+        label_zh="行业周线 MACD DIF",
+        label_en="Industry weekly MACD DIF",
+        scope="industry",
+        dependencies=("industry_index_bars", "macd:W"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.macd.week.dea",
+        factor_type="value",
+        label_zh="行业周线 MACD DEA",
+        label_en="Industry weekly MACD DEA",
+        scope="industry",
+        dependencies=("industry_index_bars", "macd:W"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.macd.week.macd_bar",
+        factor_type="value",
+        label_zh="行业周线 MACD 归因柱",
+        label_en="Industry weekly MACD attribution bar",
+        scope="industry",
+        dependencies=("industry_index_bars", "macd:W"),
+        timings=("entry", "add_on", "exit"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="industry.macd.week.energy_zone",
+        factor_type="category",
+        label_zh="行业周线 MACD 能量区间",
+        label_en="Industry weekly MACD energy zone",
+        scope="industry",
+        dependencies=("industry_index_bars", "macd:W"),
+        timings=("entry", "add_on", "exit"),
     ),
     EntryAttributionFactorDeclaration(
         key="industry.ma.ma20",
@@ -916,6 +1184,49 @@ def _symbol_evidence(
             checks["symbol.kdj.j_below_threshold"] = kdj.j < kdj_threshold
         except KeyError:
             pass
+        try:
+            weekly_kdj = completed_indicator_before_event(
+                frame,
+                name="kdj",
+                timeframe="W",
+                event_date=bar.trade_date,
+            )
+            values["symbol.kdj.week.indicator_date"] = weekly_kdj.indicator_date.isoformat()
+            values["symbol.kdj.week.k"] = weekly_kdj.value.k
+            values["symbol.kdj.week.d"] = weekly_kdj.value.d
+            values["symbol.kdj.week.j"] = weekly_kdj.value.j
+            categories["symbol.kdj.week.j_bucket"] = _kdj_j_bucket(weekly_kdj.value.j)
+            categories["symbol.kdj.week.state"] = _kdj_state(weekly_kdj.value.j)
+        except KeyError:
+            pass
+        try:
+            macd = frame.macd_at(bar.trade_date)
+            values["symbol.macd.dif"] = macd.line
+            values["symbol.macd.dea"] = macd.signal
+            values["symbol.macd.macd_bar"] = _macd_attribution_bar(macd.line, macd.signal)
+            categories["symbol.macd.energy_zone"] = _macd_energy_zone(macd.line, macd.signal)
+        except KeyError:
+            pass
+        try:
+            weekly_macd = completed_indicator_before_event(
+                frame,
+                name="macd",
+                timeframe="W",
+                event_date=bar.trade_date,
+            )
+            values["symbol.macd.week.indicator_date"] = weekly_macd.indicator_date.isoformat()
+            values["symbol.macd.week.dif"] = weekly_macd.value.line
+            values["symbol.macd.week.dea"] = weekly_macd.value.signal
+            values["symbol.macd.week.macd_bar"] = _macd_attribution_bar(
+                weekly_macd.value.line,
+                weekly_macd.value.signal,
+            )
+            categories["symbol.macd.week.energy_zone"] = _macd_energy_zone(
+                weekly_macd.value.line,
+                weekly_macd.value.signal,
+            )
+        except KeyError:
+            pass
 
     resolved_ma_values = {
         period: _symbol_ma_value(bar.trade_date, frame, period=period, fallback=ma_values.get(period))
@@ -1040,23 +1351,53 @@ def _industry_kdj_evidence_by_symbol(
             [bar.low for bar in ordered_bars],
             closes,
         )
+        macd_values = calculate_macd(closes)
         ma20_values = calculate_sma(closes, period=20)
         ma60_values = calculate_sma(closes, period=60)
+        weekly_kdj_by_date = _weekly_kdj_values_by_date(ordered_bars)
+        weekly_macd_by_date = _weekly_macd_values_by_date(ordered_bars)
         industry_returns_20d = _return_values_by_date(ordered_bars, period=20)
         industry_returns_60d = _return_values_by_date(ordered_bars, period=60)
         evidence_by_date: dict[date, EntryAttributionEvidence] = {}
-        for bar, kdj, ma20, ma60 in zip(ordered_bars, kdj_values, ma20_values, ma60_values):
+        for bar, kdj, macd, ma20, ma60 in zip(ordered_bars, kdj_values, macd_values, ma20_values, ma60_values):
             values: dict[str, Any] = {
                 "industry.kdj.k": kdj.k,
                 "industry.kdj.d": kdj.d,
                 "industry.kdj.j": kdj.j,
+                "industry.macd.dif": macd.line,
+                "industry.macd.dea": macd.signal,
+                "industry.macd.macd_bar": _macd_attribution_bar(macd.line, macd.signal),
             }
             checks: dict[str, bool] = {"industry.kdj.j_below_threshold": kdj.j < threshold}
             categories: dict[str, str] = {
                 "industry.sw_l1.code": industry_symbol,
                 "industry.kdj.j_bucket": _kdj_j_bucket(kdj.j),
                 "industry.kdj.state": _kdj_state(kdj.j),
+                "industry.macd.energy_zone": _macd_energy_zone(macd.line, macd.signal),
             }
+            weekly_kdj = _latest_completed_weekly_kdj(weekly_kdj_by_date, event_date=bar.trade_date)
+            if weekly_kdj is not None:
+                weekly_date, weekly_value = weekly_kdj
+                values["industry.kdj.week.indicator_date"] = weekly_date.isoformat()
+                values["industry.kdj.week.k"] = weekly_value.k
+                values["industry.kdj.week.d"] = weekly_value.d
+                values["industry.kdj.week.j"] = weekly_value.j
+                categories["industry.kdj.week.j_bucket"] = _kdj_j_bucket(weekly_value.j)
+                categories["industry.kdj.week.state"] = _kdj_state(weekly_value.j)
+            weekly_macd = _latest_completed_weekly_macd(weekly_macd_by_date, event_date=bar.trade_date)
+            if weekly_macd is not None:
+                weekly_date, weekly_value = weekly_macd
+                values["industry.macd.week.indicator_date"] = weekly_date.isoformat()
+                values["industry.macd.week.dif"] = weekly_value.line
+                values["industry.macd.week.dea"] = weekly_value.signal
+                values["industry.macd.week.macd_bar"] = _macd_attribution_bar(
+                    weekly_value.line,
+                    weekly_value.signal,
+                )
+                categories["industry.macd.week.energy_zone"] = _macd_energy_zone(
+                    weekly_value.line,
+                    weekly_value.signal,
+                )
             if ma20 is not None:
                 values["industry.ma.ma20"] = ma20.value
                 checks["industry.ma.price_above_ma20"] = bar.close > ma20.value
@@ -1096,6 +1437,50 @@ def _industry_kdj_evidence_by_symbol(
         evidence_by_symbol[industry_symbol] = evidence_by_date
 
     return evidence_by_symbol
+
+
+def _weekly_kdj_values_by_date(bars: Sequence[IndexBar]) -> dict[date, Any]:
+    weekly_bars = resample_daily_bars(bars, frequency="W")
+    if not weekly_bars:
+        return {}
+    kdj_values = calculate_kdj(
+        [bar.high for bar in weekly_bars],
+        [bar.low for bar in weekly_bars],
+        [bar.close for bar in weekly_bars],
+    )
+    return {bar.trade_date: kdj for bar, kdj in zip(weekly_bars, kdj_values)}
+
+
+def _weekly_macd_values_by_date(bars: Sequence[IndexBar]) -> dict[date, Any]:
+    weekly_bars = resample_daily_bars(bars, frequency="W")
+    if not weekly_bars:
+        return {}
+    macd_values = calculate_macd([bar.close for bar in weekly_bars])
+    return {bar.trade_date: macd for bar, macd in zip(weekly_bars, macd_values)}
+
+
+def _latest_completed_weekly_kdj(
+    values_by_date: Mapping[date, Any],
+    *,
+    event_date: date,
+) -> tuple[date, Any] | None:
+    available_dates = [candidate_date for candidate_date in values_by_date if candidate_date < event_date]
+    if not available_dates:
+        return None
+    indicator_date = max(available_dates)
+    return indicator_date, values_by_date[indicator_date]
+
+
+def _latest_completed_weekly_macd(
+    values_by_date: Mapping[date, Any],
+    *,
+    event_date: date,
+) -> tuple[date, Any] | None:
+    available_dates = [candidate_date for candidate_date in values_by_date if candidate_date < event_date]
+    if not available_dates:
+        return None
+    indicator_date = max(available_dates)
+    return indicator_date, values_by_date[indicator_date]
 
 
 def _return_values_by_date(bars: Sequence[IndexBar], *, period: int) -> dict[date, float]:
@@ -1138,6 +1523,25 @@ def _kdj_state(value: float) -> str:
     if value < 80:
         return "strong"
     return "overheated"
+
+
+def _macd_attribution_bar(dif: float, dea: float) -> float:
+    return 2.0 * (dif - dea)
+
+
+def _macd_energy_zone(dif: float, dea: float) -> str:
+    macd_bar = _macd_attribution_bar(dif, dea)
+    if macd_bar <= 0:
+        return "green_bar_or_zero"
+    dif_above_bar = dif > macd_bar
+    dea_above_bar = dea > macd_bar
+    if not dif_above_bar and not dea_above_bar and macd_bar > dif and macd_bar > dea:
+        return "red_bar_wrapping_lines"
+    if dif_above_bar and dea_above_bar:
+        return "red_bar_two_line_escape"
+    if dif_above_bar != dea_above_bar:
+        return "red_bar_one_line_escape"
+    return "red_bar_uncategorized"
 
 
 def _relative_strength_state(excess_return: float) -> str:

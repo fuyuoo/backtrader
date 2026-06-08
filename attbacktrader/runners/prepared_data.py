@@ -443,14 +443,44 @@ def _market_index_calculation_start_date(run_plan: RunPlan, *, symbol: str) -> d
 
 
 def _industry_index_calculation_start_date(run_plan: RunPlan) -> date:
+    start_date = run_plan.run.from_date
     if _selected_attribution_has_any_factor(
         run_plan,
         prefixes=("industry.ma.", "industry.relative.hs300."),
     ):
-        return _indicator_calculation_start_date(
-            run_plan.run.from_date,
-            indicator_requirements=(IndicatorRequirement("ma60", "D"),),
+        start_date = min(
+            start_date,
+            _indicator_calculation_start_date(
+                run_plan.run.from_date,
+                indicator_requirements=(IndicatorRequirement("ma60", "D"),),
+            ),
         )
+    if _selected_attribution_has_any_factor(run_plan, prefixes=("industry.kdj.week.",)):
+        start_date = min(
+            start_date,
+            _indicator_calculation_start_date(
+                run_plan.run.from_date,
+                indicator_requirements=(IndicatorRequirement("kdj", "W"),),
+            ),
+        )
+    if _selected_attribution_has_any_factor(run_plan, prefixes=("industry.macd.week.",)):
+        start_date = min(
+            start_date,
+            _indicator_calculation_start_date(
+                run_plan.run.from_date,
+                indicator_requirements=(IndicatorRequirement("macd", "W"),),
+            ),
+        )
+    if _selected_attribution_has_any_factor(run_plan, prefixes=("industry.macd.",)):
+        start_date = min(
+            start_date,
+            _indicator_calculation_start_date(
+                run_plan.run.from_date,
+                indicator_requirements=(IndicatorRequirement("macd", "D"),),
+            ),
+        )
+    if start_date < run_plan.run.from_date:
+        return start_date
     if not _entry_attribution_has_factor(run_plan, prefix="industry."):
         return run_plan.run.from_date
     return _indicator_calculation_start_date(

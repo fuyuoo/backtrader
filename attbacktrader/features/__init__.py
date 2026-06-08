@@ -1,6 +1,7 @@
 """Feature and indicator calculations."""
 
 from .aggregation import MarketFeatureRow, MarketIndicators, join_bars_with_indicators
+from .alignment import CompletedIndicatorEvidence, completed_indicator_before_event
 from .frame import (
     IndicatorFrame,
     build_indicator_frame,
@@ -69,6 +70,7 @@ __all__ = [
     "IndicatorSnapshotMetadata",
     "IndicatorSpec",
     "IndicatorUpdatePlan",
+    "CompletedIndicatorEvidence",
     "ATRValue",
     "KDJValue",
     "MACDValue",
@@ -95,6 +97,7 @@ __all__ = [
     "calculate_macd",
     "calculate_rsi",
     "calculate_sma",
+    "completed_indicator_before_event",
     "discover_indicator_snapshot_paths",
     "indicator_frame_from_snapshots",
     "indicator_names_for_timeframe",

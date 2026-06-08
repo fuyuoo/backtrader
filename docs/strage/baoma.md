@@ -172,6 +172,24 @@ reports/_tmp-baoma-100-industry-attribution-check/
 4. 新因子先用当前 100 只样本做缺失检查，再扩到更大固定股票池。
 5. 矩阵新增必须服务于“入场胜率/收益、加仓成败、止损入场时机、止盈后卖飞”这四类问题。
 
+下一阶段 MACD/KDJ 因子口径：
+
+| 因子 | 口径 | 说明 |
+|---|---|---|
+| MACD 归因柱 | `2 * (DIF - DEA)` | 归因展示和分桶使用中文股票软件常见 MACD 柱口径；内部指标快照里的 histogram 仍可作为原始计算输入。 |
+| 日线 MACD 能量区间 | 使用信号日前一根已完成日线 | 入场、加仓、离场归因都不得使用未完成周期。 |
+| 周线 KDJ / MACD 因子 | 使用信号日前最近一根已完成周线 | 例如周三触发信号时，只能使用上周五收完的周线，不能使用本周未完成周线。 |
+
+MACD 能量区间第一版采用互斥分桶：
+
+| 分桶 | 公式 | 中文含义 |
+|---|---|---|
+| `red_bar_wrapping_lines` | `MACD归因柱 > 0 AND MACD归因柱 > DIF AND MACD归因柱 > DEA` | 红柱为正，DIF 和 DEA 都在红柱体内。 |
+| `red_bar_one_line_escape` | `MACD归因柱 > 0 AND exactly_one(DIF > MACD归因柱, DEA > MACD归因柱)` | 红柱为正，DIF/DEA 有且只有一根线高出红柱。 |
+| `red_bar_two_line_escape` | `MACD归因柱 > 0 AND DIF > MACD归因柱 AND DEA > MACD归因柱` | 红柱为正，DIF 和 DEA 两根线都高出红柱。 |
+| `green_bar_or_zero` | `MACD归因柱 <= 0` | 绿柱或零轴附近，不进入前三个红柱能量区间。 |
+| `missing` | 任一必需字段缺失 | 缺失必须记录为 missing，不补默认值。 |
+
 ## 通用回测框架方向
 
 `baoma_v1` 不能把框架带成单策略专用实现。当前确认的通用边界如下：

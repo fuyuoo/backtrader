@@ -20,6 +20,13 @@ def test_attribution_matrix_buckets_entry_add_on_and_post_exit(tmp_path: Path) -
                     dea_age=2,
                     symbol_kdj=85.0,
                     market_kdj=70.0,
+                    industry_kdj=45.0,
+                    weekly_symbol_kdj=62.0,
+                    weekly_industry_kdj=33.0,
+                    macd_zone="red_bar_wrapping_lines",
+                    weekly_macd_zone="red_bar_two_line_escape",
+                    industry_macd_zone="red_bar_one_line_escape",
+                    weekly_industry_macd_zone="red_bar_wrapping_lines",
                     industry_trend_state="bullish",
                     industry_strength_state="strong_outperform",
                     add_on_dea_age=3,
@@ -36,6 +43,13 @@ def test_attribution_matrix_buckets_entry_add_on_and_post_exit(tmp_path: Path) -
                     dea_age=12,
                     symbol_kdj=20.0,
                     market_kdj=8.0,
+                    industry_kdj=11.0,
+                    weekly_symbol_kdj=None,
+                    weekly_industry_kdj=84.0,
+                    macd_zone="green_bar_or_zero",
+                    weekly_macd_zone=None,
+                    industry_macd_zone="green_bar_or_zero",
+                    weekly_industry_macd_zone=None,
                     industry_trend_state="not_bullish",
                     industry_strength_state="weak_underperform",
                     add_on_dea_age=None,
@@ -92,6 +106,46 @@ def test_attribution_matrix_buckets_entry_add_on_and_post_exit(tmp_path: Path) -
         for row in matrix_by_id["entry_industry_relative_strength"]["rows"]
     )
     assert any(
+        row["dimensions"] == {"symbol_kdj_j": ">=80", "symbol_weekly_kdj_j": "50-80"}
+        for row in matrix_by_id["entry_symbol_daily_weekly_kdj"]["rows"]
+    )
+    assert any(
+        row["dimensions"] == {"symbol_kdj_j": "13-30", "symbol_weekly_kdj_j": "missing"}
+        for row in matrix_by_id["entry_symbol_daily_weekly_kdj"]["rows"]
+    )
+    assert any(
+        row["dimensions"] == {"industry_kdj_j": "30-50", "industry_weekly_kdj_j": "30-50"}
+        for row in matrix_by_id["entry_industry_daily_weekly_kdj"]["rows"]
+    )
+    assert any(
+        row["dimensions"] == {"industry_kdj_j": "<13", "industry_weekly_kdj_j": ">=80"}
+        for row in matrix_by_id["entry_industry_daily_weekly_kdj"]["rows"]
+    )
+    assert any(
+        row["dimensions"]
+        == {
+            "symbol_macd_zone": "red_bar_wrapping_lines",
+            "symbol_weekly_macd_zone": "red_bar_two_line_escape",
+        }
+        for row in matrix_by_id["entry_symbol_daily_weekly_macd_zone"]["rows"]
+    )
+    assert any(
+        row["dimensions"] == {"symbol_macd_zone": "green_bar_or_zero", "symbol_weekly_macd_zone": "missing"}
+        for row in matrix_by_id["entry_symbol_daily_weekly_macd_zone"]["rows"]
+    )
+    assert any(
+        row["dimensions"]
+        == {
+            "industry_macd_zone": "red_bar_one_line_escape",
+            "industry_weekly_macd_zone": "red_bar_wrapping_lines",
+        }
+        for row in matrix_by_id["entry_industry_daily_weekly_macd_zone"]["rows"]
+    )
+    assert any(
+        row["dimensions"] == {"industry_macd_zone": "green_bar_or_zero", "industry_weekly_macd_zone": "missing"}
+        for row in matrix_by_id["entry_industry_daily_weekly_macd_zone"]["rows"]
+    )
+    assert any(
         row["dimensions"] == {"industry_relative_strength": "strong_outperform", "dea_age": "3-5"}
         for row in matrix_by_id["add_on_industry_relative_strength"]["rows"]
     )
@@ -111,6 +165,13 @@ def _attribution(
     dea_age: int | None,
     symbol_kdj: float,
     market_kdj: float,
+    industry_kdj: float,
+    weekly_symbol_kdj: float | None,
+    weekly_industry_kdj: float | None,
+    macd_zone: str | None,
+    weekly_macd_zone: str | None,
+    industry_macd_zone: str | None,
+    weekly_industry_macd_zone: str | None,
     industry_trend_state: str,
     industry_strength_state: str,
     add_on_dea_age: int | None,
@@ -147,6 +208,13 @@ def _attribution(
             "factors": [
                 _factor("symbol.macd.dea_waterline_age_trading_days", dea_age),
                 _factor("symbol.kdj.j", symbol_kdj),
+                _factor("symbol.kdj.week.j", weekly_symbol_kdj),
+                _factor("symbol.macd.energy_zone", macd_zone),
+                _factor("symbol.macd.week.energy_zone", weekly_macd_zone),
+                _factor("industry.kdj.j", industry_kdj),
+                _factor("industry.kdj.week.j", weekly_industry_kdj),
+                _factor("industry.macd.energy_zone", industry_macd_zone),
+                _factor("industry.macd.week.energy_zone", weekly_industry_macd_zone),
                 _factor("market.hs300.kdj.j", market_kdj),
                 _factor("industry.ma.trend_state", industry_trend_state),
                 _factor("industry.relative.hs300.strength_state", industry_strength_state),

@@ -218,6 +218,58 @@ def test_prepare_run_data_fetches_warmup_windows_for_selected_industry_relative_
     assert prepared.industry_index_calculation_bars_by_symbol(run_plan)["801780.SI"][0].trade_date == date(2023, 10, 4)
 
 
+def test_prepare_run_data_fetches_warmup_window_for_selected_industry_weekly_kdj_attribution(
+    tmp_path: Path,
+) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    provider = FakePreparedDataProvider(bars)
+    run_plan = _run_plan(tmp_path)
+    run_plan = run_plan.model_copy(
+        update={
+            "analysis": run_plan.analysis.model_copy(
+                update={
+                    "attribution": run_plan.analysis.attribution.model_copy(
+                        update={"include": ("industry.kdj.week.j",)}
+                    )
+                }
+            ),
+        }
+    )
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+
+    assert provider.industry_index_ranges == [
+        ("801780.SI", date(2023, 10, 24), run_plan.run.to_date, "SW2021")
+    ]
+    assert prepared.industry_index_calculation_bars_by_symbol(run_plan)["801780.SI"][0].trade_date == date(2023, 10, 24)
+
+
+def test_prepare_run_data_fetches_warmup_window_for_selected_industry_weekly_macd_attribution(
+    tmp_path: Path,
+) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    provider = FakePreparedDataProvider(bars)
+    run_plan = _run_plan(tmp_path)
+    run_plan = run_plan.model_copy(
+        update={
+            "analysis": run_plan.analysis.model_copy(
+                update={
+                    "attribution": run_plan.analysis.attribution.model_copy(
+                        update={"include": ("industry.macd.week.energy_zone",)}
+                    )
+                }
+            ),
+        }
+    )
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+
+    assert provider.industry_index_ranges == [
+        ("801780.SI", date(2023, 5, 2), run_plan.run.to_date, "SW2021")
+    ]
+    assert prepared.industry_index_calculation_bars_by_symbol(run_plan)["801780.SI"][0].trade_date == date(2023, 5, 2)
+
+
 def test_prepare_run_data_uses_benchmark_index_as_trading_calendar(tmp_path: Path) -> None:
     bars = (
         DailyBar("000001.SZ", date(2024, 1, 2), 10.0, 11.0, 9.0, 10.0, 1000.0),
@@ -375,7 +427,14 @@ def test_prepare_run_data_includes_symbol_indicators_required_by_selected_attrib
             "analysis": {
                 "attribution": {
                     "enabled": True,
-                    "include": ["symbol.kdj.j", "symbol.kdj.j_below_threshold"],
+                    "include": [
+                        "symbol.kdj.j",
+                        "symbol.kdj.j_below_threshold",
+                        "symbol.kdj.week.j",
+                        "symbol.kdj.week.j_bucket",
+                        "symbol.macd.energy_zone",
+                        "symbol.macd.week.energy_zone",
+                    ],
                 },
                 "industry_attribution": {"enabled": False},
                 "market_regime": {"enabled": False},
@@ -397,6 +456,10 @@ def test_prepare_run_data_includes_symbol_indicators_required_by_selected_attrib
     symbol_data = prepared.symbol_data_by_symbol["000001.SZ"]
 
     assert symbol_data.indicator_frame.kdj_at(run_plan.run.to_date).j is not None
+    assert symbol_data.indicator_frame.kdj_at(run_plan.run.to_date, timeframe="W").j is not None
+    assert symbol_data.indicator_frame.macd_at(run_plan.run.to_date).line is not None
+    assert symbol_data.indicator_frame.macd_at(run_plan.run.to_date, timeframe="W").line is not None
+    assert {snapshot.timeframe for snapshot in symbol_data.indicator_snapshots} == {"D", "W"}
 
 
 def test_prepare_run_data_allows_trailing_gap_when_run_window_has_bars(tmp_path: Path) -> None:

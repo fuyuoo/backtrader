@@ -13,6 +13,10 @@ ATTRIBUTION_SUMMARY_SCHEMA = "attbacktrader.attribution_summary.v1"
 
 _FOCUS_MATRIX_IDS = (
     "entry_kdj_stack",
+    "entry_symbol_daily_weekly_kdj",
+    "entry_industry_daily_weekly_kdj",
+    "entry_symbol_daily_weekly_macd_zone",
+    "entry_industry_daily_weekly_macd_zone",
     "entry_industry_trend_market_kdj",
     "entry_industry_relative_strength",
     "add_on_dea_symbol_kdj",
@@ -322,7 +326,15 @@ def _summary_cards(
             "description": "优先观察个股、行业和指数共振时的入场表现。",
             "rows": _top_rows_from_matrices(
                 matrix_by_id,
-                ("entry_kdj_stack", "entry_industry_trend_market_kdj", "entry_industry_relative_strength"),
+                (
+                    "entry_kdj_stack",
+                    "entry_symbol_daily_weekly_kdj",
+                    "entry_industry_daily_weekly_kdj",
+                    "entry_symbol_daily_weekly_macd_zone",
+                    "entry_industry_daily_weekly_macd_zone",
+                    "entry_industry_trend_market_kdj",
+                    "entry_industry_relative_strength",
+                ),
                 top_n=top_n,
                 positive=True,
             ),
@@ -348,7 +360,15 @@ def _summary_cards(
             "description": "这些组合更像需要人工复核的亏损土壤，不能直接当过滤规则。",
             "rows": _top_rows_from_matrices(
                 matrix_by_id,
-                ("entry_kdj_stack", "entry_industry_trend_market_kdj", "entry_industry_relative_strength"),
+                (
+                    "entry_kdj_stack",
+                    "entry_symbol_daily_weekly_kdj",
+                    "entry_industry_daily_weekly_kdj",
+                    "entry_symbol_daily_weekly_macd_zone",
+                    "entry_industry_daily_weekly_macd_zone",
+                    "entry_industry_trend_market_kdj",
+                    "entry_industry_relative_strength",
+                ),
                 top_n=top_n,
                 positive=False,
             ),

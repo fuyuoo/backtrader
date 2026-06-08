@@ -28,9 +28,12 @@ def test_entry_attribution_context_builds_symbol_market_and_industry_evidence() 
             bars,
             indicator_requirements=(
                 IndicatorRequirement("kdj", "D"),
+                IndicatorRequirement("macd", "D"),
                 IndicatorRequirement("ma20", "D"),
                 IndicatorRequirement("ma25", "D"),
                 IndicatorRequirement("ma60", "D"),
+                IndicatorRequirement("kdj", "W"),
+                IndicatorRequirement("macd", "W"),
             ),
         )
     )
@@ -51,6 +54,33 @@ def test_entry_attribution_context_builds_symbol_market_and_industry_evidence() 
     assert evidence.values["symbol.kdj.j"] > 0
     assert evidence.values["symbol.kdj.threshold"] == 13.0
     assert evidence.checks["symbol.kdj.j_below_threshold"] is False
+    assert evidence.values["symbol.kdj.week.k"] > 0
+    assert evidence.values["symbol.kdj.week.d"] > 0
+    assert evidence.values["symbol.kdj.week.j"] > 0
+    assert evidence.values["symbol.kdj.week.indicator_date"] < bars[-1].trade_date.isoformat()
+    assert evidence.categories["symbol.kdj.week.j_bucket"] in {"<13", "13-30", "30-50", "50-80", ">=80"}
+    assert evidence.categories["symbol.kdj.week.state"] in {"oversold", "recovering", "strong", "overheated"}
+    assert "symbol.macd.dif" in evidence.values
+    assert "symbol.macd.dea" in evidence.values
+    assert evidence.values["symbol.macd.macd_bar"] == (evidence.values["symbol.macd.dif"] - evidence.values["symbol.macd.dea"]) * 2
+    assert evidence.categories["symbol.macd.energy_zone"] in {
+        "green_bar_or_zero",
+        "red_bar_wrapping_lines",
+        "red_bar_one_line_escape",
+        "red_bar_two_line_escape",
+        "red_bar_uncategorized",
+    }
+    assert evidence.values["symbol.macd.week.indicator_date"] < bars[-1].trade_date.isoformat()
+    assert evidence.values["symbol.macd.week.macd_bar"] == (
+        evidence.values["symbol.macd.week.dif"] - evidence.values["symbol.macd.week.dea"]
+    ) * 2
+    assert evidence.categories["symbol.macd.week.energy_zone"] in {
+        "green_bar_or_zero",
+        "red_bar_wrapping_lines",
+        "red_bar_one_line_escape",
+        "red_bar_two_line_escape",
+        "red_bar_uncategorized",
+    }
     assert evidence.values["symbol.ma.ma20"] > 0
     assert evidence.values["symbol.ma.ma25"] > 0
     assert evidence.values["symbol.ma.ma60"] > 0
@@ -71,6 +101,35 @@ def test_entry_attribution_context_builds_symbol_market_and_industry_evidence() 
     assert evidence.checks["industry.kdj.j_below_threshold"] is True
     assert evidence.categories["industry.kdj.j_bucket"] == "<13"
     assert evidence.categories["industry.kdj.state"] == "oversold"
+    assert evidence.values["industry.kdj.week.k"] > 0
+    assert evidence.values["industry.kdj.week.d"] > 0
+    assert isinstance(evidence.values["industry.kdj.week.j"], float)
+    assert evidence.values["industry.kdj.week.indicator_date"] < bars[-1].trade_date.isoformat()
+    assert evidence.categories["industry.kdj.week.j_bucket"] in {"<13", "13-30", "30-50", "50-80", ">=80"}
+    assert evidence.categories["industry.kdj.week.state"] in {"oversold", "recovering", "strong", "overheated"}
+    assert "industry.macd.dif" in evidence.values
+    assert "industry.macd.dea" in evidence.values
+    assert evidence.values["industry.macd.macd_bar"] == (
+        evidence.values["industry.macd.dif"] - evidence.values["industry.macd.dea"]
+    ) * 2
+    assert evidence.categories["industry.macd.energy_zone"] in {
+        "green_bar_or_zero",
+        "red_bar_wrapping_lines",
+        "red_bar_one_line_escape",
+        "red_bar_two_line_escape",
+        "red_bar_uncategorized",
+    }
+    assert evidence.values["industry.macd.week.indicator_date"] < bars[-1].trade_date.isoformat()
+    assert evidence.values["industry.macd.week.macd_bar"] == (
+        evidence.values["industry.macd.week.dif"] - evidence.values["industry.macd.week.dea"]
+    ) * 2
+    assert evidence.categories["industry.macd.week.energy_zone"] in {
+        "green_bar_or_zero",
+        "red_bar_wrapping_lines",
+        "red_bar_one_line_escape",
+        "red_bar_two_line_escape",
+        "red_bar_uncategorized",
+    }
     assert evidence.values["industry.ma.ma20"] < evidence.values["industry.ma.ma60"]
     assert evidence.checks["industry.ma.price_above_ma20"] is False
     assert evidence.checks["industry.ma.price_above_ma60"] is False

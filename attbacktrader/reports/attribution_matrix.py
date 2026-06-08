@@ -60,6 +60,50 @@ def build_attribution_matrix(
             top_n=top_n,
         ),
         _matrix(
+            "entry_symbol_daily_weekly_kdj",
+            "入场 个股日线 KDJ J x 个股周线 KDJ J",
+            _event_records(attributions, timing="entry", post_exit_by_key=post_exit_by_key),
+            dimensions=(
+                _dimension("symbol_kdj_j", "symbol.kdj.j", _kdj_j_bucket),
+                _dimension("symbol_weekly_kdj_j", "symbol.kdj.week.j", _kdj_j_bucket),
+            ),
+            min_sample_count=min_sample_count,
+            top_n=top_n,
+        ),
+        _matrix(
+            "entry_industry_daily_weekly_kdj",
+            "入场 行业日线 KDJ J x 行业周线 KDJ J",
+            _event_records(attributions, timing="entry", post_exit_by_key=post_exit_by_key),
+            dimensions=(
+                _dimension("industry_kdj_j", "industry.kdj.j", _kdj_j_bucket),
+                _dimension("industry_weekly_kdj_j", "industry.kdj.week.j", _kdj_j_bucket),
+            ),
+            min_sample_count=min_sample_count,
+            top_n=top_n,
+        ),
+        _matrix(
+            "entry_symbol_daily_weekly_macd_zone",
+            "入场 个股日线 MACD 区间 x 个股周线 MACD 区间",
+            _event_records(attributions, timing="entry", post_exit_by_key=post_exit_by_key),
+            dimensions=(
+                _dimension("symbol_macd_zone", "symbol.macd.energy_zone", _category_bucket),
+                _dimension("symbol_weekly_macd_zone", "symbol.macd.week.energy_zone", _category_bucket),
+            ),
+            min_sample_count=min_sample_count,
+            top_n=top_n,
+        ),
+        _matrix(
+            "entry_industry_daily_weekly_macd_zone",
+            "入场 行业日线 MACD 区间 x 行业周线 MACD 区间",
+            _event_records(attributions, timing="entry", post_exit_by_key=post_exit_by_key),
+            dimensions=(
+                _dimension("industry_macd_zone", "industry.macd.energy_zone", _category_bucket),
+                _dimension("industry_weekly_macd_zone", "industry.macd.week.energy_zone", _category_bucket),
+            ),
+            min_sample_count=min_sample_count,
+            top_n=top_n,
+        ),
+        _matrix(
             "add_on_dea_symbol_kdj",
             "加仓 DEA 上水天数 x 个股 KDJ J",
             _event_records(attributions, timing="add_on", post_exit_by_key=post_exit_by_key),

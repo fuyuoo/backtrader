@@ -121,17 +121,46 @@ analysis:
       - symbol.kdj.j
       - symbol.kdj.threshold
       - symbol.kdj.j_below_threshold
+      - symbol.kdj.week.indicator_date
+      - symbol.kdj.week.k
+      - symbol.kdj.week.d
+      - symbol.kdj.week.j
+      - symbol.kdj.week.j_bucket
+      - symbol.kdj.week.state
       - industry.sw_l1.code
       - industry.kdj.k
       - industry.kdj.d
       - industry.kdj.j
       - industry.kdj.j_below_threshold
+      - industry.kdj.week.indicator_date
+      - industry.kdj.week.k
+      - industry.kdj.week.d
+      - industry.kdj.week.j
+      - industry.kdj.week.j_bucket
+      - industry.kdj.week.state
+      - industry.macd.dif
+      - industry.macd.dea
+      - industry.macd.macd_bar
+      - industry.macd.energy_zone
+      - industry.macd.week.indicator_date
+      - industry.macd.week.dif
+      - industry.macd.week.dea
+      - industry.macd.week.macd_bar
+      - industry.macd.week.energy_zone
       - market.hs300.kdj.k
       - market.hs300.kdj.d
       - market.hs300.kdj.j
       - market.hs300.kdj.threshold
       - market.hs300.kdj.j_below_threshold
       - symbol.macd.dea
+      - symbol.macd.dif
+      - symbol.macd.macd_bar
+      - symbol.macd.energy_zone
+      - symbol.macd.week.indicator_date
+      - symbol.macd.week.dif
+      - symbol.macd.week.dea
+      - symbol.macd.week.macd_bar
+      - symbol.macd.week.energy_zone
       - symbol.macd.dea_positive
       - symbol.macd.dea_recent_waterline
       - symbol.macd.dea_waterline_age_trading_days
