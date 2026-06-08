@@ -80,9 +80,33 @@ _Avoid_: Closed-trade return proxy
 A per-date, per-symbol holding record that captures size, mark price, market value, cost basis, and unrealized profit or loss.
 _Avoid_: Open position summary
 
+**Per-Symbol Full Position**:
+The intended full exposure for one symbol after all planned entry tranches have been filled. It is distinct from the current position, a single entry tranche, or the whole portfolio.
+_Avoid_: Current holding, one buy order, portfolio full position
+
 **Tradable Series**:
 A configured OHLCV time series that can be traded by a strategy run, regardless of whether it represents a stock, broad index, industry index, ETF, or a future asset class.
 _Avoid_: Stock list, symbol list
+
+**Universe Selection**:
+A run-level selection layer that resolves fixed or time-varying eligible symbols for each trading date before strategy methods evaluate entry or exit decisions. It is separate from strategy rules, which only act on the candidates supplied by the run plan.
+_Avoid_: Strategy-internal stock filter, hard-coded symbol list, buy-method constituent lookup
+
+**Component Stock Universe**:
+A stock universe formed from the constituent stocks of one or more indexes, such as the CSI 300 and CSI 500 constituents. It defines the eligible stocks for a strategy run and is distinct from directly trading the index, an ETF, or an index future.
+_Avoid_: Index trade, ETF proxy, vague symbol pool
+
+**Fixed Component Stock Universe**:
+A component stock universe frozen to a specific symbol list for a strategy run instead of changing with historical index membership over time. It is useful for first real-run validation, but reports must disclose the fixed-sample limitation and survivor-bias risk.
+_Avoid_: Historical constituent backtest, unbiased universe
+
+**Stock Universe Manifest**:
+A versioned file that lists the fixed symbols eligible for a strategy run, along with source metadata such as symbol code, name, source index, and freeze date.
+_Avoid_: Live constituent query, implicit sample, strategy filter
+
+**Time-Varying Stock Universe Manifest**:
+A versioned universe manifest that maps effective dates or months to the eligible symbols for those periods within one strategy run. It is a configuration input to universe selection, not a strategy signal or a live provider lookup.
+_Avoid_: Strategy-time constituent query, implicit monthly filter, dynamic buy rule
 
 **Asset Type**:
 The declared market category of a tradable or analysis series, such as `stock`, `index`, or `industry_index`. It controls provider fetch behavior and analysis eligibility, not strategy logic.
@@ -91,6 +115,18 @@ _Avoid_: Hard-coded instrument branch
 **Price Adjustment**:
 The price basis used for stored daily bars and derived indicators. Stock daily bars default to front-adjusted `qfq`; indicator snapshots must record or inherit the same price basis.
 _Avoid_: Hidden data correction, implicit price mode
+
+**Adjusted Price-Difference Return**:
+A trade return measured from front-adjusted price differences over the holding interval, not from strict cash settlement with dividends, split handling, and unadjusted market prices.
+_Avoid_: Cash-settled return, corporate-action-complete accounting, unadjusted execution return
+
+**Adjusted Price Cost Simulation**:
+A disclosed cost lens that applies configured fees, taxes, and slippage to front-adjusted simulated order values to study cost sensitivity.
+_Avoid_: Broker cash settlement, hidden real-cost claim, no-cost return
+
+**Adjusted Price Quantity Simulation**:
+A disclosed quantity lens that derives share counts and board-lot execution from front-adjusted simulated prices to preserve position lifecycle rules.
+_Avoid_: Broker-accurate share count, pure notional return, hidden real-execution claim
 
 **Tradability Status**:
 A per-symbol, per-date state record used by trading constraints, including suspension, limit-up, limit-down, raw close, and daily limit prices.
@@ -124,6 +160,22 @@ _Avoid_: Benchmark, analysis data
 A classified market environment used to explain whether a strategy fits the current market context after a run, based on observable market evidence such as trend, breadth, volatility, liquidity, and industry diffusion.
 _Avoid_: Water temperature, market feeling
 
+**Environment Dimension**:
+A named axis used to group trade evidence when discovering strategy fit, such as market environment, industry environment, entry structure, or execution state.
+_Avoid_: One-off AI prompt, hard-coded conclusion, strategy rule
+
+**Environment Factor**:
+A measured field inside an environment dimension that can be grouped, summarized, or expanded in an environment discovery matrix.
+_Avoid_: Strategy condition, hard-coded report column, free-form AI note
+
+**Post-Trade Environment Lookup**:
+A post-run attribution step that looks up market, industry, symbol, or execution context for completed trade records after the strategy has produced trades.
+_Avoid_: Entry filter, decision input, look-ahead signal
+
+**Artifact-Bound Attribution Lookup**:
+A post-run lookup that derives attribution only from the data snapshots and run artifacts recorded by the completed run, not from fresh provider calls or unrelated recalculation inputs.
+_Avoid_: Live-data explanation, current-data replay, unpinned post-hoc lookup
+
 **Water Temperature**:
 The user-facing interpretation of `Market Regime`, expressed as deterministic labels such as `cold`, `neutral`, `warm`, `hot`, or `insufficient_evidence`.
 _Avoid_: Unstructured AI opinion
@@ -144,6 +196,14 @@ _Avoid_: Testing group
 A strategy run that can hold, enter, exit, and evaluate multiple stocks in one portfolio.
 _Avoid_: Multi-stock demo
 
+**Holding Count Cap**:
+The maximum number of different symbols that may be open at the same time in a strategy run. It can also be used as the denominator for deriving a per-symbol full position target.
+_Avoid_: Cash limit, fixed stock universe size, trade count
+
+**Trade-Sample Backtest**:
+A backtest run configured to capture as many valid executed trade samples as possible, often with intentionally large notional capital so capital scarcity does not block entries. Its portfolio-level starting value, ending value, total return, and equity curve are not the primary evidence.
+_Avoid_: Portfolio performance test, capital-realistic backtest
+
 **Single-Stock Fixture**:
 A small deterministic data snapshot for one stock used to test strategy and engine behavior.
 _Avoid_: Single-stock backtest
@@ -160,6 +220,18 @@ _Avoid_: Retest
 The deterministic aggregation of daily OHLCV bars into weekly or monthly bars using first open, max high, min low, last close, and summed volume or amount.
 _Avoid_: Dynamic timeframe magic
 
+**Warmup Data Range**:
+The pre-backtest data range loaded only to make indicators and lookback-dependent strategy checks valid before statistics begin.
+_Avoid_: Backtest period, counted trading sample, default-filled indicator rows
+
+**Indicator Coverage Alarm**:
+A run-level data quality alert raised when required indicator values are missing beyond an accepted threshold for the configured backtest window.
+_Avoid_: Default-filled indicator, silent missing data, strategy signal
+
+**Indicator Coverage Eligible Date**:
+A symbol-date included in indicator missing-value checks only after the symbol has base daily bars and the required indicator warmup window is available.
+_Avoid_: Listing-before data gap, warmup row, market-wide calendar denominator
+
 **Signal Rule**:
 A rule that converts prepared data and features into an entry, exit, hold, or avoid decision.
 _Avoid_: Buy rule, sell rule, order rule
@@ -172,9 +244,29 @@ _Avoid_: Buy strategy
 A code-backed method bound to a strategy template that determines when the strategy should exit a profitable position.
 _Avoid_: Take-profit setting
 
+**Scale-Out**:
+A partial profitable sell that reduces an open position while keeping the remaining position alive for later profit-taking or stop-loss decisions.
+_Avoid_: Full exit, closed trade, cost-basis rewrite
+
+**Full Exit**:
+A sell decision that closes all remaining quantity of an open position and ends that position's trade lifecycle.
+_Avoid_: Scale-out, partial sell, cost reduction
+
+**DEA Waterline Cycle**:
+A decision-layer MACD state where DEA has moved above the zero line and remains above it until DEA returns to zero or below. It is strategy evidence, not a separate reusable indicator.
+_Avoid_: MACD calculation, permanent bullish state
+
 **Stop-Loss Method**:
 A code-backed method bound to a strategy template that determines when the strategy should exit a losing position.
 _Avoid_: Stop-loss setting
+
+**Stop-Loss Watch**:
+A risk state after a stop-loss observation condition has been met but before the next completed bar confirms whether the position should be exited.
+_Avoid_: Immediate stop order, add-on opportunity
+
+**Profit-Exit Watch**:
+A profit-protection state after a profit-taking observation condition has been met but before the next completed bar confirms whether the position should be exited.
+_Avoid_: Add-on opportunity, immediate full exit
 
 **Trade Intent**:
 A standardized decision emitted by an entry, profit-taking, or stop-loss method before sizing and execution, such as enter, exit profit, exit loss, hold, or avoid. It includes explanatory evidence such as the method name, reason code, signal values, risk price, target price, confidence, and any blocking constraint.
@@ -195,6 +287,34 @@ _Avoid_: Calculated-after-the-fact metric, default-filled indicator
 **Entry Attribution Factor Declaration**:
 An explicit declaration of an entry attribution factor's key, type, human label, scope, dependencies, and missing-data behavior.
 _Avoid_: Ad hoc signal key, implicit report field
+
+**Attribution Factor Registry**:
+The shared declaration catalog for framework-owned and strategy-owned attribution factors that may be enabled by a run plan and summarized after trades exist.
+_Avoid_: Separate report logic, one-off strategy column, implicit factor list
+
+**Attribution Factor Selection**:
+A run-plan choice that explicitly lists which declared attribution factors are included in post-run analysis and which known factors are intentionally not included. Included factors are calculated and summarized; explicitly not-included factors are recorded for audit visibility but do not affect the run.
+_Avoid_: Factor bundle, hidden default report fields, analyze-everything mode, implicit unused factor list
+
+**Resolved Attribution Factor Selection**:
+The run-specific attribution factor set after applying strategy, data, and indicator applicability. It records included factors and derives not-included factors as the applicable factor set minus the configured include list.
+_Avoid_: Hand-maintained unused list, all-registry dump, undocumented factor availability
+
+**Attribution Factor Applicability Declaration**:
+The metadata that states when an attribution factor can be used, including its owner, timing, required indicators or artifacts, compatible strategy methods, value type, source, and missing-data policy.
+_Avoid_: Report-time guess, factor key only, undocumented dependency
+
+**Attribution Factor Timing**:
+The lifecycle point or window where an attribution factor is measured, such as entry, exit, holding, or post-exit.
+_Avoid_: Entry-only attribution, unlabeled report field, mixed timing bucket
+
+**Framework Attribution Factor**:
+An attribution factor owned by the framework and reusable across strategies, such as market trend, industry state, moving-average structure, distance to moving averages, or exit-time context.
+_Avoid_: Strategy-specific signal, hard-coded report metric
+
+**Strategy Attribution Factor**:
+An attribution factor owned by a specific strategy definition and meaningful only for strategies that declare it, such as a baoma-specific distance to MA60 or DEA waterline-cycle age.
+_Avoid_: Framework-wide metric, hidden strategy signal, report-only special case
 
 **Entry Attribution Evidence**:
 The structured evidence captured with an entry decision so completed trades can later be explained by the conditions, values, and categories visible at entry time.
@@ -316,6 +436,42 @@ _Avoid_: Buy/sell method
 A market rule or simulation rule that can allow, reject, resize, or reprice an intended trade during a strategy run.
 _Avoid_: Broker setting
 
+**Pending Exit Intent**:
+A confirmed exit decision that could not be fully executed because of trading constraints and remains active until the position is cleared.
+_Avoid_: Fresh exit signal, entry retry, cancelled sell order
+
+**Execution Lifecycle Foundation**:
+The execution and position-state behavior required before strategy signals can produce trustworthy trade records, including trade timing, sellable lots, partial exits, pending exits, and cost basis.
+_Avoid_: Strategy signal, report-only attribution, broker default behavior
+
+**Execution Lifecycle Component**:
+A business-layer component that turns accepted strategy intents and trading constraints into position lifecycle state, execution events, and trade records before report attribution.
+_Avoid_: Backtrader-only bridge logic, report reconstruction, strategy method
+
+**Lifecycle Golden Scenario**:
+A deterministic execution-lifecycle example used to define and verify expected trade timing, lot state, partial exits, pending exits, and cost-basis behavior.
+_Avoid_: Vague behavior note, performance target, strategy optimization case
+
+**Strategy Lifecycle State Machine**:
+A finite set of position lifecycle states and transitions that defines which entry, add-on, scale-out, full-exit, pending-exit, and end-of-run actions are allowed.
+_Avoid_: Loose rule list, report-only phase label, indicator state
+
+**Lifecycle State Label**:
+A user-facing display label for a lifecycle state, usually localized for reports while the code keeps a stable enum value.
+_Avoid_: Separate state, translated business rule, free-form report text
+
+**Lifecycle Action Permission Table**:
+A pre-state-machine matrix that lists whether each lifecycle situation allows entry, add-on, scale-out, full exit, pending-exit retry, or end-of-run handling.
+_Avoid_: Free-form rule list, hidden branch logic, report-only table
+
+**Lifecycle Transition Table**:
+A state-machine table that defines how lifecycle states change after signals, executions, rejections, cost-basis updates, and end-of-run handling.
+_Avoid_: Hidden if/else order, report-side inference, undocumented transition
+
+**Authoritative Lifecycle Output**:
+The lifecycle evidence source that downstream reports, environment lookup, and AI review must trust for execution events, lot state, position lifecycle, trade records, and cost-basis state.
+_Avoid_: Broker-only inference, report-side reconstruction, duplicate evidence source
+
 **China A-Share Constraint Set**:
 The trading constraints needed to simulate Chinese A-share behavior, including T+1 selling, limit-up and limit-down behavior, suspension, board-lot sizing, fees, slippage, and cash checks.
 _Avoid_: A-share mode
@@ -332,10 +488,62 @@ _Avoid_: Parameter tuning objective, performance leaderboard
 A post-run summary of how the portfolio behaved across symbols, including open holding count, open symbols, cash ratio when broker state is available, closed-symbol count, and per-symbol trade contribution.
 _Avoid_: Raw broker dump, position printout
 
+**Adjusted Remaining Cost Basis**:
+The per-share cost basis used for a remaining position after cost-inclusive realized scale-out proceeds are applied to reduce that position's cost.
+_Avoid_: Raw average buy cost, report-only realized PnL
+
+**Cost Recovered Position**:
+A remaining position whose adjusted remaining cost basis is zero or below after scale-out proceeds have recovered the original position cost.
+_Avoid_: Infinite return, free shares, completed trade
+
 **Scenario Fit**:
 A rule-based post-run judgment that combines return, drawdown, win rate, profit/loss ratio, benchmark excess return, industry attribution, and market regime evidence into a deterministic fit label.
 _Avoid_: AI conclusion, suitability opinion
 
+**Strategy Environment Discovery**:
+The use of backtest evidence to identify the market, industry, and entry-condition environments where a strategy tends to work or fail.
+_Avoid_: Perfect return proof, parameter optimization, leaderboard result
+
+**Environment Discovery Matrix**:
+A post-run grouping table that compares trade outcomes across configured environment dimensions to identify favorable and unfavorable strategy contexts.
+_Avoid_: Parameter tuning grid, free-form AI notes, optimized strategy rule
+
 **Engine Adapter**:
 The boundary that translates a strategy definition and prepared data into a specific backtest engine's native objects.
 _Avoid_: Strategy wrapper, glue code
+
+**All-Eligible Entry Fill**:
+A sample-collection entry policy that opens every no-position symbol whose entry signal is eligible, stopping only when a holding-count cap is reached.
+_Avoid_: Ranking model, signal-strength selector, portfolio optimizer
+
+**Entry Candidate Ordering**:
+A run-level rule for ordering same-day eligible entry candidates when the remaining holding-count capacity is smaller than the candidate set.
+_Avoid_: Hidden sort, implicit alpha model, nondeterministic candidate order
+
+**Net Trade View**:
+A primary trade-sample result view that includes configured fees, taxes, slippage, and execution costs.
+_Avoid_: Raw signal return, no-cost benchmark
+
+**Gross Trade View**:
+A derived trade-sample result view that removes fees, taxes, slippage, and execution costs from the same executed trade events.
+_Avoid_: Separate rerun, alternate trade path, replacement for net results
+
+**Execution Cost Assumption**:
+A run-level configurable assumption for commissions, taxes, slippage, and other execution costs that must be disclosed with the backtest result.
+_Avoid_: Hard-coded cost model, hidden broker default
+
+**Forced End Liquidation View**:
+A result view that converts positions still open at the end of a backtest into artificial exits under explicit end-of-run assumptions.
+_Avoid_: Strategy exit signal, real sell confirmation, hidden mark-to-market
+
+**Open-Position Excluded View**:
+A result view that excludes positions still open at the end of a backtest from completed-trade statistics while reporting them separately.
+_Avoid_: Forced liquidation result, ignored open risk, incomplete trade counted as completed
+
+**End-of-Run Liquidation Switch**:
+A run-plan configuration switch that controls whether open positions at the end of a run are converted into forced end-liquidation records under explicit closing-price assumptions.
+_Avoid_: Strategy natural exit, hidden cleanup, default completed trade
+
+**End Liquidation Failure**:
+A failed forced end liquidation attempt where an open position cannot be converted into an artificial exit under the configured end-of-run assumptions.
+_Avoid_: Completed trade, strategy exit signal, ignored open position
