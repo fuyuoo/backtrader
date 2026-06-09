@@ -132,6 +132,10 @@ _Avoid_: Broker-accurate share count, pure notional return, hidden real-executio
 A per-symbol, per-date state record used by trading constraints, including suspension, limit-up, limit-down, raw close, and daily limit prices.
 _Avoid_: Indicator, trading signal
 
+**Historical ST Status**:
+A per-symbol, per-date historical special-treatment state used for data-universe filtering and attribution reference sets. It must be determined for the historical trade date, not from the symbol's current name or current listing metadata.
+_Avoid_: Current ST flag, current stock name filter, retroactive ST assumption
+
 **Industry Classification**:
 A historical relationship that identifies the Shenwan first-level, second-level, and third-level industry for a stock at a point in time.
 _Avoid_: Backtest filter, stock universe rule
@@ -304,6 +308,22 @@ _Avoid_: Separate report logic, one-off strategy column, implicit factor list
 A run-plan choice that explicitly lists which declared attribution factors are included in post-run analysis and which known factors are intentionally not included. Included factors are calculated and summarized; explicitly not-included factors are recorded for audit visibility but do not affect the run.
 _Avoid_: Factor bundle, hidden default report fields, analyze-everything mode, implicit unused factor list
 
+**Attribution Field Index**:
+A persisted wide-table style index of available attribution fields and sample values used to inspect, filter, and choose candidate environment factors before adding a smaller default field set to an environment fit report.
+_Avoid_: Environment fit report, strategy signal table, implicit factor selection
+
+**Attribution Wide Sample**:
+A completed-trade attribution sample row that preserves both raw numeric factor values and derived bucket values for inspection, bucket redesign, and downstream field selection.
+_Avoid_: Bucket-only sample, report-only aggregate, recalculated factor row
+
+**Attribution Data Staleness**:
+The age, in trading days, between an attribution sample's measurement date and the as-of date of the historical data used for that factor. Limited forward-fill is allowed only when staleness is recorded and remains within the declared maximum.
+_Avoid_: Silent forward-fill, realtime backfill, treating stale data as same-day evidence
+
+**Attribution Data Exception**:
+A recorded reason that explains why an attribution factor value, bucket, or reference percentile is missing, excluded, stale, or otherwise not comparable for a sample.
+_Avoid_: Silent missing value, dropped sample, unexplained exclusion
+
 **Resolved Attribution Factor Selection**:
 The run-specific attribution factor set after applying strategy, data, and indicator applicability. It records included factors and derives not-included factors as the applicable factor set minus the configured include list.
 _Avoid_: Hand-maintained unused list, all-registry dump, undocumented factor availability
@@ -355,6 +375,38 @@ _Avoid_: Raw trade list, ungrouped signal count
 **Entry Attribution Coverage**:
 The proportion of entry attribution samples where a factor is present. Missing evidence is measured separately and is never treated as false, zero, neutral, or a report-time default.
 _Avoid_: Default-filled coverage, implicit false evidence
+
+**Negative PE Bucket**:
+An explicit valuation bucket for entry attribution samples whose PE value is negative. It represents loss-making valuation evidence and is separate from missing PE evidence.
+_Avoid_: Missing PE, low PE, default-filled PE
+
+**Market Capitalization Bucket**:
+A pair of entry attribution buckets for total market value or free-float market value: an absolute-amount bucket for human interpretation and a full-A-share historical cross-sectional percentile bucket for comparing symbols across runs and stock universes.
+_Avoid_: One-size market cap label, hidden universe-relative size, run-universe-only percentile, real-time market cap
+
+**Valuation Bucket**:
+A pair of entry attribution buckets for PE, PE_TTM, or PB: an absolute-value bucket for human interpretation and a full-A-share historical cross-sectional percentile bucket for comparing symbols across runs and stock universes. Negative PE and PE_TTM values use a separate loss-making bucket; missing values remain missing. Non-positive PB values use a separate non-positive bucket rather than a low-PB bucket.
+_Avoid_: Realtime valuation, default-filled valuation, run-universe-only percentile, treating negative PE as missing, treating non-positive PB as cheap
+
+**Volatility Bucket**:
+An entry attribution bucket that describes a symbol's volatility using both absolute symbol-level measures and measures relative to the symbol's Shenwan first-level industry. It supports fixed profit-taking and stop-loss fit review without becoming a strategy decision rule.
+_Avoid_: Hidden volatility filter, default-filled volatility, industry-agnostic volatility label
+
+**Industry Fit Factor**:
+An entry attribution factor that groups completed trades by Shenwan first-level industry and may compare symbol-level volatility with industry-level volatility to review whether a strategy fits some industries better than others.
+_Avoid_: Industry entry filter, industry strategy, post-hoc industry signal
+
+**Liquidity Fit Factor**:
+An entry attribution factor that describes entry-time trading activity, such as turnover rate, amount, average amount, or amount percentile, to review whether results differ across liquidity environments.
+_Avoid_: Liquidity entry filter, execution rule, default-filled liquidity
+
+**Profit-Taking Fit Factor**:
+An entry attribution factor that compares a fixed profit-taking threshold with entry-time volatility, displayed as how many ATR units the fixed threshold represents. For a fixed 5 percent threshold, the underlying measure is `5% / ATR%`.
+_Avoid_: Profit-taking rule, optimized target, hidden sell condition
+
+**Stop-Loss Fit Factor**:
+An entry attribution factor that compares the executed entry price with the signal-day MA60 using signal-day ATR units. The standard measure is `(entry_price - signal_day_ma60) / signal_day_atr`.
+_Avoid_: Stop-loss rule, optimized stop distance, using future-day indicators
 
 **Entry Attribution Contrast**:
 A comparison between winning and losing entry attribution samples that ranks factors by differences such as true-rate gap, average-value gap, or category-rate gap.
