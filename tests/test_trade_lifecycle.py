@@ -23,6 +23,14 @@ def test_trade_lifecycle_report_indexes_completed_trade_timelines() -> None:
         execution_audit=(
             _execution(date(2024, 1, 2), "buy", "ENTRY", "completed"),
             _execution(date(2024, 1, 3), "buy", "ADD_ON", "completed"),
+            _execution(
+                date(2024, 1, 4),
+                "sell",
+                "BAOMA_SCALE_OUT_5_PERCENT_TRIGGERED",
+                "completed",
+                position_quantity_after=200,
+                remaining_cost_basis_after=9.5,
+            ),
             _execution(date(2024, 1, 5), "sell", "TAKE_PROFIT", "completed"),
             _execution(date(2024, 1, 8), "buy", "ENTRY", "rejected", blocked_by="BOARD_LOT_TOO_SMALL"),
             _execution(date(2024, 1, 8), "buy", "ENTRY", "completed"),
@@ -31,6 +39,11 @@ def test_trade_lifecycle_report_indexes_completed_trade_timelines() -> None:
     )
 
     assert report.trade_count == 2
+    assert [event.event_type for event in report.lifecycles[0].events] == ["entry", "add_on", "scale_out", "exit"]
+    scale_out = report.lifecycles[0].events[2]
+    assert scale_out.reason_code == "BAOMA_SCALE_OUT_5_PERCENT_TRIGGERED"
+    assert scale_out.executions[0].position_quantity_after == 200
+    assert scale_out.executions[0].remaining_cost_basis_after == 9.5
     assert _bucket(report.indexes.by_outcome, "win").trade_indexes == (1,)
     assert _bucket(report.indexes.by_outcome, "loss").trade_indexes == (2,)
     assert _bucket(report.indexes.by_add_on_count, "1").trade_indexes == (1,)
@@ -80,6 +93,8 @@ def _execution(
     event_type: str,
     *,
     blocked_by: str | None = None,
+    position_quantity_after: int | None = None,
+    remaining_cost_basis_after: float | None = None,
 ) -> ExecutionAuditEvent:
     return ExecutionAuditEvent(
         event_date=trade_date,
@@ -96,6 +111,8 @@ def _execution(
         executed_date=trade_date if event_type == "completed" else None,
         executed_quantity=100.0 if event_type == "completed" else None,
         executed_price=10.0 if event_type == "completed" else None,
+        position_quantity_after=position_quantity_after,
+        remaining_cost_basis_after=remaining_cost_basis_after,
     )
 
 

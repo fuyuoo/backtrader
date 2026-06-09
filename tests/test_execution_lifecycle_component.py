@@ -100,6 +100,9 @@ def test_lgs_04_scale_out_reduces_quantity_and_recomputes_remaining_cost_basis()
 
     assert first.accepted is True
     assert first.executed_quantity == 200
+    assert first.position_quantity_after == 400
+    assert first.remaining_cost_basis_after == 9.5
+    assert first.remaining_cost_value_after == 3800.0
     assert lifecycle.total_quantity == 400
     assert lifecycle.adjusted_remaining_cost_basis == 9.5
     assert lifecycle.is_scale_out_stage_completed(ScaleOutStage.FIVE_PERCENT) is True
@@ -113,6 +116,9 @@ def test_lgs_04_scale_out_reduces_quantity_and_recomputes_remaining_cost_basis()
 
     assert second.accepted is True
     assert second.executed_quantity == 200
+    assert second.position_quantity_after == 200
+    assert second.remaining_cost_basis_after == 7.0
+    assert second.remaining_cost_value_after == 1400.0
     assert lifecycle.total_quantity == 200
     assert lifecycle.adjusted_remaining_cost_basis == 7.0
     assert lifecycle.is_scale_out_stage_completed(ScaleOutStage.FIFTEEN_PERCENT) is True
@@ -189,6 +195,10 @@ def test_lgs_05b_closed_trade_keeps_primary_entry_date_after_scale_out_and_add_o
     closed_trade = lifecycle.closed_trades[0]
     assert closed_trade.entry_date == date(2024, 1, 2)
     assert closed_trade.exit_date == date(2024, 1, 6)
+    assert closed_trade.entry_price == 10.0
+    assert closed_trade.original_entry_price == 10.0
+    assert closed_trade.entry_quantity == 600
+    assert closed_trade.remaining_cost_basis_at_exit == 7.0
 
 
 def test_lgs_06_confirmed_full_exit_rejection_enters_pending_exit() -> None:

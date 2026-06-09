@@ -53,6 +53,10 @@ class TradeLifecycleExecutionEvent:
     slippage: float | None
     cash_after: float | None
     value_after: float | None
+    position_quantity_after: int | None
+    remaining_cost_value_after: float | None
+    remaining_cost_basis_after: float | None
+    cost_recovered_after: bool | None
 
 
 @dataclass(frozen=True)
@@ -82,6 +86,10 @@ class TradeLifecycle:
     exit_price: float
     return_pct: float
     events: tuple[TradeLifecycleEvent, ...]
+    quantity: int | None = None
+    original_entry_price: float | None = None
+    remaining_cost_basis_at_exit: float | None = None
+    entry_quantity: int | None = None
 
 
 @dataclass(frozen=True)
@@ -107,8 +115,10 @@ def build_trade_lifecycle_report(
         intents_by_symbol[intent.symbol].append(intent)
 
     executions_by_key: dict[tuple[str, date, str, str], list[ExecutionAuditEvent]] = defaultdict(list)
+    executions_by_symbol: dict[str, list[ExecutionAuditEvent]] = defaultdict(list)
     for event in execution_audit:
         executions_by_key[(event.symbol, event.signal_date, event.reason_code, event.side)].append(event)
+        executions_by_symbol[event.symbol].append(event)
 
     lifecycles = tuple(
         _trade_lifecycle(
@@ -116,6 +126,7 @@ def build_trade_lifecycle_report(
             trade=trade,
             intents=intents_by_symbol.get(trade.symbol, ()),
             executions_by_key=executions_by_key,
+            executions_by_symbol=executions_by_symbol,
         )
         for index, trade in enumerate(lifecycle_trades, start=1)
     )
@@ -190,6 +201,7 @@ def _trade_lifecycle(
     trade: ClosedTrade,
     intents: Sequence[TradeIntent],
     executions_by_key: Mapping[tuple[str, date, str, str], Sequence[ExecutionAuditEvent]],
+    executions_by_symbol: Mapping[str, Sequence[ExecutionAuditEvent]],
 ) -> TradeLifecycle:
     entry_intent = _matching_entry_intent(trade, intents)
     exit_intent = _matching_exit_intent(trade, intents)
@@ -204,7 +216,7 @@ def _trade_lifecycle(
             executions_by_key=executions_by_key,
         )
     ]
-    events.extend(
+    middle_events = [
         _lifecycle_event(
             event_type="add_on",
             trade_date=add_on_intent.trade_date,
@@ -213,6 +225,16 @@ def _trade_lifecycle(
             executions_by_key=executions_by_key,
         )
         for add_on_intent in add_on_intents
+    ]
+    middle_events.extend(
+        _scale_out_lifecycle_event(execution)
+        for execution in _matching_scale_out_executions(trade, executions_by_symbol.get(trade.symbol, ()))
+    )
+    events.extend(
+        sorted(
+            middle_events,
+            key=lambda event: (event.trade_date, event.event_type, event.reason_code or ""),
+        )
     )
     events.append(
         _lifecycle_event(
@@ -234,6 +256,10 @@ def _trade_lifecycle(
         entry_price=trade.entry_price,
         exit_price=trade.exit_price,
         return_pct=trade.return_pct,
+        quantity=getattr(trade, "quantity", None),
+        original_entry_price=getattr(trade, "original_entry_price", None),
+        remaining_cost_basis_at_exit=getattr(trade, "remaining_cost_basis_at_exit", None),
+        entry_quantity=getattr(trade, "entry_quantity", None),
         events=tuple(events),
     )
 
@@ -270,6 +296,20 @@ def _matching_add_on_intents(trade: ClosedTrade, intents: Sequence[TradeIntent])
         if intent.intent_type == TradeIntentType.ADD_ON
         and trade.entry_date < intent.trade_date < trade.exit_date
         and _successful_intent(intent)
+    )
+
+
+def _matching_scale_out_executions(
+    trade: ClosedTrade,
+    executions: Sequence[ExecutionAuditEvent],
+) -> tuple[ExecutionAuditEvent, ...]:
+    return tuple(
+        event
+        for event in sorted(executions, key=lambda value: (value.signal_date, value.reason_code))
+        if event.side == "sell"
+        and event.reason_code.startswith("BAOMA_SCALE_OUT_")
+        and event.event_type == "completed"
+        and trade.entry_date < event.signal_date < trade.exit_date
     )
 
 
@@ -310,6 +350,30 @@ def _lifecycle_event(
     )
 
 
+def _scale_out_lifecycle_event(event: ExecutionAuditEvent) -> TradeLifecycleEvent:
+    return TradeLifecycleEvent(
+        event_type="scale_out",
+        trade_date=event.signal_date,
+        intent_type=None,
+        method_name=None,
+        reason_code=event.reason_code,
+        blocked_by=event.blocked_by,
+        checks={},
+        values={
+            "executed_quantity": event.executed_quantity,
+            "executed_price": event.executed_price,
+            "gross_value": event.gross_value,
+            "position_quantity_after": event.position_quantity_after,
+            "remaining_cost_value_after": event.remaining_cost_value_after,
+            "remaining_cost_basis_after": event.remaining_cost_basis_after,
+            "cost_recovered_after": event.cost_recovered_after,
+        },
+        categories={},
+        sizing_context={},
+        executions=(_execution_event(event),),
+    )
+
+
 def _execution_event(event: ExecutionAuditEvent) -> TradeLifecycleExecutionEvent:
     return TradeLifecycleExecutionEvent(
         event_date=event.event_date,
@@ -331,6 +395,10 @@ def _execution_event(event: ExecutionAuditEvent) -> TradeLifecycleExecutionEvent
         slippage=event.slippage,
         cash_after=event.cash_after,
         value_after=event.value_after,
+        position_quantity_after=event.position_quantity_after,
+        remaining_cost_value_after=event.remaining_cost_value_after,
+        remaining_cost_basis_after=event.remaining_cost_basis_after,
+        cost_recovered_after=event.cost_recovered_after,
     )
 
 

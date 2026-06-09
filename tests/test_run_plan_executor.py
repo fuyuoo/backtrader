@@ -434,13 +434,25 @@ def test_execute_run_plan_can_route_to_baoma_dedicated_business_runner(tmp_path:
             price=10.0,
         ),
         LifecycleExecutionEvent(
+            trade_date=date(2024, 1, 7),
+            symbol="000001.SZ",
+            side="sell",
+            status="accepted",
+            reason_code="BAOMA_SCALE_OUT_5_PERCENT_TRIGGERED",
+            requested_quantity=100,
+            executed_quantity=100,
+            price=11.0,
+            position_quantity_after=200,
+            remaining_cost_basis_after=9.5,
+        ),
+        LifecycleExecutionEvent(
             trade_date=date(2024, 1, 8),
             symbol="000001.SZ",
             side="sell",
             status="accepted",
             reason_code="BAOMA_MA60_STOP_TRIGGERED",
-            requested_quantity=300,
-            executed_quantity=300,
+            requested_quantity=200,
+            executed_quantity=200,
             price=9.0,
         ),
     )
@@ -459,8 +471,11 @@ def test_execute_run_plan_can_route_to_baoma_dedicated_business_runner(tmp_path:
                     exit_date=date(2024, 1, 8),
                     entry_price=10.0,
                     exit_price=9.0,
-                    quantity=300,
+                    quantity=200,
                     exit_reason="BAOMA_MA60_STOP_TRIGGERED",
+                    original_entry_price=10.0,
+                    remaining_cost_basis_at_exit=9.5,
+                    entry_quantity=300,
                 ),
             ),
             open_positions=(),
@@ -475,8 +490,12 @@ def test_execute_run_plan_can_route_to_baoma_dedicated_business_runner(tmp_path:
     assert result.lifecycle_events == lifecycle_events
     assert [event.reason_code for event in result.execution_audit] == [
         "BAOMA_ENTRY_TRIGGERED",
+        "BAOMA_SCALE_OUT_5_PERCENT_TRIGGERED",
         "BAOMA_MA60_STOP_TRIGGERED",
     ]
+    scale_out_audit = result.execution_audit[1]
+    assert scale_out_audit.position_quantity_after == 200
+    assert scale_out_audit.remaining_cost_basis_after == pytest.approx(9.5)
     assert captured["config"].total_asset_value == pytest.approx(1_200_000.0)
     assert captured["config"].max_holding_count == 12
     assert captured["config"].buy_slice_fraction == pytest.approx(0.25)

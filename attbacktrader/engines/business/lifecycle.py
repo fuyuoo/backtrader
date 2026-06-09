@@ -41,6 +41,10 @@ class LifecycleExecutionEvent:
     executed_quantity: int
     price: float
     blocked_by: str | None = None
+    position_quantity_after: int | None = None
+    remaining_cost_value_after: float | None = None
+    remaining_cost_basis_after: float | None = None
+    cost_recovered_after: bool | None = None
 
     @property
     def accepted(self) -> bool:
@@ -56,6 +60,9 @@ class LifecycleClosedTrade:
     exit_price: float
     quantity: int
     exit_reason: str
+    original_entry_price: float | None = None
+    remaining_cost_basis_at_exit: float | None = None
+    entry_quantity: int | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +101,8 @@ class ExecutionLifecycleComponent:
         self._completed_scale_out_stages: set[ScaleOutStage] = set()
         self._closed_trades: list[LifecycleClosedTrade] = []
         self._primary_entry_date: date | None = None
+        self._primary_entry_price: float | None = None
+        self._total_entry_quantity = 0
         self.pending_exit_reason: str | None = None
         self.ever_profitable = False
         self.cost_recovered = False
@@ -142,12 +151,16 @@ class ExecutionLifecycleComponent:
                 executed_quantity=0,
                 price=price,
                 blocked_by="BOARD_LOT_TOO_SMALL",
+                **self._event_position_state(),
             )
 
         if self.total_quantity <= 0:
             self._primary_entry_date = trade_date
+            self._primary_entry_price = price
+            self._total_entry_quantity = 0
         self._lots.append(LifecycleLot(trade_date=trade_date, quantity=quantity, price=price))
         self._remaining_cost_value += quantity * price
+        self._total_entry_quantity += quantity
         self.state = LifecycleState.ENTRY_LOCKED_T1
         return LifecycleExecutionEvent(
             trade_date=trade_date,
@@ -158,6 +171,7 @@ class ExecutionLifecycleComponent:
             requested_quantity=quantity,
             executed_quantity=quantity,
             price=price,
+            **self._event_position_state(),
         )
 
     def sellable_quantity(self, trade_date: date) -> int:
@@ -226,7 +240,10 @@ class ExecutionLifecycleComponent:
             )
 
         entry_date = self._entry_date(fallback=trade_date)
-        entry_price = self.adjusted_remaining_cost_basis or 0.0
+        original_entry_price = self._primary_entry_price
+        closing_cost_basis = self.adjusted_remaining_cost_basis
+        entry_price = original_entry_price if original_entry_price is not None else closing_cost_basis or 0.0
+        entry_quantity = self._total_entry_quantity or requested_quantity
         self._remove_quantity_from_lots(executable_quantity, trade_date=trade_date)
         self._remaining_cost_value = max(0.0, self._remaining_cost_value - executable_quantity * price)
         if self.total_quantity <= 0:
@@ -239,10 +256,15 @@ class ExecutionLifecycleComponent:
                     exit_price=price,
                     quantity=executable_quantity,
                     exit_reason=reason_code,
+                    original_entry_price=entry_price,
+                    remaining_cost_basis_at_exit=closing_cost_basis,
+                    entry_quantity=entry_quantity,
                 )
             )
             self._remaining_cost_value = 0.0
             self._primary_entry_date = None
+            self._primary_entry_price = None
+            self._total_entry_quantity = 0
             self.state = LifecycleState.CLOSED
             self.pending_exit_reason = None
         else:
@@ -257,6 +279,7 @@ class ExecutionLifecycleComponent:
             requested_quantity=requested_quantity,
             executed_quantity=executable_quantity,
             price=price,
+            **self._event_position_state(),
         )
 
     def retry_pending_exit(
@@ -309,10 +332,15 @@ class ExecutionLifecycleComponent:
             )
 
         entry_date = self._entry_date(fallback=end_date)
-        entry_price = self.adjusted_remaining_cost_basis or 0.0
+        original_entry_price = self._primary_entry_price
+        closing_cost_basis = self.adjusted_remaining_cost_basis
+        entry_price = original_entry_price if original_entry_price is not None else closing_cost_basis or 0.0
+        entry_quantity = self._total_entry_quantity or open_quantity
         self._lots = []
         self._remaining_cost_value = 0.0
         self._primary_entry_date = None
+        self._primary_entry_price = None
+        self._total_entry_quantity = 0
         self._closed_trades.append(
             LifecycleClosedTrade(
                 symbol=self.symbol,
@@ -322,6 +350,9 @@ class ExecutionLifecycleComponent:
                 exit_price=price,
                 quantity=open_quantity,
                 exit_reason=reason_code,
+                original_entry_price=entry_price,
+                remaining_cost_basis_at_exit=closing_cost_basis,
+                entry_quantity=entry_quantity,
             )
         )
         self.state = LifecycleState.CLOSED
@@ -338,6 +369,7 @@ class ExecutionLifecycleComponent:
                 requested_quantity=open_quantity,
                 executed_quantity=open_quantity,
                 price=price,
+                **self._event_position_state(),
             ),
         )
 
@@ -390,6 +422,7 @@ class ExecutionLifecycleComponent:
             requested_quantity=requested_quantity,
             executed_quantity=executable_quantity,
             price=price,
+            **self._event_position_state(),
         )
 
     def is_scale_out_stage_completed(self, stage: ScaleOutStage) -> bool:
@@ -443,4 +476,13 @@ class ExecutionLifecycleComponent:
             executed_quantity=0,
             price=price,
             blocked_by=blocked_by,
+            **self._event_position_state(),
         )
+
+    def _event_position_state(self) -> dict[str, float | int | bool | None]:
+        return {
+            "position_quantity_after": self.total_quantity,
+            "remaining_cost_value_after": self._remaining_cost_value if self.total_quantity > 0 else 0.0,
+            "remaining_cost_basis_after": self.adjusted_remaining_cost_basis,
+            "cost_recovered_after": self.cost_recovered,
+        }

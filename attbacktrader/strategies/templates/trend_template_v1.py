@@ -43,9 +43,15 @@ class ClosedTrade:
     entry_price: float
     exit_price: float
     exit_reason: str
+    quantity: int | None = None
+    original_entry_price: float | None = None
+    remaining_cost_basis_at_exit: float | None = None
+    entry_quantity: int | None = None
 
     @property
     def return_pct(self) -> float:
+        if self.entry_price <= 0:
+            return 0.0
         return self.exit_price / self.entry_price - 1.0
 
 

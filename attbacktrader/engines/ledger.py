@@ -51,3 +51,7 @@ class ExecutionAuditEvent:
     slippage: float | None = None
     cash_after: float | None = None
     value_after: float | None = None
+    position_quantity_after: int | None = None
+    remaining_cost_value_after: float | None = None
+    remaining_cost_basis_after: float | None = None
+    cost_recovered_after: bool | None = None

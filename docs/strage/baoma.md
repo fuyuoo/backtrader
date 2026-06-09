@@ -64,12 +64,12 @@
 | `B-03` | baoma 专用执行入口 | 已完成 | RunPlan/CLI 可选择 `baoma_v1_business`；执行顺序固定为 `Pending Full Exit > Exit Watch > Full Exit > Scale-Out > Add-On > Entry`。 |
 | `B-04` | 固定股票池 | 已完成 | `examples/stock-pools/baoma-hs300-csi500-20260607.csv` 固定 800 只，RunPlan 只引用文件，不在运行时动态换池。 |
 | `B-05` | 数据预热和指标覆盖 | 已完成 | 回测前自动 data preflight；优先读缓存，缺什么补什么；`ok/warning` 进入回测，`error` 自动剔除；报告写入过滤统计。 |
-| `B-06` | 交易样本报告 | 已完成首版 | 输出 `trades.json`、`trade_lifecycle.json`、`trade_review.json`、`report.zh.md`，可查看完整交易、生命周期、拒绝/挂起和未平仓。 |
-| `B-07` | AI 可读审计包 | 已完成首版 | 输出 `signal_audit.json`、`execution_audit.json`、`result_diagnostics.json`、`environment_fit.json`、`strategy_environment_profile.json`。 |
+| `B-06` | 交易样本报告 | 已完成首版 | 输出 `trades.json`、`trade_lifecycle.json`、`trade_review.json`、`report.zh.md`，可查看完整交易、生命周期、分批减仓、拒绝/挂起和未平仓。 |
+| `B-07` | AI 可读审计包 | 已完成首版 | 输出 `signal_audit.json`、`execution_audit.json`、`result_diagnostics.json`、`environment_fit.json`、`strategy_environment_profile.json`；`execution_audit` 已包含 `BAOMA_SCALE_OUT_*` 分批减仓事件。 |
 | `B-08` | 环境发现框架 | 已完成首版 | `environment_fit` 和 `strategy_environment_profile` 已能消费 baoma 交易样本；当前环境因子信息量仍偏少，后续按因子扩展。 |
 | `B-09` | 最小真实回测样本 | 已完成 | 固定池 2023-2024 真实回测已跑通，作为当前 baoma 回测基线。 |
 
-当前已知待接，但不阻止进入真实策略研究：
+当前已知待接/近期修复项：
 
 | 编号 | 缺口 | 影响 | 下一步处理原则 |
 |---|---|---|---|
@@ -77,6 +77,8 @@
 | `G-02` | 成本、税费、滑点尚未完全驱动 baoma 生命周期净口径 | 当前更适合作为前复权价差和交易样本分析，不适合当作真实资金收益结论 | 费用继续保留为配置项；后续从同一批成交记录派生毛/净视图，不单独重跑策略。 |
 | `G-03` | 期末强制清仓视图和剔除未完成视图仍需独立报告化 | 当前能看到 104 个期末未平仓，但双视图口径还不够清晰 | 进入稳定性分析前补；当前不要把未平仓混入完整交易胜率结论。 |
 | `G-04` | 环境因子还不够有区分度 | 当前环境报告能跑，但分组主要集中在少数字段，不能充分回答牛市/震荡/熊市适配 | 下一阶段只补环境因子，不重建归因框架。 |
+| `G-05` | 原始入场价与分批减仓后的剩余成本口径拆分 | 已修复；`ClosedTrade.entry_price` / `original_entry_price` 保留首笔入场价，`remaining_cost_basis_at_exit` 单独记录最终清仓前剩余成本 | `300803.SZ` 这类减仓后剩余成本为负的交易不再显示为负入场价；负值只出现在剩余成本字段，用于解释成本已被分批卖出覆盖。 |
+| `G-06` | 分批减仓事件作为可核验交易事件完整落盘 | 已修复；`BAOMA_SCALE_OUT_*` 已进入 `execution_audit.json`、`trade_lifecycle.json` 和人工核验样本 | full run 中 `execution_audit` 已包含分批减仓事件，并记录成交日、成交价、成交数量、事件后持仓数量和事件后剩余成本。 |
 
 当前明确暂不做：
 
@@ -163,6 +165,11 @@ reports/_tmp-baoma-100-industry-attribution-check/
 | 周线行业因子 | `industry.kdj.week.j_bucket`、`industry.kdj.week.state` | 用于观察行业周线是否比行业日线更能解释策略土壤。 |
 | 周线指数因子 | `market.hs300.kdj.week.j_bucket`、`market.csi500.kdj.week.j_bucket` | 用于观察大盘周线是否过滤掉日线噪音。 |
 | 行业细化因子 | 行业 MA 周期、行业相对强弱周期、行业强弱连续天数 | 在周线 KDJ 后再接，避免一次性把矩阵切太碎。 |
+| 市值因子 | 总市值分桶、流通市值分桶 | 先记录为下一阶段待接因子；用于观察策略是否更适合大/中/小市值股票。 |
+| 估值因子 | PE、PE_TTM、PB 分桶 | 亏损 PE 或不可解释 PE 必须保持 `missing`，不得补默认值。 |
+| 波动率因子 | 20 日收益波动率、60 日收益波动率、ATR 百分比、近 20 日最大振幅 | 固定止盈/止损对不同波动股票敏感，优先作为后验归因，不进入买卖规则。 |
+| 止盈适配因子 | `5%止盈 / ATR百分比` | 用于判断固定 5% 止盈对不同波动股票是否过紧或过松。 |
+| 止损适配因子 | 入场价距离 MA60 的 ATR 倍数 | 用于观察止损空间是否和个股真实波动匹配。 |
 
 下一阶段新增因子的实现规则：
 
@@ -171,6 +178,7 @@ reports/_tmp-baoma-100-industry-attribution-check/
 3. 新因子先通过交易记录反查，不进入第一版买卖策略。
 4. 新因子先用当前 100 只样本做缺失检查，再扩到更大固定股票池。
 5. 矩阵新增必须服务于“入场胜率/收益、加仓成败、止损入场时机、止盈后卖飞”这四类问题。
+6. 市值、估值和波动率因子已经确认要做，但当前阶段先记录，不在买卖点核验前实现。
 
 下一阶段 MACD/KDJ 因子口径：
 
@@ -494,6 +502,12 @@ DEA 上水计算：
 | 卖出数量 | 剩余全部仓位 |
 | 最低持有期 | 如果当前仓位买入日或加仓日为 `T`，对应未满 T+1 的数量不得卖出 |
 
+连续两日确认口径：
+
+- 当前实现不持久化 `Stop Watch` 标记。
+- MA60 止损按 `previous_price_below_ma && current_price_below_ma` 判断：前一交易日收盘低于 MA60，当前交易日收盘仍低于 MA60，才在当前交易日尾盘清仓止损。
+- 如果第一次跌破后下一交易日重新站上 MA60，则不触发清仓，继续持有。
+
 建议 reason code：
 
 | 场景 | reason_code |
@@ -578,6 +592,13 @@ DEA 上水计算：
 | 成交价格 | `close[T]`，叠加配置的费用和滑点 |
 | 卖出数量 | `Full Exit`，卖出全部剩余可卖仓位 |
 | 最低持有期 | 只卖出满足 T+1 的可卖数量；未满 T+1 的数量不得卖出 |
+
+连续两日确认口径：
+
+- 当前实现不持久化 `Profit Exit Watch` 标记。
+- MA25 止盈按 `previous_price_below_ma && current_price_below_ma && confirmed_profitable` 判断：前一交易日收盘低于 MA25，当前交易日收盘仍低于 MA25，并且当前交易日收盘仍有盈利，才在当前交易日尾盘清仓止盈。
+- 如果第一次跌破后下一交易日重新站上 MA25，则不触发清仓，继续持有。
+- MA25 止盈不要求此前发生过加仓；只要满足连续两日跌破 MA25 且确认日仍盈利即可触发。
 
 建议 reason code：
 

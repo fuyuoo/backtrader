@@ -321,7 +321,8 @@ def _validate_execution_matches_signals(
     for event in execution_audit:
         signal_key = (event.symbol, event.signal_date, event.reason_code)
         signal_types = signal_types_by_key.get(signal_key, set())
-        if not signal_types:
+        lifecycle_only_execution = _is_lifecycle_only_execution(event)
+        if not signal_types and not lifecycle_only_execution:
             issues.append(
                 _issue(
                     "error",
@@ -334,7 +335,7 @@ def _validate_execution_matches_signals(
                     actual=event.reason_code,
                 )
             )
-        elif not _side_matches_signal_types(event.side, signal_types):
+        elif signal_types and not _side_matches_signal_types(event.side, signal_types):
             issues.append(
                 _issue(
                     "error",
@@ -363,7 +364,7 @@ def _validate_execution_matches_signals(
                     )
                 )
 
-            if event.side == "sell":
+            if event.side == "sell" and not lifecycle_only_execution:
                 trade_key = (event.symbol, event.executed_date or event.event_date, event.reason_code)
                 if closed_trade_exit_counts[trade_key] > 0:
                     closed_trade_exit_counts[trade_key] -= 1
@@ -402,6 +403,10 @@ def _validate_execution_matches_signals(
             )
 
     _validate_blocked_intents_have_rejections(signal_audit, execution_audit, issues)
+
+
+def _is_lifecycle_only_execution(event: ExecutionAuditEvent) -> bool:
+    return event.reason_code.startswith("BAOMA_SCALE_OUT_")
 
 
 def _validate_rejected_execution_reason(

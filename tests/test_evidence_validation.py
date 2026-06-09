@@ -234,6 +234,36 @@ def test_evidence_validation_flags_invalid_rejection_shape() -> None:
     assert "REJECTION_REASON_SIDE_MISMATCH" in codes
 
 
+def test_evidence_validation_accepts_baoma_scale_out_lifecycle_execution_without_closed_trade() -> None:
+    trade_date = date(2024, 1, 4)
+    result = _minimal_result(
+        signal_audit=(),
+        execution_audit=(
+            ExecutionAuditEvent(
+                event_date=trade_date,
+                signal_date=trade_date,
+                symbol="000001.SZ",
+                side="sell",
+                event_type="completed",
+                status="completed",
+                reason_code="BAOMA_SCALE_OUT_5_PERCENT_TRIGGERED",
+                requested_quantity=100,
+                executable_quantity=100,
+                signal_price=11.0,
+                executed_date=trade_date,
+                executed_quantity=100.0,
+                executed_price=11.0,
+                position_quantity_after=200,
+                remaining_cost_basis_after=9.5,
+            ),
+        ),
+    )
+
+    validation = build_evidence_validation(result)
+
+    assert validation.status == "ok"
+
+
 def _execute_fixture_run(tmp_path: Path):
     bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
     run_plan = _run_plan(tmp_path / "snapshots")

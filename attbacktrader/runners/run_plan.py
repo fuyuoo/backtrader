@@ -439,6 +439,10 @@ def _portfolio_result_from_baoma(result: BaomaBusinessRunResult) -> TrendTemplat
                 entry_price=trade.entry_price,
                 exit_price=trade.exit_price,
                 exit_reason=trade.exit_reason,
+                quantity=trade.quantity,
+                original_entry_price=trade.original_entry_price,
+                remaining_cost_basis_at_exit=trade.remaining_cost_basis_at_exit,
+                entry_quantity=trade.entry_quantity,
             )
             for trade in result.closed_trades
         ),
@@ -458,7 +462,6 @@ def _execution_audit_from_baoma(result: BaomaBusinessRunResult) -> tuple[Executi
     return tuple(
         _execution_audit_event_from_lifecycle(event)
         for event in result.lifecycle_events
-        if not event.reason_code.startswith("BAOMA_SCALE_OUT_")
     )
 
 
@@ -480,6 +483,10 @@ def _execution_audit_event_from_lifecycle(event: LifecycleExecutionEvent) -> Exe
         executed_quantity=float(event.executed_quantity) if completed else None,
         executed_price=event.price if completed else None,
         gross_value=event.executed_quantity * event.price if completed else None,
+        position_quantity_after=event.position_quantity_after,
+        remaining_cost_value_after=event.remaining_cost_value_after,
+        remaining_cost_basis_after=event.remaining_cost_basis_after,
+        cost_recovered_after=event.cost_recovered_after,
     )
 
 

@@ -203,6 +203,9 @@ def test_baoma_business_runner_scales_out_one_stage_per_day_and_recomputes_remai
         ("sell", trade_dates[3], 11.0, "BAOMA_SCALE_OUT_5_PERCENT_TRIGGERED", 100),
         ("sell", trade_dates[4], 11.2, "BAOMA_SCALE_OUT_15_PERCENT_TRIGGERED", 100),
     ]
+    scale_out_events = [event for event in result.lifecycle_events if event.reason_code.startswith("BAOMA_SCALE_OUT_")]
+    assert [event.position_quantity_after for event in scale_out_events] == [200, 100]
+    assert [event.remaining_cost_basis_after for event in scale_out_events] == pytest.approx([9.5, 7.8])
 
     assert result.closed_trades == ()
     assert len(result.open_positions) == 1
