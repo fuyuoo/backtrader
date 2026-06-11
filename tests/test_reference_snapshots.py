@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 import pandas as pd
@@ -357,6 +358,60 @@ def test_prepare_attribution_reference_cli_accepts_symbol_whitelist(tmp_path, mo
     )
 
     assert seen["symbols"] == ["000001.SZ", "600000.SH"]
+
+
+def test_prepare_attribution_reference_cli_derives_scope_from_run_dir(tmp_path, monkeypatch, capsys) -> None:
+    seen = {}
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    stock_pool = tmp_path / "pool.csv"
+    stock_pool.write_text("ts_code,name\n000001.SZ,平安银行\n600000.SH,浦发银行\n", encoding="utf-8")
+    (run_dir / "run_plan.json").write_text(
+        json.dumps(
+            {
+                "run": {"from_date": "2024-01-10", "to_date": "2024-03-29"},
+                "data": {"stock_pool_file": str(stock_pool)},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeProvider:
+        def __init__(self, token, *, rate_limit=None):
+            pass
+
+        def fetch_attribution_reference_frame_for_symbols(self, *, start_date, end_date, symbols):
+            seen["start_date"] = start_date
+            seen["end_date"] = end_date
+            seen["symbols"] = symbols
+            return _all_a_feature_frame()
+
+    monkeypatch.setattr(prepare_attribution_reference_cli, "read_tushare_token", lambda path: "test-token")
+    monkeypatch.setattr(prepare_attribution_reference_cli, "TushareProvider", FakeProvider)
+
+    prepare_attribution_reference_cli.main(
+        [
+            "--provider",
+            "tushare",
+            "--run-dir",
+            str(run_dir),
+            "--run-warmup-trading-days",
+            "3",
+            "--min-reference-count",
+            "2",
+            "--output-dir",
+            str(tmp_path / "provider-reference"),
+        ]
+    )
+    stdout = json.loads(capsys.readouterr().out)
+
+    assert seen["symbols"] == ["000001.SZ", "600000.SH"]
+    assert seen["start_date"] == date(2024, 1, 5)
+    assert seen["end_date"] == date(2024, 3, 29)
+    assert stdout["effective_start_date"] == "2024-01-05"
+    assert stdout["effective_end_date"] == "2024-03-29"
+    assert stdout["symbol_count"] == 2
 
 
 def test_industry_memberships_apply_by_effective_interval(tmp_path) -> None:

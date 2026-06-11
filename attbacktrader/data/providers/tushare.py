@@ -40,6 +40,7 @@ DEFAULT_TUSHARE_RETRY_ATTEMPTS = 5
 DEFAULT_TUSHARE_RETRY_BASE_SECONDS = 2.0
 DEFAULT_TUSHARE_RETRY_MAX_SECONDS = 60.0
 DEFAULT_TUSHARE_DATE_WINDOW_DAYS = 366
+REFERENCE_SYMBOL_ALL_MARKET_THRESHOLD = 100
 TUSHARE_REQUESTS_PER_MINUTE_ENV = "ATT_TUSHARE_REQUESTS_PER_MINUTE"
 TUSHARE_RETRY_ATTEMPTS_ENV = "ATT_TUSHARE_RETRY_ATTEMPTS"
 TUSHARE_DATE_WINDOW_DAYS_ENV = "ATT_TUSHARE_DATE_WINDOW_DAYS"
@@ -312,7 +313,7 @@ class TushareProvider:
         end_date: date,
         symbols: Sequence[str] | None,
     ) -> list[Any]:
-        if symbols:
+        if symbols and len(symbols) < REFERENCE_SYMBOL_ALL_MARKET_THRESHOLD:
             return [
                 self._fetch_date_windowed(
                     self._pro.daily,
@@ -324,7 +325,7 @@ class TushareProvider:
                 )
                 for symbol in symbols
             ]
-        return [
+        frames = [
             self._fetch_date_windowed(
                 self._pro.daily,
                 api_name="daily",
@@ -333,6 +334,7 @@ class TushareProvider:
                 fields=REFERENCE_DAILY_FIELDS,
             )
         ]
+        return [_filter_frame_to_symbols(frame, symbols) for frame in frames] if symbols else frames
 
     def _fetch_reference_daily_basic_frames(
         self,
@@ -341,7 +343,7 @@ class TushareProvider:
         end_date: date,
         symbols: Sequence[str] | None,
     ) -> list[Any]:
-        if symbols:
+        if symbols and len(symbols) < REFERENCE_SYMBOL_ALL_MARKET_THRESHOLD:
             return [
                 self._fetch_date_windowed(
                     self._pro.daily_basic,
@@ -353,7 +355,7 @@ class TushareProvider:
                 )
                 for symbol in symbols
             ]
-        return [
+        frames = [
             self._fetch_trade_date_windowed(
                 self._pro.daily_basic,
                 api_name="daily_basic",
@@ -362,6 +364,7 @@ class TushareProvider:
                 fields=REFERENCE_DAILY_BASIC_FIELDS,
             )
         ]
+        return [_filter_frame_to_symbols(frame, symbols) for frame in frames] if symbols else frames
 
     def _fetch_reference_suspend_frames(
         self,
@@ -370,7 +373,7 @@ class TushareProvider:
         end_date: date,
         symbols: Sequence[str] | None,
     ) -> list[Any]:
-        if symbols:
+        if symbols and len(symbols) < REFERENCE_SYMBOL_ALL_MARKET_THRESHOLD:
             return [
                 self._fetch_date_windowed(
                     self._pro.suspend_d,
@@ -382,7 +385,7 @@ class TushareProvider:
                 )
                 for symbol in symbols
             ]
-        return [
+        frames = [
             self._fetch_date_windowed(
                 self._pro.suspend_d,
                 api_name="suspend_d",
@@ -391,6 +394,7 @@ class TushareProvider:
                 fields=SUSPEND_FIELDS,
             )
         ]
+        return [_filter_frame_to_symbols(frame, symbols) for frame in frames] if symbols else frames
 
     def fetch_shenwan_industry_classifications(
         self,
@@ -722,6 +726,18 @@ def _attribution_reference_frame_from_frames(
     daily["listing_trading_days"] = _listing_trading_days(daily)
     daily["is_tradable"] = True
     return daily.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
+
+
+def _filter_frame_to_symbols(frame: Any, symbols: Sequence[str] | None) -> Any:
+    if frame is None or not symbols:
+        return frame
+    if getattr(frame, "empty", False):
+        return frame
+    column = "ts_code" if "ts_code" in frame.columns else "symbol" if "symbol" in frame.columns else None
+    if column is None:
+        return frame
+    symbol_set = {str(symbol) for symbol in symbols}
+    return frame[frame[column].astype(str).isin(symbol_set)].copy()
 
 
 def _historical_st_flags(daily: Any, namechange_frame: Any) -> list[bool]:
