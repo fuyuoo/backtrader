@@ -75,6 +75,8 @@ def build_attribution_reference_snapshot_from_frame(
     end_date: date,
     reference_universe: str = DEFAULT_REFERENCE_UNIVERSE,
     min_reference_count: int = 100,
+    emit_symbols: Sequence[str] | None = None,
+    emit_dates: Sequence[date | str] | None = None,
 ) -> dict[str, Any]:
     """Build long-form attribution reference rows from daily all-A data."""
 
@@ -94,6 +96,9 @@ def build_attribution_reference_snapshot_from_frame(
     rows: list[dict[str, Any]] = []
     exceptions: list[dict[str, Any]] = []
     percentile_specs = _percentile_specs()
+    emit_symbol_set = {str(symbol) for symbol in emit_symbols or []}
+    emit_date_set = {_coerce_date(value) for value in emit_dates or []}
+    emit_date_set.discard(None)
     for trade_date, day in data.groupby("trade_date", sort=True):
         reference_mask = _reference_universe_mask(day)
         reference_day = day[reference_mask]
@@ -105,6 +110,10 @@ def build_attribution_reference_snapshot_from_frame(
         }
         for _, record in day.iterrows():
             symbol = str(record["symbol"])
+            if emit_symbol_set and symbol not in emit_symbol_set:
+                continue
+            if emit_date_set and trade_date not in emit_date_set:
+                continue
             symbol_exclusions = exclusion_codes.get(record.name, [])
             rows.extend(_field_rows_for_record(
                 record,
@@ -138,6 +147,8 @@ def build_attribution_reference_snapshot_from_frame(
             "exclude Beijing Stock Exchange",
             "exclude non-tradable ordinary shares",
         ],
+        "emit_symbol_count": len(emit_symbol_set) if emit_symbol_set else None,
+        "emit_date_count": len(emit_date_set) if emit_date_set else None,
         "exception_count": len(exceptions),
         "exceptions": exceptions[:1000],
     }
@@ -544,6 +555,17 @@ def _jsonable(value: Any) -> Any:
     if hasattr(value, "item"):
         return value.item()
     return value
+
+
+def _coerce_date(value: date | str | Any) -> date | None:
+    if isinstance(value, date):
+        return value
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:

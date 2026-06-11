@@ -27,12 +27,15 @@ def main(argv: list[str] | None = None) -> int:
     start_date = date.fromisoformat(args.start_date or run_defaults["start_date"])
     end_date = date.fromisoformat(args.end_date or run_defaults["end_date"])
     frame = _load_input_frame(Path(args.input)) if args.input is not None else _fetch_provider_frame(args, start_date, end_date)
+    emit_scope = _run_entry_scope(args.run_dir) if args.emit_run_entry_scope else {"symbols": [], "dates": []}
     snapshot = build_attribution_reference_snapshot_from_frame(
         frame,
         start_date=start_date,
         end_date=end_date,
         reference_universe=args.reference_universe,
         min_reference_count=args.min_reference_count,
+        emit_symbols=emit_scope["symbols"],
+        emit_dates=emit_scope["dates"],
     )
     output_dir = (
         Path(args.output_dir)
@@ -58,6 +61,9 @@ def main(argv: list[str] | None = None) -> int:
                 "effective_end_date": end_date.isoformat(),
                 "run_dir": args.run_dir,
                 "symbol_count": len(_symbols_from_args(args, run_defaults=run_defaults)),
+                "emit_run_entry_scope": args.emit_run_entry_scope,
+                "emit_symbol_count": len(emit_scope["symbols"]),
+                "emit_date_count": len(emit_scope["dates"]),
                 "row_count": snapshot["row_count"],
                 "exception_count": snapshot["metadata"]["exception_count"],
                 "artifacts": {
@@ -83,6 +89,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         type=int,
         default=90,
         help="When --run-dir supplies start date, fetch this many business days before run.from_date.",
+    )
+    parser.add_argument(
+        "--emit-run-entry-scope",
+        action="store_true",
+        help="With --run-dir, write reference rows only for completed trade entry symbol/date pairs.",
     )
     parser.add_argument("--symbol", action="append", default=[], help="Repeatable symbol whitelist for provider fetch")
     parser.add_argument("--symbol-file", default=None, help="Text file with one symbol per line for provider fetch")
@@ -112,6 +123,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         parser.error("--input and --provider are mutually exclusive")
     if (args.start_date is None or args.end_date is None) and args.run_dir is None:
         parser.error("--start-date/--end-date are required unless --run-dir is provided")
+    if args.emit_run_entry_scope and args.run_dir is None:
+        parser.error("--emit-run-entry-scope requires --run-dir")
     if args.run_warmup_trading_days < 0:
         parser.error("--run-warmup-trading-days must be greater than or equal to 0")
     return args
@@ -217,6 +230,26 @@ def _business_days_before(value: date, trading_days: int) -> date:
         return value
     days = pd.bdate_range(end=value, periods=trading_days + 1)
     return days[0].date()
+
+
+def _run_entry_scope(run_dir: str | None) -> dict[str, list[str]]:
+    if run_dir is None:
+        return {"symbols": [], "dates": []}
+    path = Path(run_dir) / "trade_attribution.json"
+    if not path.exists():
+        raise FileNotFoundError(f"trade_attribution.json does not exist under run dir: {run_dir}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    symbols = []
+    dates = []
+    for item in payload.get("attributions") or []:
+        if not isinstance(item, dict):
+            continue
+        symbol = item.get("symbol")
+        entry_date = item.get("entry_date")
+        if symbol and entry_date:
+            symbols.append(str(symbol))
+            dates.append(str(entry_date))
+    return {"symbols": _dedupe_symbols(symbols), "dates": _dedupe_symbols(dates)}
 
 
 def _symbols_from_args(args: argparse.Namespace, *, run_defaults: dict[str, object] | None = None) -> list[str]:

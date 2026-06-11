@@ -222,6 +222,23 @@ def test_attribution_reference_snapshot_builds_buckets_and_exceptions(tmp_path, 
     assert "reference_values_parquet_path" in capsys.readouterr().out
 
 
+def test_attribution_reference_snapshot_can_emit_only_target_entries() -> None:
+    snapshot = build_attribution_reference_snapshot_from_frame(
+        _all_a_feature_frame(),
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 29),
+        min_reference_count=2,
+        emit_symbols=["000001.SZ"],
+        emit_dates=["2024-03-29"],
+    )
+
+    assert snapshot["rows"]
+    assert {row["symbol"] for row in snapshot["rows"]} == {"000001.SZ"}
+    assert {row["trade_date"] for row in snapshot["rows"]} == {"2024-03-29"}
+    assert snapshot["metadata"]["emit_symbol_count"] == 1
+    assert snapshot["metadata"]["emit_date_count"] == 1
+
+
 def test_prepare_attribution_reference_cli_fetches_tushare_provider(tmp_path, monkeypatch, capsys) -> None:
     class FakeProvider:
         def __init__(self, token, *, rate_limit=None):
@@ -412,6 +429,64 @@ def test_prepare_attribution_reference_cli_derives_scope_from_run_dir(tmp_path, 
     assert stdout["effective_start_date"] == "2024-01-05"
     assert stdout["effective_end_date"] == "2024-03-29"
     assert stdout["symbol_count"] == 2
+
+
+def test_prepare_attribution_reference_cli_can_emit_run_entry_scope(tmp_path, monkeypatch, capsys) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "run_plan.json").write_text(
+        json.dumps(
+            {
+                "run": {"from_date": "2024-01-01", "to_date": "2024-03-29"},
+                "data": {"symbols": ["000001.SZ", "600000.SH"]},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "trade_attribution.json").write_text(
+        json.dumps(
+            {
+                "attributions": [
+                    {"symbol": "000001.SZ", "entry_date": "2024-03-29"},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeProvider:
+        def __init__(self, token, *, rate_limit=None):
+            pass
+
+        def fetch_attribution_reference_frame_for_symbols(self, *, start_date, end_date, symbols):
+            return _all_a_feature_frame()
+
+    monkeypatch.setattr(prepare_attribution_reference_cli, "read_tushare_token", lambda path: "test-token")
+    monkeypatch.setattr(prepare_attribution_reference_cli, "TushareProvider", FakeProvider)
+
+    prepare_attribution_reference_cli.main(
+        [
+            "--provider",
+            "tushare",
+            "--run-dir",
+            str(run_dir),
+            "--emit-run-entry-scope",
+            "--min-reference-count",
+            "2",
+            "--output-dir",
+            str(tmp_path / "provider-reference"),
+        ]
+    )
+    stdout = json.loads(capsys.readouterr().out)
+    reference = json.loads((tmp_path / "provider-reference" / "reference.json").read_text(encoding="utf-8"))
+
+    assert stdout["emit_run_entry_scope"] is True
+    assert stdout["emit_symbol_count"] == 1
+    assert stdout["emit_date_count"] == 1
+    assert {row["symbol"] for row in reference["rows"]} == {"000001.SZ"}
+    assert {row["trade_date"] for row in reference["rows"]} == {"2024-03-29"}
 
 
 def test_industry_memberships_apply_by_effective_interval(tmp_path) -> None:
