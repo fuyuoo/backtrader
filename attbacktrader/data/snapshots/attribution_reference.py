@@ -347,8 +347,8 @@ def _field_rows_for_record(
             trade_date=trade_date,
             field_key=spec["field_key"],
             value=value,
-            bucket=_percentile_bucket(percentile) if percentile is not None and not exceptions else None,
-            percentile=percentile if not exceptions else None,
+            bucket=_percentile_bucket(percentile) if percentile is not None else None,
+            percentile=percentile,
             reference_count=reference_count,
             exception_codes=exceptions,
         ))
