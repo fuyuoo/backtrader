@@ -70,6 +70,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepare attribution reference snapshots")
     parser.add_argument("--input", default=None, help="All-A daily feature CSV/Parquet input")
     parser.add_argument("--provider", choices=["tushare"], default=None, help="Fetch all-A reference input from a provider")
+    parser.add_argument("--symbol", action="append", default=[], help="Repeatable symbol whitelist for provider fetch")
+    parser.add_argument("--symbol-file", default=None, help="Text file with one symbol per line for provider fetch")
     parser.add_argument("--token-file", default=".secrets/tushare_token.txt")
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
@@ -115,7 +117,12 @@ def _fetch_provider_frame(args: argparse.Namespace, start_date: date, end_date: 
         read_tushare_token(args.token_file),
         rate_limit=tushare_rate_limit_config_from_args(args),
     )
-    frame = provider.fetch_attribution_reference_frame(start_date=start_date, end_date=end_date)
+    symbols = _symbols_from_args(args)
+    frame = provider.fetch_attribution_reference_frame_for_symbols(
+        start_date=start_date,
+        end_date=end_date,
+        symbols=symbols or None,
+    )
     if not args.fetch_industry_memberships:
         return frame
     symbols = sorted(str(symbol) for symbol in frame["symbol"].dropna().unique())
@@ -127,6 +134,27 @@ def _fetch_provider_frame(args: argparse.Namespace, start_date: date, end_date: 
         refresh=args.refresh_industry_memberships,
     )
     return apply_industry_memberships_to_frame(frame, memberships)
+
+
+def _symbols_from_args(args: argparse.Namespace) -> list[str]:
+    symbols = [str(symbol).strip() for symbol in args.symbol if str(symbol).strip()]
+    if args.symbol_file is not None:
+        path = Path(args.symbol_file)
+        if not path.exists():
+            raise FileNotFoundError(f"symbol file does not exist: {path}")
+        symbols.extend(
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        )
+    result = []
+    seen = set()
+    for symbol in symbols:
+        if symbol in seen:
+            continue
+        seen.add(symbol)
+        result.append(symbol)
+    return result
 
 
 if __name__ == "__main__":

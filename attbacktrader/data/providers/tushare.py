@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -248,31 +248,49 @@ class TushareProvider:
         if end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
 
-        daily_frame = self._fetch_date_windowed(
-            self._pro.daily,
-            api_name="daily",
+        return self.fetch_attribution_reference_frame_for_symbols(
             start_date=start_date,
             end_date=end_date,
-            fields=REFERENCE_DAILY_FIELDS,
+            symbols=None,
         )
-        daily_basic_frame = self._fetch_trade_date_windowed(
-            self._pro.daily_basic,
-            api_name="daily_basic",
-            start_date=start_date,
-            end_date=end_date,
-            fields=REFERENCE_DAILY_BASIC_FIELDS,
+
+    def fetch_attribution_reference_frame_for_symbols(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        symbols: Sequence[str] | None,
+    ) -> Any:
+        """Fetch attribution reference rows for all A or a specified symbol list."""
+
+        if end_date < start_date:
+            raise ValueError("end_date must be on or after start_date")
+
+        daily_frame = _concat_frames(
+            self._fetch_reference_daily_frames(
+                start_date=start_date,
+                end_date=end_date,
+                symbols=symbols,
+            )
+        )
+        daily_basic_frame = _concat_frames(
+            self._fetch_reference_daily_basic_frames(
+                start_date=start_date,
+                end_date=end_date,
+                symbols=symbols,
+            )
         )
         stock_basic_frame = self._call_tushare(
             self._pro.stock_basic,
             api_name="stock_basic",
             fields=REFERENCE_STOCK_BASIC_FIELDS,
         )
-        suspend_frame = self._fetch_date_windowed(
-            self._pro.suspend_d,
-            api_name="suspend_d",
-            start_date=start_date,
-            end_date=end_date,
-            fields=SUSPEND_FIELDS,
+        suspend_frame = _concat_frames(
+            self._fetch_reference_suspend_frames(
+                start_date=start_date,
+                end_date=end_date,
+                symbols=symbols,
+            )
         )
         namechange_frame = self._call_tushare(
             self._pro.namechange,
@@ -286,6 +304,93 @@ class TushareProvider:
             suspend_frame=suspend_frame,
             namechange_frame=namechange_frame,
         )
+
+    def _fetch_reference_daily_frames(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        symbols: Sequence[str] | None,
+    ) -> list[Any]:
+        if symbols:
+            return [
+                self._fetch_date_windowed(
+                    self._pro.daily,
+                    api_name="daily",
+                    start_date=start_date,
+                    end_date=end_date,
+                    ts_code=str(symbol),
+                    fields=REFERENCE_DAILY_FIELDS,
+                )
+                for symbol in symbols
+            ]
+        return [
+            self._fetch_date_windowed(
+                self._pro.daily,
+                api_name="daily",
+                start_date=start_date,
+                end_date=end_date,
+                fields=REFERENCE_DAILY_FIELDS,
+            )
+        ]
+
+    def _fetch_reference_daily_basic_frames(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        symbols: Sequence[str] | None,
+    ) -> list[Any]:
+        if symbols:
+            return [
+                self._fetch_date_windowed(
+                    self._pro.daily_basic,
+                    api_name="daily_basic",
+                    start_date=start_date,
+                    end_date=end_date,
+                    ts_code=str(symbol),
+                    fields=REFERENCE_DAILY_BASIC_FIELDS,
+                )
+                for symbol in symbols
+            ]
+        return [
+            self._fetch_trade_date_windowed(
+                self._pro.daily_basic,
+                api_name="daily_basic",
+                start_date=start_date,
+                end_date=end_date,
+                fields=REFERENCE_DAILY_BASIC_FIELDS,
+            )
+        ]
+
+    def _fetch_reference_suspend_frames(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        symbols: Sequence[str] | None,
+    ) -> list[Any]:
+        if symbols:
+            return [
+                self._fetch_date_windowed(
+                    self._pro.suspend_d,
+                    api_name="suspend_d",
+                    start_date=start_date,
+                    end_date=end_date,
+                    ts_code=str(symbol),
+                    fields=SUSPEND_FIELDS,
+                )
+                for symbol in symbols
+            ]
+        return [
+            self._fetch_date_windowed(
+                self._pro.suspend_d,
+                api_name="suspend_d",
+                start_date=start_date,
+                end_date=end_date,
+                fields=SUSPEND_FIELDS,
+            )
+        ]
 
     def fetch_shenwan_industry_classifications(
         self,

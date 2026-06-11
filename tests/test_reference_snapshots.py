@@ -228,6 +228,10 @@ def test_prepare_attribution_reference_cli_fetches_tushare_provider(tmp_path, mo
             self.rate_limit = rate_limit
 
         def fetch_attribution_reference_frame(self, *, start_date, end_date):
+            raise AssertionError("CLI should call symbol-aware provider method")
+
+        def fetch_attribution_reference_frame_for_symbols(self, *, start_date, end_date, symbols):
+            assert symbols is None
             assert start_date == date(2024, 1, 1)
             assert end_date == date(2024, 3, 29)
             return _all_a_feature_frame()
@@ -264,6 +268,10 @@ def test_prepare_attribution_reference_cli_fetches_and_applies_industry_membersh
             self.token = token
 
         def fetch_attribution_reference_frame(self, *, start_date, end_date):
+            raise AssertionError("CLI should call symbol-aware provider method")
+
+        def fetch_attribution_reference_frame_for_symbols(self, *, start_date, end_date, symbols):
+            assert symbols is None
             frame = _all_a_feature_frame()
             return frame.drop(columns=["sw_l1_code"])
 
@@ -311,6 +319,44 @@ def test_prepare_attribution_reference_cli_fetches_and_applies_industry_membersh
     assert calls
     assert "801780.SI" in reference
     assert (tmp_path / "snapshots" / "industries" / "sw" / "SW2021" / "memberships" / "000001_SZ.parquet").exists()
+
+
+def test_prepare_attribution_reference_cli_accepts_symbol_whitelist(tmp_path, monkeypatch) -> None:
+    seen = {}
+
+    class FakeProvider:
+        def __init__(self, token, *, rate_limit=None):
+            pass
+
+        def fetch_attribution_reference_frame_for_symbols(self, *, start_date, end_date, symbols):
+            seen["symbols"] = symbols
+            return _all_a_feature_frame()
+
+    monkeypatch.setattr(prepare_attribution_reference_cli, "read_tushare_token", lambda path: "test-token")
+    monkeypatch.setattr(prepare_attribution_reference_cli, "TushareProvider", FakeProvider)
+
+    prepare_attribution_reference_cli.main(
+        [
+            "--provider",
+            "tushare",
+            "--symbol",
+            "000001.SZ",
+            "--symbol",
+            "000001.SZ",
+            "--symbol",
+            "600000.SH",
+            "--start-date",
+            "2024-01-01",
+            "--end-date",
+            "2024-03-29",
+            "--min-reference-count",
+            "2",
+            "--output-dir",
+            str(tmp_path / "provider-reference"),
+        ]
+    )
+
+    assert seen["symbols"] == ["000001.SZ", "600000.SH"]
 
 
 def test_industry_memberships_apply_by_effective_interval(tmp_path) -> None:

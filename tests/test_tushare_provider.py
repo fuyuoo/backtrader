@@ -431,6 +431,51 @@ def test_tushare_reference_listing_days_uses_stock_list_date(monkeypatch: pytest
     assert frame["listing_trading_days"].iloc[0] < 60
 
 
+def test_tushare_reference_fetch_can_limit_symbols(monkeypatch: pytest.MonkeyPatch) -> None:
+    daily_calls = []
+    basic_calls = []
+    daily_frame = pd.DataFrame(
+        [{"ts_code": "000001.SZ", "trade_date": "20240102", "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2, "vol": 1000, "amount": 2000}]
+    )
+    daily_basic_frame = pd.DataFrame(
+        [{"ts_code": "000001.SZ", "trade_date": "20240102", "turnover_rate": 1.2, "volume_ratio": 1.1, "pe": 10.0, "pe_ttm": 11.0, "pb": 1.3, "total_mv": 100.0, "circ_mv": 90.0}]
+    )
+    stock_basic_frame = pd.DataFrame(
+        [{"ts_code": "000001.SZ", "name": "平安银行", "exchange": "SZSE", "market": "主板", "list_date": "19910403"}]
+    )
+
+    class FakeApi:
+        def daily(self, **kwargs):
+            daily_calls.append(kwargs)
+            return daily_frame
+
+        def daily_basic(self, **kwargs):
+            basic_calls.append(kwargs)
+            return daily_basic_frame
+
+        def stock_basic(self, **kwargs):
+            return stock_basic_frame
+
+        def suspend_d(self, **kwargs):
+            return pd.DataFrame()
+
+        def namechange(self, **kwargs):
+            return pd.DataFrame()
+
+    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: FakeApi()))
+
+    provider = TushareProvider("test-token", rate_limit=TushareRateLimitConfig(requests_per_minute=600))
+    frame = provider.fetch_attribution_reference_frame_for_symbols(
+        start_date=date(2024, 1, 2),
+        end_date=date(2024, 1, 2),
+        symbols=["000001.SZ"],
+    )
+
+    assert daily_calls[0]["ts_code"] == "000001.SZ"
+    assert basic_calls[0]["ts_code"] == "000001.SZ"
+    assert set(frame["symbol"]) == {"000001.SZ"}
+
+
 def test_tushare_provider_fetches_tradability_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {}
     limit_frame = pd.DataFrame(
