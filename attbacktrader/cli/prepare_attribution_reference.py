@@ -123,6 +123,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="Refresh industry membership snapshots even when cached files exist.",
     )
+    parser.add_argument(
+        "--backfill-missing-industry-memberships",
+        action="store_true",
+        help="When a stock has only one open-ended future industry interval, apply it to earlier dates and tag industry_membership_backfilled.",
+    )
     parser.add_argument("--min-reference-count", type=int, default=100)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument(
@@ -199,7 +204,11 @@ def _fetch_provider_frame(args: argparse.Namespace, start_date: date, end_date: 
             source=args.industry_source,
             refresh=args.refresh_industry_memberships,
         )
-    return apply_industry_memberships_to_frame(frame, memberships)
+    return apply_industry_memberships_to_frame(
+        frame,
+        memberships,
+        backfill_missing=args.backfill_missing_industry_memberships,
+    )
 
 
 def _run_defaults_from_args(args: argparse.Namespace) -> dict[str, object]:

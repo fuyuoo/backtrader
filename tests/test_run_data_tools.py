@@ -336,10 +336,12 @@ def test_attribution_wide_samples_derives_path_and_signal_strength_from_daily_ca
     assert fields["entry.weekly.symbol_ma_trend_bucket"]["bucket"] is not None
     assert fields["entry.weekly.symbol_close_vs_week_ma20_bucket"]["bucket"] is not None
     assert fields["industry.volatility.atr_20d_bucket"]["bucket"] is not None
+    assert "industry_membership_backfilled" in fields["industry.volatility.atr_20d_bucket"]["exception_codes"]
     assert fields["industry.volatility.return_vol_20d_bucket"]["bucket"] is not None
     assert fields["industry.price_position.near_high_60d_bucket"]["bucket"] is not None
     assert fields["industry.weekly.kdj_j_bucket"]["bucket"] is not None
     assert fields["industry.weekly.kdj_state"]["bucket"] is not None
+    assert "industry_membership_backfilled" in fields["industry.weekly.kdj_state"]["exception_codes"]
     assert fields["industry.weekly.ma_trend_bucket"]["bucket"] is not None
     assert fields["industry.weekly.relative_strength_bucket"]["bucket"] is not None
     assert fields["trade.exit.reason"]["bucket"] == "FIXED_5_PERCENT_STOP"
@@ -964,6 +966,7 @@ def _reference_snapshot(root: Path) -> Path:
                     "asof_date": "2024-01-04",
                     "staleness_trading_days": 0,
                     "reference_count": 4000,
+                    "exception_codes": ["industry_membership_backfilled"],
                 },
                 {
                     "symbol": "000001.SZ",

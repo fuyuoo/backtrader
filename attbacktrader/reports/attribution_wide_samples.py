@@ -1364,7 +1364,13 @@ def _add_industry_index_fields(
     signal_date: str,
     industry_context: Mapping[str, Any],
 ) -> None:
-    industry_code = _field_raw_or_bucket(field_values.get("industry.sw_l1.code"))
+    industry_payload = _as_mapping(field_values.get("industry.sw_l1.code"))
+    industry_code = _field_raw_or_bucket(industry_payload)
+    inherited_exceptions = [
+        code
+        for code in _exception_codes(industry_payload.get("exception_codes"))
+        if code == "industry_membership_backfilled"
+    ]
     if not industry_code:
         _set_missing_fields(
             field_values,
@@ -1408,28 +1414,28 @@ def _add_industry_index_fields(
         bucket=_volatility_pct_bucket(atr_pct),
         asof_date=daily_asof,
         reference_count=None,
-        exception_codes=[] if atr_pct is not None else daily_missing,
+        exception_codes=inherited_exceptions if atr_pct is not None else inherited_exceptions + daily_missing,
     )
     field_values[INDUSTRY_RETURN_VOL_20D_FIELD] = _derived_payload(
         raw=return_vol_20d,
         bucket=_volatility_pct_bucket(return_vol_20d),
         asof_date=daily_asof,
         reference_count=None,
-        exception_codes=[] if return_vol_20d is not None else daily_missing,
+        exception_codes=inherited_exceptions if return_vol_20d is not None else inherited_exceptions + daily_missing,
     )
     field_values[INDUSTRY_RETURN_VOL_60D_FIELD] = _derived_payload(
         raw=return_vol_60d,
         bucket=_volatility_pct_bucket(return_vol_60d),
         asof_date=daily_asof,
         reference_count=None,
-        exception_codes=[] if return_vol_60d is not None else daily_missing,
+        exception_codes=inherited_exceptions if return_vol_60d is not None else inherited_exceptions + daily_missing,
     )
     field_values[INDUSTRY_NEAR_HIGH_60D_FIELD] = _derived_payload(
         raw=near_high_60d,
         bucket=_near_high_bucket(near_high_60d),
         asof_date=daily_asof,
         reference_count=None,
-        exception_codes=[] if near_high_60d is not None else daily_missing,
+        exception_codes=inherited_exceptions if near_high_60d is not None else inherited_exceptions + daily_missing,
     )
 
     weekly_asof = _as_str(_as_mapping(weekly_row).get("trade_date")) or signal_date
@@ -1444,28 +1450,28 @@ def _add_industry_index_fields(
         bucket=_kdj_j_bucket(weekly_j),
         asof_date=weekly_asof,
         reference_count=None,
-        exception_codes=[] if weekly_j is not None else weekly_missing,
+        exception_codes=inherited_exceptions if weekly_j is not None else inherited_exceptions + weekly_missing,
     )
     field_values[INDUSTRY_WEEKLY_KDJ_STATE_FIELD] = _derived_payload(
         raw=weekly_state,
         bucket=weekly_state,
         asof_date=weekly_asof,
         reference_count=None,
-        exception_codes=[] if weekly_state else weekly_missing,
+        exception_codes=inherited_exceptions if weekly_state else inherited_exceptions + weekly_missing,
     )
     field_values[INDUSTRY_WEEKLY_MA_TREND_FIELD] = _derived_payload(
         raw=weekly_trend,
         bucket=weekly_trend,
         asof_date=weekly_asof,
         reference_count=None,
-        exception_codes=[] if weekly_trend else weekly_missing,
+        exception_codes=inherited_exceptions if weekly_trend else inherited_exceptions + weekly_missing,
     )
     field_values[INDUSTRY_WEEKLY_RELATIVE_STRENGTH_FIELD] = _derived_payload(
         raw=relative_strength,
         bucket=_percentile_bucket(relative_strength),
         asof_date=weekly_asof,
         reference_count=None,
-        exception_codes=[] if relative_strength is not None else weekly_missing,
+        exception_codes=inherited_exceptions if relative_strength is not None else inherited_exceptions + weekly_missing,
     )
 
 

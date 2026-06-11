@@ -696,6 +696,71 @@ def test_industry_memberships_apply_by_effective_interval(tmp_path) -> None:
     assert list(enriched["sw_l1_code"]) == ["801780.SI", "801180.SI"]
 
 
+def test_industry_membership_backfill_is_explicit_and_audited() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "symbol": "000001.SZ",
+                "trade_date": "2024-01-15",
+                "open": 10,
+                "close": 10,
+                "high": 11,
+                "low": 9,
+                "amount": 100000,
+                "turnover_rate": 1.0,
+                "volume_ratio": 1.0,
+                "total_mv": 100,
+                "circ_mv": 80,
+                "pe": 10,
+                "pe_ttm": 11,
+                "pb": 1.2,
+                "is_st": False,
+                "is_suspended": False,
+                "exchange": "SZSE",
+                "listing_trading_days": 200,
+                "is_tradable": True,
+            }
+        ]
+    )
+    memberships = {
+        "000001.SZ": (
+            StockIndustryMembership(
+                symbol="000001.SZ",
+                stock_name="平安银行",
+                level1_code="801780.SI",
+                level1_name="银行",
+                level2_code="801781.SI",
+                level2_name="二级",
+                level3_code="801782.SI",
+                level3_name="三级",
+                in_date=date(2024, 3, 1),
+                out_date=None,
+                is_new=True,
+                source="SW2021",
+            ),
+        )
+    }
+
+    without_backfill = apply_industry_memberships_to_frame(frame, memberships)
+    with_backfill = apply_industry_memberships_to_frame(frame, memberships, backfill_missing=True)
+    snapshot = build_attribution_reference_snapshot_from_frame(
+        with_backfill,
+        start_date=date(2024, 1, 15),
+        end_date=date(2024, 1, 15),
+        min_reference_count=1,
+    )
+    industry_row = next(row for row in snapshot["rows"] if row["field_key"] == "industry.sw_l1.code")
+
+    assert without_backfill["sw_l1_code"].iloc[0] is None
+    assert bool(without_backfill["industry_membership_missing"].iloc[0]) is True
+    assert with_backfill["sw_l1_code"].iloc[0] == "801780.SI"
+    assert bool(with_backfill["industry_membership_missing"].iloc[0]) is False
+    assert bool(with_backfill["industry_membership_backfilled"].iloc[0]) is True
+    assert industry_row["bucket"] == "801780.SI"
+    assert "industry_membership_backfilled" in industry_row["exception_codes"]
+    assert snapshot["metadata"]["industry_membership_backfilled_count"] == 1
+
+
 def _all_a_feature_frame() -> pd.DataFrame:
     rows = []
     symbols = [

@@ -108,6 +108,11 @@ def build_attribution_reference_snapshot_from_frame(
     data = data[(data["trade_date"] >= start_date) & (data["trade_date"] <= end_date)].copy()
     data = data.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
     data = _derive_symbol_features(data)
+    industry_membership_backfilled_count = (
+        int(data["industry_membership_backfilled"].fillna(False).astype(bool).sum())
+        if "industry_membership_backfilled" in data.columns
+        else 0
+    )
 
     rows: list[dict[str, Any]] = []
     exceptions: list[dict[str, Any]] = []
@@ -178,6 +183,12 @@ def build_attribution_reference_snapshot_from_frame(
         "emit_symbol_count": len(emit_symbol_set) if emit_symbol_set else None,
         "emit_date_count": len(emit_date_set) if emit_date_set else None,
         "emit_pair_count": sum(len(symbols) for symbols in emit_pair_dates.values()) if emit_pair_dates else None,
+        "industry_membership_backfill_policy": (
+            "single open-ended future interval is applied to earlier dates"
+            if industry_membership_backfilled_count
+            else None
+        ),
+        "industry_membership_backfilled_count": industry_membership_backfilled_count,
         "exception_count": len(exceptions),
         "exceptions": exceptions[:1000],
     }
@@ -245,6 +256,8 @@ def load_or_fetch_all_industry_memberships(
 def apply_industry_memberships_to_frame(
     frame: pd.DataFrame,
     memberships_by_symbol: Mapping[str, Sequence[StockIndustryMembership]],
+    *,
+    backfill_missing: bool = False,
 ) -> pd.DataFrame:
     """Attach historical SW L1 industry by effective membership interval."""
 
@@ -255,19 +268,28 @@ def apply_industry_memberships_to_frame(
     l1_codes: list[str | None] = []
     l1_names: list[str | None] = []
     missing_flags: list[bool] = []
+    backfilled_flags: list[bool] = []
     for row in data.itertuples(index=False):
-        membership = _active_membership_for(str(row.symbol), row.trade_date, memberships_by_symbol)
+        membership, backfilled = _industry_membership_for(
+            str(row.symbol),
+            row.trade_date,
+            memberships_by_symbol,
+            backfill_missing=backfill_missing,
+        )
         if membership is None:
             l1_codes.append(None)
             l1_names.append(None)
             missing_flags.append(True)
+            backfilled_flags.append(False)
         else:
             l1_codes.append(membership.level1_code)
             l1_names.append(membership.level1_name)
             missing_flags.append(False)
+            backfilled_flags.append(backfilled)
     data["sw_l1_code"] = l1_codes
     data["sw_l1_name"] = l1_names
     data["industry_membership_missing"] = missing_flags
+    data["industry_membership_backfilled"] = backfilled_flags
     return data
 
 
@@ -301,11 +323,46 @@ def _active_membership_for(
     trade_date: date,
     memberships_by_symbol: Mapping[str, Sequence[StockIndustryMembership]],
 ) -> StockIndustryMembership | None:
+    membership, _backfilled = _industry_membership_for(
+        symbol,
+        trade_date,
+        memberships_by_symbol,
+        backfill_missing=False,
+    )
+    return membership
+
+
+def _industry_membership_for(
+    symbol: str,
+    trade_date: date,
+    memberships_by_symbol: Mapping[str, Sequence[StockIndustryMembership]],
+    *,
+    backfill_missing: bool,
+) -> tuple[StockIndustryMembership | None, bool]:
     memberships = tuple(memberships_by_symbol.get(symbol, ()))
     active = [membership for membership in memberships if membership.active_on(trade_date)]
     if active:
-        return sorted(active, key=lambda item: (item.in_date, item.level1_code))[-1]
-    return None
+        return sorted(active, key=lambda item: (item.in_date, item.level1_code))[-1], False
+    if backfill_missing:
+        backfill = _backfill_membership_for_prior_date(trade_date, memberships)
+        if backfill is not None:
+            return backfill, True
+    return None, False
+
+
+def _backfill_membership_for_prior_date(
+    trade_date: date,
+    memberships: Sequence[StockIndustryMembership],
+) -> StockIndustryMembership | None:
+    ordered = tuple(sorted(memberships, key=lambda item: (item.in_date, item.level1_code, item.level3_code)))
+    if len(ordered) != 1:
+        return None
+    candidate = ordered[0]
+    if candidate.out_date is not None:
+        return None
+    if trade_date >= candidate.in_date:
+        return None
+    return candidate
 
 
 def _derive_symbol_features(data: pd.DataFrame) -> pd.DataFrame:
@@ -448,6 +505,7 @@ def _field_rows_for_record(
             exception_codes=exceptions,
         ))
 
+    industry_membership_exceptions = _industry_membership_exception_codes(record)
     stats = _as_mapping(industry_stats.get(symbol))
     industry_reference_fields = (
         (
@@ -473,7 +531,7 @@ def _field_rows_for_record(
         ),
     )
     for field_key, value, bucket, percentile, reference_count in industry_reference_fields:
-        exceptions = list(excluded_codes)
+        exceptions = list(excluded_codes) + list(industry_membership_exceptions)
         if _is_missing_text(record.get("sw_l1_code")):
             exceptions.append("industry_missing")
         if reference_count is not None and reference_count < min_reference_count:
@@ -511,6 +569,8 @@ def _field_rows_for_record(
         exceptions = list(excluded_codes)
         if field_key == "industry.sw_l1.code" and _is_missing_text(bucket):
             exceptions.append("industry_missing")
+        if field_key == "industry.sw_l1.code":
+            exceptions.extend(industry_membership_exceptions)
         if field_key.endswith("pe_bucket") and _optional_float(value) is not None and (_optional_float(value) or 0.0) < 0:
             exceptions.append("negative_pe")
         if field_key == "entry.liquidity.amount_vs_20d_bucket" and bucket is None:
@@ -526,6 +586,12 @@ def _field_rows_for_record(
             exception_codes=exceptions,
         ))
     return rows
+
+
+def _industry_membership_exception_codes(record: Mapping[str, Any]) -> list[str]:
+    if _truthy_flag(record.get("industry_membership_backfilled")):
+        return ["industry_membership_backfilled"]
+    return []
 
 
 def _row(
@@ -791,6 +857,14 @@ def _is_missing_text(value: Any) -> bool:
     if value is None or pd.isna(value):
         return True
     return not str(value).strip()
+
+
+def _truthy_flag(value: Any) -> bool:
+    if value is None or pd.isna(value):
+        return False
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
 def _jsonable(value: Any) -> Any:
