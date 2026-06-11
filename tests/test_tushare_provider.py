@@ -531,6 +531,10 @@ def test_tushare_reference_fetch_large_symbol_list_uses_market_window(monkeypatc
     assert "ts_code" not in calls["daily"][0]
     assert "ts_code" not in calls["daily_basic"][0]
     assert "ts_code" not in calls["suspend_d"][0]
+    assert calls["daily"][0]["trade_date"] == "20240102"
+    assert calls["daily_basic"][0]["trade_date"] == "20240102"
+    assert "start_date" not in calls["daily"][0]
+    assert "end_date" not in calls["daily"][0]
     assert set(frame["symbol"]) == {"000001.SZ", "600000.SH"}
 
 

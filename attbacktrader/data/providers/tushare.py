@@ -326,7 +326,7 @@ class TushareProvider:
                 for symbol in symbols
             ]
         frames = [
-            self._fetch_date_windowed(
+            self._fetch_trade_date_windowed(
                 self._pro.daily,
                 api_name="daily",
                 start_date=start_date,
@@ -520,15 +520,10 @@ class TushareProvider:
             self._call_tushare(
                 call,
                 api_name=api_name,
-                start_date=_format_tushare_date(window_start),
-                end_date=_format_tushare_date(window_end),
+                trade_date=_format_tushare_date(trade_date),
                 **kwargs,
             )
-            for window_start, window_end in _date_windows(
-                start_date,
-                end_date,
-                window_days=self._rate_limit.date_window_days,
-            )
+            for trade_date in _business_dates(start_date, end_date)
         ]
         return _concat_frames(frames)
 
@@ -803,6 +798,13 @@ def _month_windows(start_date: date, end_date: date) -> Iterable[tuple[date, dat
         window_end = min(end_date, next_month - timedelta(days=1))
         yield current, window_end
         current = window_end + timedelta(days=1)
+
+
+def _business_dates(start_date: date, end_date: date) -> Iterable[date]:
+    import pandas as pd
+
+    for value in pd.bdate_range(start=start_date, end=end_date):
+        yield value.date()
 
 
 def _concat_frames(frames: Iterable[Any]) -> Any:
