@@ -5,6 +5,7 @@ import pytest
 
 from attbacktrader.cli import environment_fit as environment_fit_cli
 from attbacktrader.reports import (
+    build_environment_fit_report_from_wide_samples,
     build_environment_fit_report_from_artifacts,
     build_environment_fit_report_from_run_dir,
     render_environment_fit_markdown_zh,
@@ -88,6 +89,62 @@ def test_environment_fit_run_dir_writer_and_cli(tmp_path: Path, capsys) -> None:
     assert stdout["trade_count"] == 3
     assert (tmp_path / "cli-out" / "environment_fit.json").exists()
     assert (tmp_path / "cli-out" / "environment_fit.zh.md").exists()
+
+
+def test_environment_fit_wide_samples_does_not_fallback_raw_for_bucket_fields() -> None:
+    wide_samples = {
+        "schema": "attbacktrader.attribution_wide_samples.v1",
+        "run_id": "wide-bucket-test",
+        "source_dir": "reports/wide-bucket-test",
+        "reference_path": "reference",
+        "environment_fit_default_fields": ["entry.volatility.atr_20d_bucket"],
+        "field_index": {
+            "schema": "attbacktrader.attribution_field_index.v1",
+            "fields": [
+                {
+                    "field_key": "entry.volatility.atr_20d_bucket",
+                    "value_type": "bucket",
+                    "default_in_environment_fit": True,
+                }
+            ],
+            "environment_fit_default_fields": ["entry.volatility.atr_20d_bucket"],
+        },
+        "samples": [
+            {
+                "trade_index": 1,
+                "symbol": "000001.SZ",
+                "entry_date": "2024-01-02",
+                "exit_date": "2024-01-05",
+                "outcome": "loss",
+                "return_pct": -0.01,
+                "field_values": {
+                    "entry.volatility.atr_20d_bucket": {
+                        "raw": 0.032,
+                        "bucket": None,
+                    }
+                },
+            },
+            {
+                "trade_index": 2,
+                "symbol": "000002.SZ",
+                "entry_date": "2024-01-02",
+                "exit_date": "2024-01-05",
+                "outcome": "win",
+                "return_pct": 0.02,
+                "field_values": {
+                    "entry.volatility.atr_20d_bucket": {
+                        "raw": 0.025,
+                        "bucket": "p20_p40",
+                    }
+                },
+            },
+        ],
+    }
+
+    report = build_environment_fit_report_from_wide_samples(wide_samples, min_sample_count=1)
+
+    assert [summary["value"] for summary in report["single_factor_summaries"]] == ["p20_p40"]
+    assert report["single_factor_summaries"][0]["sample_count"] == 1
 
 
 def _trade_review() -> dict:

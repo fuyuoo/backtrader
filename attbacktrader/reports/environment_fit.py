@@ -159,7 +159,7 @@ def build_environment_fit_report_from_wide_samples(
         if len(_as_sequence(pair)) == 2
     )
 
-    trades = _trade_rows_from_wide_samples(wide, environment_fields=fields)
+    trades = _trade_rows_from_wide_samples(wide, environment_fields=fields, field_index=index)
     single_factor_summaries = _single_factor_summaries(trades, fields)
     combination_summaries = _pair_combination_summaries(trades, pairs)
     trade_contributions = _trade_contributions(trades)
@@ -447,7 +447,9 @@ def _trade_rows_from_wide_samples(
     wide_samples: Mapping[str, Any],
     *,
     environment_fields: Sequence[str],
+    field_index: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    bucket_fields = _bucket_field_keys(field_index or _as_mapping(wide_samples.get("field_index")))
     rows = []
     for sample in _as_sequence(wide_samples.get("samples")):
         sample_map = _as_mapping(sample)
@@ -457,7 +459,10 @@ def _trade_rows_from_wide_samples(
             payload = _as_mapping(field_values.get(field))
             if not payload:
                 continue
-            value = payload.get("bucket") if payload.get("bucket") is not None else payload.get("raw")
+            if field in bucket_fields:
+                value = payload.get("bucket")
+            else:
+                value = payload.get("bucket") if payload.get("bucket") is not None else payload.get("raw")
             if value is not None:
                 environment[field] = value
         rows.append(
@@ -478,6 +483,18 @@ def _trade_rows_from_wide_samples(
             )
         )
     return rows
+
+
+def _bucket_field_keys(field_index: Mapping[str, Any]) -> set[str]:
+    result = set()
+    for field in _as_sequence(field_index.get("fields")):
+        field_map = _as_mapping(field)
+        key = field_map.get("field_key")
+        if key is None:
+            continue
+        if field_map.get("value_type") == "bucket" or str(key).endswith("_bucket"):
+            result.add(str(key))
+    return result
 
 
 def _profit_contribution(lifecycle: Mapping[str, Any]) -> dict[str, Any]:
