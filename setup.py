@@ -159,6 +159,7 @@ setuptools.setup(
         'att-attribution-wide-samples=attbacktrader.cli.attribution_wide_samples:main',
         'att-prepare-attribution-reference=attbacktrader.cli.prepare_attribution_reference:main',
         'att-environment-fit=attbacktrader.cli.environment_fit:main',
+        'att-single-factor-attribution=attbacktrader.cli.single_factor_attribution:main',
         'att-strategy-environment-profile=attbacktrader.cli.strategy_environment_profile:main',
         'att-review-brief=attbacktrader.cli.review_brief:main',
         'att-review-expand-samples=attbacktrader.cli.review_expand_samples:main',

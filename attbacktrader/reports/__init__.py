@@ -95,6 +95,12 @@ from .environment_fit import (
     render_environment_fit_markdown_zh,
     write_environment_fit_report,
 )
+from .single_factor_attribution import (
+    SINGLE_FACTOR_ATTRIBUTION_SCHEMA,
+    build_single_factor_attribution_report,
+    render_single_factor_attribution_markdown_zh,
+    write_single_factor_attribution_report,
+)
 from .attribution_wide_samples import (
     ATTRIBUTION_FIELD_INDEX_SCHEMA,
     ATTRIBUTION_WIDE_SAMPLES_SCHEMA,
@@ -337,6 +343,7 @@ __all__ = [
     "EvidenceValidationReport",
     "ENVIRONMENT_FIT_SCHEMA",
     "ENVIRONMENT_FIT_COMPARISON_SCHEMA",
+    "SINGLE_FACTOR_ATTRIBUTION_SCHEMA",
     "MARKET_TYPE_SUMMARY_SCHEMA",
     "STRATEGY_VARIANT_VALIDATION_SCHEMA",
     "EntryAttributionContrast",
@@ -438,6 +445,7 @@ __all__ = [
     "build_attribution_field_index",
     "build_attribution_summary",
     "build_attribution_wide_samples",
+    "build_single_factor_attribution_report",
     "build_ai_review_brief",
     "build_ai_review_findings",
     "build_ai_review_golden_check",
@@ -492,6 +500,7 @@ __all__ = [
     "render_backtest_report_markdown_zh",
     "render_attribution_matrix_markdown_zh",
     "render_attribution_field_index_markdown_zh",
+    "render_single_factor_attribution_markdown_zh",
     "render_attribution_summary_markdown_zh",
     "render_environment_fit_markdown_zh",
     "render_environment_fit_comparison_markdown_zh",
@@ -555,6 +564,7 @@ __all__ = [
     "write_ai_review_result",
     "write_attribution_matrix",
     "write_attribution_wide_samples",
+    "write_single_factor_attribution_report",
     "write_attribution_summary",
     "write_environment_fit_report",
     "write_environment_fit_comparison",
