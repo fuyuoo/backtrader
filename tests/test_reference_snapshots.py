@@ -4,8 +4,10 @@ import pandas as pd
 
 from attbacktrader.data import IndexBar, ShenwanIndustryClassification, StockIndustryMembership
 from attbacktrader.data.snapshots import (
+    apply_industry_memberships_to_frame,
     attribution_reference_snapshot_dir,
     build_attribution_reference_snapshot_from_frame,
+    load_or_fetch_industry_memberships_for_symbols,
     discover_index_bars_snapshot_paths,
     discover_industry_index_bars_snapshot_paths,
     index_bars_snapshot_path,
@@ -252,6 +254,108 @@ def test_prepare_attribution_reference_cli_fetches_tushare_provider(tmp_path, mo
     assert exit_code == 0
     assert "reference_values_parquet_path" in stdout
     assert (tmp_path / "provider-reference" / "reference.json").exists()
+
+
+def test_prepare_attribution_reference_cli_fetches_and_applies_industry_memberships(tmp_path, monkeypatch) -> None:
+    calls = []
+
+    class FakeProvider:
+        def __init__(self, token, *, rate_limit=None):
+            self.token = token
+
+        def fetch_attribution_reference_frame(self, *, start_date, end_date):
+            frame = _all_a_feature_frame()
+            return frame.drop(columns=["sw_l1_code"])
+
+        def fetch_stock_industry_memberships(self, *, symbol, source="SW2021"):
+            calls.append((symbol, source))
+            return (
+                StockIndustryMembership(
+                    symbol=symbol,
+                    stock_name=symbol,
+                    level1_code="801780.SI" if symbol == "000001.SZ" else "801180.SI",
+                    level1_name="银行" if symbol == "000001.SZ" else "房地产",
+                    level2_code="801781.SI",
+                    level2_name="二级",
+                    level3_code="801782.SI",
+                    level3_name="三级",
+                    in_date=date(1990, 1, 1),
+                    out_date=None,
+                    is_new=True,
+                    source=source,
+                ),
+            )
+
+    monkeypatch.setattr(prepare_attribution_reference_cli, "read_tushare_token", lambda path: "test-token")
+    monkeypatch.setattr(prepare_attribution_reference_cli, "TushareProvider", FakeProvider)
+
+    prepare_attribution_reference_cli.main(
+        [
+            "--provider",
+            "tushare",
+            "--fetch-industry-memberships",
+            "--start-date",
+            "2024-01-01",
+            "--end-date",
+            "2024-03-29",
+            "--min-reference-count",
+            "2",
+            "--snapshot-root",
+            str(tmp_path / "snapshots"),
+            "--output-dir",
+            str(tmp_path / "provider-reference"),
+        ]
+    )
+
+    reference = (tmp_path / "provider-reference" / "reference.json").read_text(encoding="utf-8")
+    assert calls
+    assert "801780.SI" in reference
+    assert (tmp_path / "snapshots" / "industries" / "sw" / "SW2021" / "memberships" / "000001_SZ.parquet").exists()
+
+
+def test_industry_memberships_apply_by_effective_interval(tmp_path) -> None:
+    frame = pd.DataFrame(
+        [
+            {"symbol": "000001.SZ", "trade_date": "2024-01-15", "close": 10, "high": 11, "low": 9},
+            {"symbol": "000001.SZ", "trade_date": "2024-02-15", "close": 10, "high": 11, "low": 9},
+        ]
+    )
+    memberships = {
+        "000001.SZ": (
+            StockIndustryMembership(
+                symbol="000001.SZ",
+                stock_name="平安银行",
+                level1_code="801780.SI",
+                level1_name="银行",
+                level2_code="801781.SI",
+                level2_name="二级",
+                level3_code="801782.SI",
+                level3_name="三级",
+                in_date=date(2024, 1, 1),
+                out_date=date(2024, 1, 31),
+                is_new=True,
+                source="SW2021",
+            ),
+            StockIndustryMembership(
+                symbol="000001.SZ",
+                stock_name="平安银行",
+                level1_code="801180.SI",
+                level1_name="房地产",
+                level2_code="801181.SI",
+                level2_name="二级",
+                level3_code="801182.SI",
+                level3_name="三级",
+                in_date=date(2024, 2, 1),
+                out_date=None,
+                is_new=True,
+                source="SW2021",
+            ),
+        )
+    }
+
+    enriched = apply_industry_memberships_to_frame(frame, memberships)
+
+    assert list(enriched["sw_l1_code"]) == ["801780.SI", "801180.SI"]
 
 
 def _all_a_feature_frame() -> pd.DataFrame:

@@ -13,8 +13,10 @@ from attbacktrader.cli.tushare_options import add_tushare_rate_limit_args, tusha
 from attbacktrader.data.providers import TushareProvider, read_tushare_token
 from attbacktrader.data.snapshots import (
     DEFAULT_REFERENCE_UNIVERSE,
+    apply_industry_memberships_to_frame,
     attribution_reference_snapshot_dir,
     build_attribution_reference_snapshot_from_frame,
+    load_or_fetch_industry_memberships_for_symbols,
     write_attribution_reference_snapshot,
 )
 
@@ -73,6 +75,17 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--snapshot-root", default="data/snapshots")
     parser.add_argument("--reference-universe", default=DEFAULT_REFERENCE_UNIVERSE)
+    parser.add_argument("--industry-source", default="SW2021")
+    parser.add_argument(
+        "--fetch-industry-memberships",
+        action="store_true",
+        help="With --provider tushare, fetch/cache per-symbol SW industry memberships and merge by effective interval.",
+    )
+    parser.add_argument(
+        "--refresh-industry-memberships",
+        action="store_true",
+        help="Refresh industry membership snapshots even when cached files exist.",
+    )
     parser.add_argument("--min-reference-count", type=int, default=100)
     parser.add_argument("--output-dir", default=None)
     add_tushare_rate_limit_args(parser)
@@ -102,7 +115,18 @@ def _fetch_provider_frame(args: argparse.Namespace, start_date: date, end_date: 
         read_tushare_token(args.token_file),
         rate_limit=tushare_rate_limit_config_from_args(args),
     )
-    return provider.fetch_attribution_reference_frame(start_date=start_date, end_date=end_date)
+    frame = provider.fetch_attribution_reference_frame(start_date=start_date, end_date=end_date)
+    if not args.fetch_industry_memberships:
+        return frame
+    symbols = sorted(str(symbol) for symbol in frame["symbol"].dropna().unique())
+    memberships = load_or_fetch_industry_memberships_for_symbols(
+        symbols,
+        snapshot_root=args.snapshot_root,
+        provider=provider,
+        source=args.industry_source,
+        refresh=args.refresh_industry_memberships,
+    )
+    return apply_industry_memberships_to_frame(frame, memberships)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,13 @@ from typing import Any, Mapping, Sequence
 
 import pandas as pd
 
+from attbacktrader.data import StockIndustryMembership
+from attbacktrader.data.snapshots.industry_store import (
+    read_stock_industry_memberships_parquet,
+    stock_industry_membership_snapshot_path,
+    write_stock_industry_memberships_parquet,
+)
+
 
 ATTRIBUTION_REFERENCE_FIELDS_VERSION = "attribution_reference_fields.v1"
 DEFAULT_REFERENCE_UNIVERSE = "full_a_main_chinext_star"
@@ -141,6 +148,61 @@ def build_attribution_reference_snapshot_from_frame(
     }
 
 
+def load_or_fetch_industry_memberships_for_symbols(
+    symbols: Sequence[str],
+    *,
+    snapshot_root: str | Path,
+    provider: Any | None,
+    source: str = "SW2021",
+    refresh: bool = False,
+) -> dict[str, tuple[StockIndustryMembership, ...]]:
+    """Load cached stock industry memberships or fetch them from provider."""
+
+    result: dict[str, tuple[StockIndustryMembership, ...]] = {}
+    for symbol in sorted(set(str(item) for item in symbols if item)):
+        path = stock_industry_membership_snapshot_path(snapshot_root, symbol=symbol, source=source)
+        if path.exists() and not refresh:
+            result[symbol] = read_stock_industry_memberships_parquet(path)
+            continue
+        if provider is None:
+            result[symbol] = ()
+            continue
+        memberships = tuple(provider.fetch_stock_industry_memberships(symbol=symbol, source=source))
+        if memberships:
+            write_stock_industry_memberships_parquet(memberships, path)
+        result[symbol] = memberships
+    return result
+
+
+def apply_industry_memberships_to_frame(
+    frame: pd.DataFrame,
+    memberships_by_symbol: Mapping[str, Sequence[StockIndustryMembership]],
+) -> pd.DataFrame:
+    """Attach historical SW L1 industry by effective membership interval."""
+
+    if frame.empty:
+        return frame.copy()
+    data = frame.copy()
+    data["trade_date"] = pd.to_datetime(data["trade_date"]).dt.date
+    l1_codes: list[str | None] = []
+    l1_names: list[str | None] = []
+    missing_flags: list[bool] = []
+    for row in data.itertuples(index=False):
+        membership = _active_membership_for(str(row.symbol), row.trade_date, memberships_by_symbol)
+        if membership is None:
+            l1_codes.append(None)
+            l1_names.append(None)
+            missing_flags.append(True)
+        else:
+            l1_codes.append(membership.level1_code)
+            l1_names.append(membership.level1_name)
+            missing_flags.append(False)
+    data["sw_l1_code"] = l1_codes
+    data["sw_l1_name"] = l1_names
+    data["industry_membership_missing"] = missing_flags
+    return data
+
+
 def write_attribution_reference_snapshot(snapshot: Mapping[str, Any], output_dir: str | Path) -> tuple[Path, Path, Path]:
     target_dir = Path(output_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -164,6 +226,18 @@ def write_attribution_reference_snapshot(snapshot: Mapping[str, Any], output_dir
             frame["exception_codes"] = frame["exception_codes"].map(lambda value: ";".join(str(item) for item in _as_sequence(value)))
     frame.to_parquet(values_path, index=False)
     return metadata_path, reference_json_path, values_path
+
+
+def _active_membership_for(
+    symbol: str,
+    trade_date: date,
+    memberships_by_symbol: Mapping[str, Sequence[StockIndustryMembership]],
+) -> StockIndustryMembership | None:
+    memberships = tuple(memberships_by_symbol.get(symbol, ()))
+    active = [membership for membership in memberships if membership.active_on(trade_date)]
+    if active:
+        return sorted(active, key=lambda item: (item.in_date, item.level1_code))[-1]
+    return None
 
 
 def _derive_symbol_features(data: pd.DataFrame) -> pd.DataFrame:

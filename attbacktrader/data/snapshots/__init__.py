@@ -37,8 +37,10 @@ from .tradability_store import (
 from .attribution_reference import (
     ATTRIBUTION_REFERENCE_FIELDS_VERSION,
     DEFAULT_REFERENCE_UNIVERSE,
+    apply_industry_memberships_to_frame,
     build_attribution_reference_snapshot_from_frame,
     attribution_reference_snapshot_dir,
+    load_or_fetch_industry_memberships_for_symbols,
     write_attribution_reference_snapshot,
 )
 
@@ -49,7 +51,9 @@ __all__ = [
     "ATTRIBUTION_REFERENCE_FIELDS_VERSION",
     "DEFAULT_REFERENCE_UNIVERSE",
     "attribution_reference_snapshot_dir",
+    "apply_industry_memberships_to_frame",
     "build_attribution_reference_snapshot_from_frame",
+    "load_or_fetch_industry_memberships_for_symbols",
     "daily_bars_snapshot_path",
     "discover_index_bars_snapshot_paths",
     "discover_industry_index_bars_snapshot_paths",
