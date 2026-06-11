@@ -267,6 +267,29 @@ def test_attribution_wide_samples_builds_field_index_and_enriched_environment_fi
     )
 
 
+def test_attribution_wide_samples_treats_stale_reference_rows_as_missing(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    reference_path = _reference_snapshot(tmp_path)
+    reference = json.loads(reference_path.read_text(encoding="utf-8"))
+    for row in reference["rows"]:
+        row["trade_date"] = "2023-12-20"
+        row["asof_date"] = "2023-12-20"
+    reference_path.write_text(json.dumps(reference, ensure_ascii=False), encoding="utf-8")
+
+    wide_samples = build_attribution_wide_samples(
+        run_dir,
+        reference_snapshot=reference_path,
+        max_staleness_trading_days=5,
+    )
+
+    sample = wide_samples["samples"][0]
+    near_high = sample["field_values"]["entry.price_position.near_high_20d_bucket"]
+    assert near_high["raw"] is None
+    assert near_high["bucket"] is None
+    assert near_high["exception_codes"] == ["reference_record_missing"]
+    assert "reference_record_missing" in sample["attribution_exception_codes"]
+
+
 def test_run_data_clis_write_outputs(tmp_path: Path, capsys) -> None:
     run_dir = _run_dir(tmp_path)
     output_dir = tmp_path / "cli-out"

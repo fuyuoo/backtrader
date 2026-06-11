@@ -540,13 +540,24 @@ def _reference_row_for(
     exact = [row for row in rows if _as_str(row.get("trade_date")) == entry_date]
     if exact:
         return exact[-1]
-    valid = [
-        row for row in rows
-        if (_optional_int(row.get("staleness_trading_days")) is not None
-            and (_optional_int(row.get("staleness_trading_days")) or 0) <= max_staleness_trading_days
-            and (_as_str(row.get("trade_date")) <= entry_date or not _as_str(row.get("trade_date"))))
-    ]
+    valid = []
+    for row in rows:
+        row_date = _as_str(row.get("trade_date")) or _as_str(row.get("asof_date"))
+        if not row_date or row_date > entry_date:
+            continue
+        merge_staleness = _trading_day_distance(row_date, entry_date)
+        if merge_staleness is not None and merge_staleness <= max_staleness_trading_days:
+            valid.append(row)
     return valid[-1] if valid else None
+
+
+def _trading_day_distance(start_date: str, end_date: str) -> int | None:
+    if start_date > end_date:
+        return None
+    try:
+        return max(len(pd.bdate_range(start=start_date, end=end_date)) - 1, 0)
+    except (TypeError, ValueError):
+        return None
 
 
 def _write_wide_csv(samples: Sequence[Any], field_keys: Sequence[str], path: Path) -> None:
