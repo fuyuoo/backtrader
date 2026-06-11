@@ -77,6 +77,7 @@ def build_attribution_reference_snapshot_from_frame(
     min_reference_count: int = 100,
     emit_symbols: Sequence[str] | None = None,
     emit_dates: Sequence[date | str] | None = None,
+    emit_symbol_date_pairs: Sequence[tuple[str, date | str]] | None = None,
 ) -> dict[str, Any]:
     """Build long-form attribution reference rows from daily all-A data."""
 
@@ -99,7 +100,14 @@ def build_attribution_reference_snapshot_from_frame(
     emit_symbol_set = {str(symbol) for symbol in emit_symbols or []}
     emit_date_set = {_coerce_date(value) for value in emit_dates or []}
     emit_date_set.discard(None)
+    emit_pair_dates: dict[date, set[str]] = {}
+    for symbol, value in emit_symbol_date_pairs or ():
+        pair_date = _coerce_date(value)
+        if pair_date is not None:
+            emit_pair_dates.setdefault(pair_date, set()).add(str(symbol))
     for trade_date, day in data.groupby("trade_date", sort=True):
+        if emit_pair_dates and trade_date not in emit_pair_dates:
+            continue
         if emit_date_set and trade_date not in emit_date_set:
             continue
         reference_mask = _reference_universe_mask(day)
@@ -111,7 +119,9 @@ def build_attribution_reference_snapshot_from_frame(
             for spec in percentile_specs
         }
         emit_day = day
-        if emit_symbol_set:
+        if emit_pair_dates:
+            emit_day = emit_day[emit_day["symbol"].astype(str).isin(emit_pair_dates[trade_date])]
+        elif emit_symbol_set:
             emit_day = emit_day[emit_day["symbol"].astype(str).isin(emit_symbol_set)]
         for _, record in emit_day.iterrows():
             symbol = str(record["symbol"])
@@ -150,6 +160,7 @@ def build_attribution_reference_snapshot_from_frame(
         ],
         "emit_symbol_count": len(emit_symbol_set) if emit_symbol_set else None,
         "emit_date_count": len(emit_date_set) if emit_date_set else None,
+        "emit_pair_count": sum(len(symbols) for symbols in emit_pair_dates.values()) if emit_pair_dates else None,
         "exception_count": len(exceptions),
         "exceptions": exceptions[:1000],
     }

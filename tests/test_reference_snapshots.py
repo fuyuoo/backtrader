@@ -228,15 +228,19 @@ def test_attribution_reference_snapshot_can_emit_only_target_entries() -> None:
         start_date=date(2024, 1, 1),
         end_date=date(2024, 3, 29),
         min_reference_count=2,
-        emit_symbols=["000001.SZ"],
-        emit_dates=["2024-03-29"],
+        emit_symbols=["000001.SZ", "600000.SH"],
+        emit_dates=["2024-01-01", "2024-03-29"],
+        emit_symbol_date_pairs=[("000001.SZ", "2024-03-29"), ("600000.SH", "2024-01-01")],
     )
 
     assert snapshot["rows"]
-    assert {row["symbol"] for row in snapshot["rows"]} == {"000001.SZ"}
-    assert {row["trade_date"] for row in snapshot["rows"]} == {"2024-03-29"}
-    assert snapshot["metadata"]["emit_symbol_count"] == 1
-    assert snapshot["metadata"]["emit_date_count"] == 1
+    assert {
+        (row["symbol"], row["trade_date"])
+        for row in snapshot["rows"]
+    } == {("000001.SZ", "2024-03-29"), ("600000.SH", "2024-01-01")}
+    assert snapshot["metadata"]["emit_symbol_count"] == 2
+    assert snapshot["metadata"]["emit_date_count"] == 2
+    assert snapshot["metadata"]["emit_pair_count"] == 2
 
 
 def test_prepare_attribution_reference_cli_fetches_tushare_provider(tmp_path, monkeypatch, capsys) -> None:
@@ -449,6 +453,7 @@ def test_prepare_attribution_reference_cli_can_emit_run_entry_scope(tmp_path, mo
             {
                 "attributions": [
                     {"symbol": "000001.SZ", "entry_date": "2024-03-29"},
+                    {"symbol": "600000.SH", "entry_date": "2024-01-01"},
                 ]
             },
             ensure_ascii=False,
@@ -483,10 +488,13 @@ def test_prepare_attribution_reference_cli_can_emit_run_entry_scope(tmp_path, mo
     reference = json.loads((tmp_path / "provider-reference" / "reference.json").read_text(encoding="utf-8"))
 
     assert stdout["emit_run_entry_scope"] is True
-    assert stdout["emit_symbol_count"] == 1
-    assert stdout["emit_date_count"] == 1
-    assert {row["symbol"] for row in reference["rows"]} == {"000001.SZ"}
-    assert {row["trade_date"] for row in reference["rows"]} == {"2024-03-29"}
+    assert stdout["emit_symbol_count"] == 2
+    assert stdout["emit_date_count"] == 2
+    assert stdout["emit_pair_count"] == 2
+    assert {
+        (row["symbol"], row["trade_date"])
+        for row in reference["rows"]
+    } == {("000001.SZ", "2024-03-29"), ("600000.SH", "2024-01-01")}
 
 
 def test_industry_memberships_apply_by_effective_interval(tmp_path) -> None:

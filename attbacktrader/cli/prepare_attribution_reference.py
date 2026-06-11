@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     start_date = date.fromisoformat(args.start_date or run_defaults["start_date"])
     end_date = date.fromisoformat(args.end_date or run_defaults["end_date"])
     frame = _load_input_frame(Path(args.input)) if args.input is not None else _fetch_provider_frame(args, start_date, end_date)
-    emit_scope = _run_entry_scope(args.run_dir) if args.emit_run_entry_scope else {"symbols": [], "dates": []}
+    emit_scope = _run_entry_scope(args.run_dir) if args.emit_run_entry_scope else {"symbols": [], "dates": [], "pairs": []}
     snapshot = build_attribution_reference_snapshot_from_frame(
         frame,
         start_date=start_date,
@@ -36,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
         min_reference_count=args.min_reference_count,
         emit_symbols=emit_scope["symbols"],
         emit_dates=emit_scope["dates"],
+        emit_symbol_date_pairs=emit_scope["pairs"],
     )
     output_dir = (
         Path(args.output_dir)
@@ -64,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
                 "emit_run_entry_scope": args.emit_run_entry_scope,
                 "emit_symbol_count": len(emit_scope["symbols"]),
                 "emit_date_count": len(emit_scope["dates"]),
+                "emit_pair_count": len(emit_scope["pairs"]),
                 "row_count": snapshot["row_count"],
                 "exception_count": snapshot["metadata"]["exception_count"],
                 "artifacts": {
@@ -242,13 +244,14 @@ def _business_days_before(value: date, trading_days: int) -> date:
 
 def _run_entry_scope(run_dir: str | None) -> dict[str, list[str]]:
     if run_dir is None:
-        return {"symbols": [], "dates": []}
+        return {"symbols": [], "dates": [], "pairs": []}
     path = Path(run_dir) / "trade_attribution.json"
     if not path.exists():
         raise FileNotFoundError(f"trade_attribution.json does not exist under run dir: {run_dir}")
     payload = json.loads(path.read_text(encoding="utf-8"))
     symbols = []
     dates = []
+    pairs = []
     for item in payload.get("attributions") or []:
         if not isinstance(item, dict):
             continue
@@ -257,7 +260,8 @@ def _run_entry_scope(run_dir: str | None) -> dict[str, list[str]]:
         if symbol and entry_date:
             symbols.append(str(symbol))
             dates.append(str(entry_date))
-    return {"symbols": _dedupe_symbols(symbols), "dates": _dedupe_symbols(dates)}
+            pairs.append((str(symbol), str(entry_date)))
+    return {"symbols": _dedupe_symbols(symbols), "dates": _dedupe_symbols(dates), "pairs": _dedupe_pairs(pairs)}
 
 
 def _symbols_from_args(args: argparse.Namespace, *, run_defaults: dict[str, object] | None = None) -> list[str]:
@@ -283,6 +287,17 @@ def _dedupe_symbols(symbols: list[str]) -> list[str]:
             continue
         seen.add(symbol)
         result.append(symbol)
+    return result
+
+
+def _dedupe_pairs(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    result = []
+    seen = set()
+    for pair in pairs:
+        if pair in seen:
+            continue
+        seen.add(pair)
+        result.append(pair)
     return result
 
 
