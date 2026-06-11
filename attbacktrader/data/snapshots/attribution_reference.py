@@ -37,10 +37,22 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"field_key": "entry.volatility.max_amplitude_20d_bucket", "label_zh": "近20日最大振幅分位桶", "scope": "volatility", "value_type": "bucket"},
     {"field_key": "entry.liquidity.amount_20d_bucket", "label_zh": "20日平均成交额分位桶", "scope": "liquidity", "value_type": "bucket"},
     {"field_key": "entry.liquidity.turnover_rate_bucket", "label_zh": "换手率桶", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
+    {"field_key": "entry.liquidity.turnover_rate_5d_bucket", "label_zh": "5日平均换手率桶", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
+    {"field_key": "entry.liquidity.turnover_rate_20d_bucket", "label_zh": "20日平均换手率桶", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
     {"field_key": "entry.liquidity.volume_ratio_bucket", "label_zh": "量比桶", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
     {"field_key": "entry.liquidity.amount_bucket", "label_zh": "当日成交额桶（亿元）", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
     {"field_key": "entry.liquidity.amount_vs_20d_bucket", "label_zh": "当日成交额相对20日均额桶", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
+    {"field_key": "entry.liquidity.amount_vs_60d_bucket", "label_zh": "当日成交额相对60日均额桶", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
+    {"field_key": "entry.liquidity.amount_5d_vs_20d_bucket", "label_zh": "5日均额相对20日均额桶", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket", "default_in_environment_fit": True},
+    {"field_key": "entry.liquidity.amount_20d_vs_60d_bucket", "label_zh": "20日均额相对60日均额桶", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
     {"field_key": "entry.liquidity.industry_amount_percentile_bucket", "label_zh": "成交额在行业内分位桶", "scope": "liquidity", "value_type": "bucket"},
+    {"field_key": "entry.profit_quality.loss_making_bucket", "label_zh": "亏损状态桶", "scope": "profit_quality", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket", "default_in_environment_fit": True},
+    {"field_key": "entry.momentum.return_20d_bucket", "label_zh": "个股20日收益率分位桶", "scope": "momentum", "value_type": "bucket", "default_in_environment_fit": True},
+    {"field_key": "entry.momentum.return_60d_bucket", "label_zh": "个股60日收益率分位桶", "scope": "momentum", "value_type": "bucket", "default_in_environment_fit": True},
+    {"field_key": "entry.momentum.return_120d_bucket", "label_zh": "个股120日收益率分位桶", "scope": "momentum", "value_type": "bucket"},
+    {"field_key": "entry.momentum.new_high_20d_bucket", "label_zh": "个股20日新高状态", "scope": "momentum", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
+    {"field_key": "entry.momentum.new_high_60d_bucket", "label_zh": "个股60日新高状态", "scope": "momentum", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket", "default_in_environment_fit": True},
+    {"field_key": "entry.momentum.new_high_120d_bucket", "label_zh": "个股120日新高状态", "scope": "momentum", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
     {"field_key": "entry.price_position.near_high_20d_bucket", "label_zh": "距近20日高点桶", "scope": "price_position", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket", "default_in_environment_fit": True},
     {"field_key": "entry.price_position.near_high_60d_bucket", "label_zh": "距近60日高点桶", "scope": "price_position", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket", "default_in_environment_fit": True},
     {"field_key": "entry.price_position.interval_20d_bucket", "label_zh": "20日区间位置桶", "scope": "price_position", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
@@ -375,6 +387,9 @@ def _derive_symbol_features(data: pd.DataFrame) -> pd.DataFrame:
         data["amount_yi"] = data["amount"] / 100000.0
     grouped = data.groupby("symbol", sort=False)
     data["return_1d"] = grouped["close"].pct_change()
+    data["return_20d"] = grouped["close"].pct_change(20)
+    data["return_60d"] = grouped["close"].pct_change(60)
+    data["return_120d"] = grouped["close"].pct_change(120)
     data["return_vol_20d"] = grouped["return_1d"].transform(lambda value: value.rolling(20, min_periods=20).std())
     data["return_vol_60d"] = grouped["return_1d"].transform(lambda value: value.rolling(60, min_periods=60).std())
     data["prev_close"] = grouped["close"].shift(1)
@@ -394,8 +409,12 @@ def _derive_symbol_features(data: pd.DataFrame) -> pd.DataFrame:
     data["rolling_low_20d"] = grouped["low"].transform(lambda value: value.rolling(20, min_periods=20).min())
     data["rolling_high_60d"] = grouped["high"].transform(lambda value: value.rolling(60, min_periods=60).max())
     data["rolling_low_60d"] = grouped["low"].transform(lambda value: value.rolling(60, min_periods=60).min())
+    data["rolling_high_120d"] = grouped["high"].transform(lambda value: value.rolling(120, min_periods=120).max())
     data["near_high_20d"] = data["close"] / data["rolling_high_20d"] - 1.0
     data["near_high_60d"] = data["close"] / data["rolling_high_60d"] - 1.0
+    data["new_high_20d"] = data["close"] >= data["rolling_high_20d"]
+    data["new_high_60d"] = data["close"] >= data["rolling_high_60d"]
+    data["new_high_120d"] = data["close"] >= data["rolling_high_120d"]
     data["interval_20d"] = (data["close"] - data["rolling_low_20d"]) / (data["rolling_high_20d"] - data["rolling_low_20d"])
     data["interval_60d"] = (data["close"] - data["rolling_low_60d"]) / (data["rolling_high_60d"] - data["rolling_low_60d"])
     data["max_amplitude_20d"] = data["rolling_high_20d"] / data["rolling_low_20d"] - 1.0
@@ -403,7 +422,21 @@ def _derive_symbol_features(data: pd.DataFrame) -> pd.DataFrame:
     data["fixed_atr_multiple"] = 0.05 / data["atr_pct"]
     if "amount" in data.columns:
         data["amount_20d"] = grouped["amount"].transform(lambda value: value.rolling(20, min_periods=20).mean())
+        data["amount_5d"] = grouped["amount"].transform(lambda value: value.rolling(5, min_periods=5).mean())
+        data["amount_60d"] = grouped["amount"].transform(lambda value: value.rolling(60, min_periods=60).mean())
         data["amount_vs_20d"] = data["amount"] / data["amount_20d"]
+        data["amount_vs_60d"] = data["amount"] / data["amount_60d"]
+        data["amount_5d_vs_20d"] = data["amount_5d"] / data["amount_20d"]
+        data["amount_20d_vs_60d"] = data["amount_20d"] / data["amount_60d"]
+    if "turnover_rate" in data.columns:
+        data["turnover_rate"] = pd.to_numeric(data["turnover_rate"], errors="coerce")
+        data["turnover_rate_5d"] = grouped["turnover_rate"].transform(lambda value: value.rolling(5, min_periods=5).mean())
+        data["turnover_rate_20d"] = grouped["turnover_rate"].transform(lambda value: value.rolling(20, min_periods=20).mean())
+    pe_ttm = pd.to_numeric(data["pe_ttm"], errors="coerce") if "pe_ttm" in data.columns else pd.Series(index=data.index, dtype=float)
+    pe = pd.to_numeric(data["pe"], errors="coerce") if "pe" in data.columns else pd.Series(index=data.index, dtype=float)
+    has_pe = pe_ttm.notna() | pe.notna()
+    data["loss_making"] = pd.NA
+    data.loc[has_pe, "loss_making"] = (pe_ttm < 0) | (pe < 0)
     return data
 
 
@@ -416,6 +449,9 @@ def _percentile_specs() -> tuple[dict[str, str], ...]:
         {"column": "atr_pct", "field_key": "entry.volatility.atr_20d_bucket"},
         {"column": "max_amplitude_20d", "field_key": "entry.volatility.max_amplitude_20d_bucket"},
         {"column": "amount_20d", "field_key": "entry.liquidity.amount_20d_bucket"},
+        {"column": "return_20d", "field_key": "entry.momentum.return_20d_bucket"},
+        {"column": "return_60d", "field_key": "entry.momentum.return_60d_bucket"},
+        {"column": "return_120d", "field_key": "entry.momentum.return_120d_bucket"},
     )
 
 
@@ -553,10 +589,19 @@ def _field_rows_for_record(
         ("entry.valuation.pe_bucket", record.get("pe"), _pe_bucket(record.get("pe"))),
         ("entry.valuation.pe_ttm_bucket", record.get("pe_ttm"), _pe_bucket(record.get("pe_ttm"))),
         ("entry.valuation.pb_bucket", record.get("pb"), _pb_bucket(record.get("pb"))),
+        ("entry.profit_quality.loss_making_bucket", record.get("loss_making"), _loss_making_bucket(record.get("loss_making"))),
         ("entry.liquidity.turnover_rate_bucket", record.get("turnover_rate"), _turnover_rate_bucket(record.get("turnover_rate"))),
+        ("entry.liquidity.turnover_rate_5d_bucket", record.get("turnover_rate_5d"), _turnover_rate_bucket(record.get("turnover_rate_5d"))),
+        ("entry.liquidity.turnover_rate_20d_bucket", record.get("turnover_rate_20d"), _turnover_rate_bucket(record.get("turnover_rate_20d"))),
         ("entry.liquidity.volume_ratio_bucket", record.get("volume_ratio"), _volume_ratio_bucket(record.get("volume_ratio"))),
         ("entry.liquidity.amount_bucket", record.get("amount_yi"), _amount_abs_bucket(record.get("amount_yi"))),
         ("entry.liquidity.amount_vs_20d_bucket", record.get("amount_vs_20d"), _relative_ratio_bucket(record.get("amount_vs_20d"))),
+        ("entry.liquidity.amount_vs_60d_bucket", record.get("amount_vs_60d"), _relative_ratio_bucket(record.get("amount_vs_60d"))),
+        ("entry.liquidity.amount_5d_vs_20d_bucket", record.get("amount_5d_vs_20d"), _relative_ratio_bucket(record.get("amount_5d_vs_20d"))),
+        ("entry.liquidity.amount_20d_vs_60d_bucket", record.get("amount_20d_vs_60d"), _relative_ratio_bucket(record.get("amount_20d_vs_60d"))),
+        ("entry.momentum.new_high_20d_bucket", record.get("new_high_20d"), _new_high_bucket(record.get("new_high_20d"))),
+        ("entry.momentum.new_high_60d_bucket", record.get("new_high_60d"), _new_high_bucket(record.get("new_high_60d"))),
+        ("entry.momentum.new_high_120d_bucket", record.get("new_high_120d"), _new_high_bucket(record.get("new_high_120d"))),
         ("entry.price_position.near_high_20d_bucket", record.get("near_high_20d"), _near_high_bucket(record.get("near_high_20d"))),
         ("entry.price_position.near_high_60d_bucket", record.get("near_high_60d"), _near_high_bucket(record.get("near_high_60d"))),
         ("entry.price_position.interval_20d_bucket", record.get("interval_20d"), _interval_bucket(record.get("interval_20d"))),
@@ -575,17 +620,37 @@ def _field_rows_for_record(
             exceptions.append("negative_pe")
         if field_key == "entry.liquidity.amount_vs_20d_bucket" and bucket is None:
             exceptions.append("liquidity_lookback_missing")
+        if field_key in {
+            "entry.liquidity.turnover_rate_5d_bucket",
+            "entry.liquidity.turnover_rate_20d_bucket",
+            "entry.liquidity.amount_vs_60d_bucket",
+            "entry.liquidity.amount_5d_vs_20d_bucket",
+            "entry.liquidity.amount_20d_vs_60d_bucket",
+        } and bucket is None:
+            exceptions.append("liquidity_lookback_missing")
+        if field_key.startswith("entry.momentum.new_high_") and bucket is None:
+            exceptions.append("momentum_lookback_missing")
+        if field_key == "entry.profit_quality.loss_making_bucket" and bucket is None:
+            exceptions.append("profit_quality_missing")
         rows.append(_row(
             symbol=symbol,
             trade_date=trade_date,
             field_key=field_key,
-            value=_optional_float(value) if field_key != "industry.sw_l1.code" else value,
+            value=_fixed_field_value(field_key, value),
             bucket=bucket,
             percentile=None,
             reference_count=None,
             exception_codes=exceptions,
         ))
     return rows
+
+
+def _fixed_field_value(field_key: str, value: Any) -> Any:
+    if field_key == "industry.sw_l1.code":
+        return value
+    if field_key == "entry.profit_quality.loss_making_bucket" or field_key.startswith("entry.momentum.new_high_"):
+        return _optional_bool(value)
+    return _optional_float(value)
 
 
 def _industry_membership_exception_codes(record: Mapping[str, Any]) -> list[str]:
@@ -728,6 +793,20 @@ def _pb_bucket(value: Any) -> str | None:
     return "gt_5"
 
 
+def _loss_making_bucket(value: Any) -> str | None:
+    flag = _optional_bool(value)
+    if flag is None:
+        return None
+    return "loss_making" if flag else "profitable"
+
+
+def _new_high_bucket(value: Any) -> str | None:
+    flag = _optional_bool(value)
+    if flag is None:
+        return None
+    return "new_high" if flag else "not_new_high"
+
+
 def _market_cap_abs_bucket(value: Any) -> str | None:
     number = _optional_float(value)
     if number is None or number < 0:
@@ -851,6 +930,19 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y"}:
+        return True
+    if text in {"0", "false", "no", "n"}:
+        return False
+    return None
 
 
 def _is_missing_text(value: Any) -> bool:

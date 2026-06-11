@@ -203,9 +203,17 @@ def test_attribution_reference_snapshot_builds_buckets_and_exceptions(tmp_path, 
     mv_row = next(row for row in target_rows if row["field_key"] == "entry.market_cap.total_mv_bucket")
     mv_abs_row = next(row for row in target_rows if row["field_key"] == "entry.market_cap.total_mv_abs_bucket")
     turnover_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.turnover_rate_bucket")
+    turnover_5d_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.turnover_rate_5d_bucket")
+    turnover_20d_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.turnover_rate_20d_bucket")
     volume_ratio_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.volume_ratio_bucket")
     amount_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.amount_bucket")
     amount_vs_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.amount_vs_20d_bucket")
+    amount_vs_60d_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.amount_vs_60d_bucket")
+    amount_5d_vs_20d_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.amount_5d_vs_20d_bucket")
+    loss_making_row = next(row for row in target_rows if row["field_key"] == "entry.profit_quality.loss_making_bucket")
+    return_20d_row = next(row for row in target_rows if row["field_key"] == "entry.momentum.return_20d_bucket")
+    return_60d_row = next(row for row in target_rows if row["field_key"] == "entry.momentum.return_60d_bucket")
+    new_high_60d_row = next(row for row in target_rows if row["field_key"] == "entry.momentum.new_high_60d_bucket")
     industry_atr_row = next(
         row for row in target_rows if row["field_key"] == "entry.volatility.industry_atr_percentile_bucket"
     )
@@ -229,9 +237,17 @@ def test_attribution_reference_snapshot_builds_buckets_and_exceptions(tmp_path, 
     assert mv_row["bucket"] in {"p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100"}
     assert mv_abs_row["bucket"] == "0_100yi"
     assert turnover_row["bucket"] == "lt_1pct"
+    assert turnover_5d_row["bucket"] == "lt_1pct"
+    assert turnover_20d_row["bucket"] == "lt_1pct"
     assert volume_ratio_row["bucket"] == "0p8_1p2x"
     assert amount_row["bucket"] == "1_3yi"
     assert amount_vs_row["bucket"] in {"0p8_1p2x", "1p2_1p6x"}
+    assert amount_vs_60d_row["bucket"] in {"0p8_1p2x", "1p2_1p6x"}
+    assert amount_5d_vs_20d_row["bucket"] in {"0p8_1p2x", "1p2_1p6x"}
+    assert loss_making_row["bucket"] == "loss_making"
+    assert return_20d_row["bucket"] in {"p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100"}
+    assert return_60d_row["bucket"] in {"p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100"}
+    assert new_high_60d_row["bucket"] in {"new_high", "not_new_high"}
     assert industry_atr_row["bucket"] in {"p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100"}
     assert industry_atr_ratio_row["bucket"] in {"lt_0p8x", "0p8_1p2x", "1p2_1p6x", "1p6_2x", "gte_2x"}
     assert industry_amount_row["bucket"] in {"p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100"}

@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 from attbacktrader.data import IndexBar
-from attbacktrader.data.snapshots import industry_index_bars_snapshot_path, write_index_bars_parquet
+from attbacktrader.data.snapshots import index_bars_snapshot_path, industry_index_bars_snapshot_path, write_index_bars_parquet
 from attbacktrader.cli import run_data_dictionary as run_data_dictionary_cli
 from attbacktrader.cli import run_data_drilldown as run_data_drilldown_cli
 from attbacktrader.cli import run_data_drilldown_batch as run_data_drilldown_batch_cli
@@ -344,11 +344,27 @@ def test_attribution_wide_samples_derives_path_and_signal_strength_from_daily_ca
     assert "industry_membership_backfilled" in fields["industry.weekly.kdj_state"]["exception_codes"]
     assert fields["industry.weekly.ma_trend_bucket"]["bucket"] is not None
     assert fields["industry.weekly.relative_strength_bucket"]["bucket"] is not None
+    assert fields["entry.market.source_index"]["bucket"] == "HS300"
+    assert fields["market.hs300.trend_state"]["bucket"] in {"bullish", "bearish", "mixed"}
+    assert fields["market.csi500.trend_state"]["bucket"] in {"bullish", "bearish", "mixed"}
+    assert fields["market.hs300.weekly.kdj_state"]["bucket"] in {"oversold", "recovering", "strong", "overheated"}
+    assert fields["entry.momentum.symbol_vs_hs300_return_20d_bucket"]["bucket"] is not None
+    assert fields["entry.momentum.symbol_vs_industry_return_20d_bucket"]["bucket"] is not None
+    assert fields["trade.path.max_favorable_atr_multiple_bucket"]["bucket"] == "positive_0_1atr"
+    assert fields["trade.path.max_adverse_atr_multiple_bucket"]["bucket"] is not None
+    assert fields["trade.path.reached_10pct_bucket"]["bucket"] == "not_reached"
+    assert fields["trade.path.reached_15pct_bucket"]["bucket"] == "not_reached"
+    assert fields["trade.path.post_exit_5d_max_high_return_bucket"]["bucket"] == "up_gt_10pct"
     assert fields["trade.exit.reason"]["bucket"] == "FIXED_5_PERCENT_STOP"
     assert "entry.weekly.symbol_kdj_state" in wide_samples["environment_fit_default_fields"]
     assert "industry.weekly.kdj_state" in wide_samples["environment_fit_default_fields"]
+    assert "entry.market.source_index" in wide_samples["environment_fit_default_fields"]
+    assert "market.hs300.trend_state" in wide_samples["environment_fit_default_fields"]
+    assert "entry.momentum.symbol_vs_hs300_return_20d_bucket" in wide_samples["environment_fit_default_fields"]
     assert "trade.path.holding_days_bucket" not in wide_samples["environment_fit_default_fields"]
+    assert "trade.path.max_favorable_atr_multiple_bucket" not in wide_samples["environment_fit_default_fields"]
     assert "trade.exit.reason" not in wide_samples["environment_fit_default_fields"]
+    assert ["entry.market.source_index", "market.hs300.trend_state"] in wide_samples["environment_fit_pair_whitelist"]
     assert ["trade.exit.reason", "entry.signal_strength.dea_waterline_age_trading_days_bucket"] not in wide_samples[
         "environment_fit_pair_whitelist"
     ]
@@ -471,6 +487,10 @@ def test_run_data_clis_write_outputs(tmp_path: Path, capsys) -> None:
 def _run_dir(root: Path) -> Path:
     path = root / "run-data-test"
     path.mkdir()
+    (path / "stock_pool.csv").write_text(
+        "ts_code,name,source_index\n000001.SZ,平安银行,HS300\n600519.SH,贵州茅台,CSI500\n",
+        encoding="utf-8",
+    )
     _write_json(
         path / "run_plan.json",
         {
@@ -482,7 +502,8 @@ def _run_dir(root: Path) -> Path:
                     {"symbol": "000001.SZ", "asset_type": "stock"},
                     {"symbol": "600519.SH", "asset_type": "stock"},
                 ],
-                "benchmark_series": {"indexes": ["000300.SH"]},
+                "stock_pool_file": "stock_pool.csv",
+                "benchmark_series": {"indexes": ["000300.SH", "000905.SH"]},
                 "industry_series": {"source": "SW2021", "indexes": ["801780.SI"]},
             },
             "strategy": {
@@ -1060,6 +1081,34 @@ def _industry_index_cache(root: Path) -> Path:
     snapshot_root = root / "snapshots"
     start_date = pd.Timestamp("2023-07-03").date()
     end_date = pd.Timestamp("2024-01-12").date()
+    for symbol_index, symbol in enumerate(("000300.SH", "000905.SH")):
+        bars = []
+        for index, trade_date in enumerate(pd.bdate_range(start_date, end_date)):
+            base = 3000.0 + symbol_index * 500.0 + index * (2.0 + symbol_index)
+            close = base * (1.0 + (0.005 if index % 9 == 0 else 0.0))
+            high = max(base, close) * 1.01
+            low = min(base, close) * 0.99
+            bars.append(
+                IndexBar(
+                    symbol=symbol,
+                    trade_date=trade_date.date(),
+                    open=base,
+                    high=high,
+                    low=low,
+                    close=close,
+                    volume=2000000.0 + index,
+                    amount=3000000.0 + index,
+                )
+            )
+        write_index_bars_parquet(
+            bars,
+            index_bars_snapshot_path(
+                snapshot_root,
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+            ),
+        )
     for symbol_index, symbol in enumerate(("801780.SI", "801180.SI")):
         bars = []
         for index, trade_date in enumerate(pd.bdate_range(start_date, end_date)):

@@ -214,11 +214,22 @@ reports/_tmp-baoma-100-industry-attribution-check/
 
 | backlog | 因子方向 | 第一批字段候选 | 状态 |
 |---|---|---|---|
-| `NEXT-01` | 大盘环境因子 | 沪深300/中证500日线趋势、周线 KDJ/MACD、20/60 日指数波动率、个股来源指数环境、市场宽度 | 待实现；先用现有 92 字段完成归因解读封板，再开始。 |
-| `NEXT-02` | 亏损/盈利质量因子 | `loss_making`、扣非净利润同比、营收同比、ROE、毛利率、净利率、经营现金流质量 | 待实现；需要新增财务数据源，不依赖实时 PE/PB。 |
-| `NEXT-03` | 相对强弱/动量因子 | 个股 20/60 日收益率、相对沪深300/中证500强弱、相对所属行业强弱、行业相对大盘强弱、20/60/120 日新高 | 待实现。 |
-| `NEXT-04` | 成交活跃度趋势因子 | 5/20 日换手均值、成交额连续放大/萎缩、成交额相对 60 日均额、放量突破/缩量回踩 | 待实现。 |
-| `NEXT-05` | 更细出场后验因子 | 最大浮盈/浮亏对应 ATR 倍数、是否达到 10%/15%、止盈后继续上涨、止损后反弹、卖飞幅度、错杀幅度 | 待实现；只用于路径诊断，不能作为入场环境因子。 |
+| `NEXT-01` | 大盘环境因子 | 沪深300/中证500日线趋势、周线 KDJ/MACD、20/60 日指数波动率、个股来源指数环境、市场宽度 | 已实现首版：沪深300/中证500日线趋势、20/60 日波动率、周线 KDJ/均线趋势、股票池来源指数已进入字段索引；市场宽度和周线 MACD 待后续单独补。 |
+| `NEXT-02` | 亏损/盈利质量因子 | `loss_making`、扣非净利润同比、营收同比、ROE、毛利率、净利率、经营现金流质量 | 已实现首版：`loss_making` 使用入场信号日历史 PE/PE_TTM 负值判断；扣非、营收、ROE、现金流质量仍待新增财务快照数据源。 |
+| `NEXT-03` | 相对强弱/动量因子 | 个股 20/60 日收益率、相对沪深300/中证500强弱、相对所属行业强弱、行业相对大盘强弱、20/60/120 日新高 | 已实现首版：个股 20/60/120 日收益率、20/60/120 日新高、个股相对沪深300/中证500/所属行业 20 日收益差已进入字段索引；行业相对大盘强弱待后续补。 |
+| `NEXT-04` | 成交活跃度趋势因子 | 5/20 日换手均值、成交额连续放大/萎缩、成交额相对 60 日均额、放量突破/缩量回踩 | 已实现首版：5/20 日平均换手率、当日成交额相对 60 日均额、5 日均额相对 20 日均额、20 日均额相对 60 日均额已进入字段索引；连续放大/萎缩和突破/回踩形态待后续补。 |
+| `NEXT-05` | 更细出场后验因子 | 最大浮盈/浮亏对应 ATR 倍数、是否达到 10%/15%、止盈后继续上涨、止损后反弹、卖飞幅度、错杀幅度 | 已实现首版：最大浮盈/浮亏 ATR 倍数、是否达到 10%/15%、退出后 5 交易日 high/close/low 收益、止盈后继续上涨、止损后反弹已进入宽表；这些字段只用于路径诊断，不默认进入入场环境排名。 |
+
+126 字段首版归因输入重建记录：
+
+| 项目 | 内容 |
+|---|---|
+| reference 快照 | `data/snapshots/attribution_reference/full_a_main_chinext_star/2022-08-26_2024-12-31_baoma-v1-entry-scope-full-a-industry-backfilled` |
+| reference 口径 | `--reference-fetch-scope all --emit-run-entry-scope`；3567 笔交易对应 7134 个 symbol/date 入场反查点；reference rows 271092；异常 64。 |
+| wide samples | `reports/baoma-v1-fixed-sample-2023-2024/full_entry_scope_environment_fit_review/attribution_wide_samples.json`；3567 笔 completed trades；字段索引 126 个。 |
+| environment_fit | 默认字段 31 个；单因子分组 160 个；白名单二因子组合 796 个。 |
+| 默认进入环境归因的新字段 | `entry.market.source_index`、沪深300/中证500日线趋势和周线 KDJ、`loss_making`、个股 20/60 日收益率、60 日新高、个股相对沪深300/所属行业强弱、5 日均额相对 20 日均额。 |
+| 不默认进入环境归因的新字段 | 退出后路径诊断字段、市场波动率、市场周线均线趋势、中证500相对强弱、120 日动量、换手均值、成交额相对 60 日均额等；先用于宽表筛选和专项复盘。 |
 
 现有 92 字段归因解读封板记录：
 
@@ -249,15 +260,15 @@ reports/_tmp-baoma-100-industry-attribution-check/
 15. 第一版全 A 横截面分位桶统一使用 5 档：`p0_p20`、`p20_p40`、`p40_p60`、`p60_p80`、`p80_p100`；原始 percentile 数值仍进入宽表，后续可重切分桶。
 16. PE、PE_TTM、PB 的全 A 分位只对有效正值计算；PE/PE_TTM 负值进入 `negative`，缺失进入 `missing`；PB 小于等于 0 进入 `non_positive`，缺失进入 `missing`。
 17. ATR 百分比、20 日收益波动率、60 日收益波动率、近 20 日最大振幅等波动因子第一版也使用全 A 横截面 5 档分位桶，并在宽表保留原始值；固定绝对阈值桶后续按需要再补。
-18. 流动性因子第一版同时保留固定解释桶和分位桶：20 日平均成交额使用全 A 横截面 5 档分位桶；当日成交额、换手率、量比、当日成交额/20 日均额使用固定解释桶；行业内成交额分位按同日同申万一级行业内 5 档分位计算。成交额使用历史实际成交额，换手率和量比优先来自历史 `daily_basic`，缺失时记录 `missing`，不在报告层用成交量和流通股本临时拼出口径。
+18. 流动性因子第一版同时保留固定解释桶和分位桶：20 日平均成交额使用全 A 横截面 5 档分位桶；当日成交额、换手率、5/20 日平均换手率、量比、当日成交额/20 日均额、当日成交额/60 日均额、5 日均额/20 日均额、20 日均额/60 日均额使用固定解释桶；行业内成交额分位按同日同申万一级行业内 5 档分位计算。成交额使用历史实际成交额，换手率和量比优先来自历史 `daily_basic`，缺失时记录 `missing`，不在报告层用成交量和流通股本临时拼出口径。
 19. 个股相对行业波动同时保留原始比值和行业内分位桶：原始值使用 `symbol_atr_pct / industry_median_atr_pct`，默认进入 `environment_fit` 的桶使用同日同申万一级行业内 ATR 百分比 5 档分位。
 20. 固定 5% 止盈适配因子使用固定解释桶，不使用分位桶；原始值为 `5% / ATR%`，桶为 `<1 ATR`、`1-2 ATR`、`2-3 ATR`、`>=3 ATR`。
 21. 入场价距离 MA60 的 ATR 倍数使用固定解释桶，不使用分位桶；默认字段 `entry.price_position.ma60_atr_multiple_bucket` 的原始值为 `(实际入场成交价 - 入场信号日 MA60) / 入场信号日 ATR`，用于识别信号次日开盘下杀后是否已经贴近或跌破 MA60；宽表另保留 `entry.price_position.signal_close_ma60_atr_multiple_bucket`，原始值为 `(入场信号日 close - 入场信号日 MA60) / 入场信号日 ATR`，用于核验信号本身的位置。
 22. 距近 20 日高点和近 60 日高点默认进入 `environment_fit`，使用入场信号日 close 计量，使用固定解释桶，不使用分位桶；宽表保留原始距离百分比 `signal_day_close / rolling_high - 1`，桶为 `at_high`（0% 到 -1%）、`near_high`（-1% 到 -3%）、`moderate_pullback`（-3% 到 -8%）、`deep_pullback`（-8% 到 -15%）、`far_from_high`（小于 -15%）。全 A 参考快照按信号日对齐，`entry_date` 仅保留为实际成交日。
 23. 近 20 日和 60 日区间位置默认进入 `environment_fit`，使用入场信号日 close 计量；原始值为 `(signal_day_close - rolling_low) / (rolling_high - rolling_low)`，桶为 `bottom`（0-20%）、`lower_mid`（20-40%）、`middle`（40-60%）、`upper_mid`（60-80%）、`top`（80-100%）。当 `rolling_high == rolling_low` 时记录 `flat_range` 异常，不默认填充。
 24. 行业适配使用入场信号日的历史申万一级行业；行业映射不套用 5 个交易日 staleness 限制，而是按历史行业关系有效区间判断，`start_date <= signal_date <= end_date` 时视为有效。若只有变更点数据，则最近一次变更后的行业有效到下一次变更前；完全找不到覆盖区间时记录 `industry_missing`。当数据源只给出单条无 `out_date` 的未来行业区间、且信号日早于该区间 `in_date` 时，可以通过 `--backfill-missing-industry-memberships` 显式启用前推填充；前推结果必须记录 `industry_membership_backfilled`，不得静默当作原始历史行业。
-25. `environment_fit` 第一版默认只输出入场前或入场时可见因子的单因子统计和白名单二因子组合；三因子及以上组合先留给字段索引、样本 drilldown 或后续专项报告，避免默认矩阵样本切分过碎。第二批归因字段加入交易路径诊断和入场信号强度归因：交易路径字段包括 `trade.path.holding_days_bucket`、`trade.path.max_favorable_return_before_exit_bucket`、`trade.path.max_adverse_return_before_exit_bucket`、`trade.path.max_drawdown_from_peak_bucket`、`trade.path.first_profit_5pct_days_bucket`；这些是事后路径结果，只能用于解释交易如何结束，不能进入 `environment_fit` 排名，也不能当作入场可见因子。入场信号强度字段包括 `entry.signal_strength.dea_waterline_age_trading_days_bucket`、`entry.signal_strength.dea_value_bucket`、`entry.signal_strength.macd_bar_bucket`、`entry.signal_strength.dif_dea_distance_bucket`、`entry.signal_strength.ma25_above_ma60_spread_bucket`、`entry.signal_strength.ma60_slope_20d_bucket`、`entry.signal_strength.signal_candle_body_bucket`、`entry.signal_strength.signal_upper_lower_shadow_bucket`，这些字段可以进入 `environment_fit`。
-26. 第一版二因子组合白名单为：申万一级行业 x 个股相对行业波动桶、申万一级行业 x 行业周线 KDJ 状态、申万一级行业 x 固定 5% 对应 ATR 倍数桶、申万一级行业 x 入场距 MA60 ATR 倍数桶、ATR 百分比桶 x 固定 5% 对应 ATR 倍数桶、ATR 百分比桶 x 入场距 MA60 ATR 倍数桶、个股行业内 ATR 分位 x 个股周线 KDJ 状态、个股周线 KDJ 状态 x 行业周线 KDJ 状态、流通市值分位桶 x 20 日平均成交额分位桶、距 20 日高点桶 x 20 日区间位置桶、距 60 日高点桶 x 60 日区间位置桶；PE/PB 先只进宽表和字段索引，PE_TTM 作为第一版默认估值主轴。`trade.exit.reason` x 入场因子白名单组合单独作为 `outcome_diagnostic`，用于回答止损/止盈分别在哪些入场环境高发；它不是 `environment_fit` 组合，不参与最佳/最差环境排名，也不自动生成过滤或参数优化建议。
+25. `environment_fit` 第一版默认只输出入场前或入场时可见因子的单因子统计和白名单二因子组合；三因子及以上组合先留给字段索引、样本 drilldown 或后续专项报告，避免默认矩阵样本切分过碎。第二批归因字段加入交易路径诊断和入场信号强度归因：交易路径字段包括 `trade.path.holding_days_bucket`、`trade.path.max_favorable_return_before_exit_bucket`、`trade.path.max_adverse_return_before_exit_bucket`、`trade.path.max_drawdown_from_peak_bucket`、`trade.path.first_profit_5pct_days_bucket`、`trade.path.max_favorable_atr_multiple_bucket`、`trade.path.max_adverse_atr_multiple_bucket`、`trade.path.reached_10pct_bucket`、`trade.path.reached_15pct_bucket`、`trade.path.post_exit_5d_max_high_return_bucket`、`trade.path.post_exit_5d_max_close_return_bucket`、`trade.path.post_exit_5d_min_low_return_bucket`、`trade.path.sold_too_early_5d_bucket`、`trade.path.stop_loss_rebound_5d_bucket`；这些是事后路径结果，只能用于解释交易如何结束，不能进入 `environment_fit` 排名，也不能当作入场可见因子。入场信号强度字段包括 `entry.signal_strength.dea_waterline_age_trading_days_bucket`、`entry.signal_strength.dea_value_bucket`、`entry.signal_strength.macd_bar_bucket`、`entry.signal_strength.dif_dea_distance_bucket`、`entry.signal_strength.ma25_above_ma60_spread_bucket`、`entry.signal_strength.ma60_slope_20d_bucket`、`entry.signal_strength.signal_candle_body_bucket`、`entry.signal_strength.signal_upper_lower_shadow_bucket`，这些字段可以进入 `environment_fit`。
+26. 第一版二因子组合白名单为：申万一级行业 x 个股相对行业波动桶、申万一级行业 x 行业周线 KDJ 状态、申万一级行业 x 固定 5% 对应 ATR 倍数桶、申万一级行业 x 入场距 MA60 ATR 倍数桶、ATR 百分比桶 x 固定 5% 对应 ATR 倍数桶、ATR 百分比桶 x 入场距 MA60 ATR 倍数桶、个股行业内 ATR 分位 x 个股周线 KDJ 状态、个股周线 KDJ 状态 x 行业周线 KDJ 状态、流通市值分位桶 x 20 日平均成交额分位桶、距 20 日高点桶 x 20 日区间位置桶、距 60 日高点桶 x 60 日区间位置桶、股票池来源指数 x 沪深300/中证500日线趋势、沪深300日线趋势 x 中证500日线趋势、个股 20 日收益率 x 5 日均额/20 日均额、个股 20 日收益率 x 沪深300日线趋势；PE/PB 先只进宽表和字段索引，PE_TTM 作为第一版默认估值主轴。`trade.exit.reason` x 入场因子白名单组合单独作为 `outcome_diagnostic`，用于回答止损/止盈分别在哪些入场环境高发；它不是 `environment_fit` 组合，不参与最佳/最差环境排名，也不自动生成过滤或参数优化建议。
 27. `environment_fit` 第一版低样本阈值为：单因子分组少于 10 笔、二因子组合少于 20 笔时标记 `low_sample`。低样本分组仍保留在 JSON 中，但中文报告首页最佳/最差结论候选不采用低样本分组。
 28. `Attribution Wide Sample` 同时输出 JSON 和 CSV：JSON 保留嵌套字段、exception、asof、provenance，供程序和 AI review 使用；CSV 使用扁平字段名，供人工用 Excel/WPS/脚本筛选。
 29. 新增归因产物文件名固定为：`attribution_wide_samples.json`、`attribution_wide_samples.csv`、`attribution_field_index.json`、`attribution_field_index.zh.md`。

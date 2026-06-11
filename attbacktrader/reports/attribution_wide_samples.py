@@ -35,6 +35,11 @@ DEFAULT_ENVIRONMENT_FIT_PAIR_WHITELIST: tuple[tuple[str, str], ...] = (
     ("entry.market_cap.circulating_mv_bucket", "entry.liquidity.amount_20d_bucket"),
     ("entry.price_position.near_high_20d_bucket", "entry.price_position.interval_20d_bucket"),
     ("entry.price_position.near_high_60d_bucket", "entry.price_position.interval_60d_bucket"),
+    ("entry.market.source_index", "market.hs300.trend_state"),
+    ("entry.market.source_index", "market.csi500.trend_state"),
+    ("market.hs300.trend_state", "market.csi500.trend_state"),
+    ("entry.momentum.return_20d_bucket", "entry.liquidity.amount_5d_vs_20d_bucket"),
+    ("entry.momentum.return_20d_bucket", "market.hs300.trend_state"),
 )
 
 MA60_ATR_MULTIPLE_FIELD = "entry.price_position.ma60_atr_multiple_bucket"
@@ -66,6 +71,50 @@ INDUSTRY_WEEKLY_KDJ_J_FIELD = "industry.weekly.kdj_j_bucket"
 INDUSTRY_WEEKLY_KDJ_STATE_FIELD = "industry.weekly.kdj_state"
 INDUSTRY_WEEKLY_MA_TREND_FIELD = "industry.weekly.ma_trend_bucket"
 INDUSTRY_WEEKLY_RELATIVE_STRENGTH_FIELD = "industry.weekly.relative_strength_bucket"
+SOURCE_INDEX_FIELD = "entry.market.source_index"
+SYMBOL_HS300_RS_20D_FIELD = "entry.momentum.symbol_vs_hs300_return_20d_bucket"
+SYMBOL_CSI500_RS_20D_FIELD = "entry.momentum.symbol_vs_csi500_return_20d_bucket"
+SYMBOL_INDUSTRY_RS_20D_FIELD = "entry.momentum.symbol_vs_industry_return_20d_bucket"
+MAX_FAVORABLE_ATR_MULTIPLE_FIELD = "trade.path.max_favorable_atr_multiple_bucket"
+MAX_ADVERSE_ATR_MULTIPLE_FIELD = "trade.path.max_adverse_atr_multiple_bucket"
+REACHED_10PCT_FIELD = "trade.path.reached_10pct_bucket"
+REACHED_15PCT_FIELD = "trade.path.reached_15pct_bucket"
+POST_EXIT_MAX_HIGH_5D_FIELD = "trade.path.post_exit_5d_max_high_return_bucket"
+POST_EXIT_MAX_CLOSE_5D_FIELD = "trade.path.post_exit_5d_max_close_return_bucket"
+POST_EXIT_MIN_LOW_5D_FIELD = "trade.path.post_exit_5d_min_low_return_bucket"
+SOLD_TOO_EARLY_5D_FIELD = "trade.path.sold_too_early_5d_bucket"
+STOP_LOSS_REBOUND_5D_FIELD = "trade.path.stop_loss_rebound_5d_bucket"
+MARKET_INDEX_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("hs300", "000300.SH", "沪深300"),
+    ("csi500", "000905.SH", "中证500"),
+)
+MARKET_INDEX_FIELDS: tuple[str, ...] = tuple(
+    f"market.{key}.{suffix}"
+    for key, _symbol, _label in MARKET_INDEX_SPECS
+    for suffix in (
+        "trend_state",
+        "return_vol_20d_bucket",
+        "return_vol_60d_bucket",
+        "weekly.kdj_state",
+        "weekly.ma_trend_bucket",
+    )
+)
+MOMENTUM_RELATIVE_FIELDS = (
+    SYMBOL_HS300_RS_20D_FIELD,
+    SYMBOL_CSI500_RS_20D_FIELD,
+    SYMBOL_INDUSTRY_RS_20D_FIELD,
+)
+POST_TRADE_DIAGNOSTIC_FIELDS = (
+    MAX_FAVORABLE_ATR_MULTIPLE_FIELD,
+    MAX_ADVERSE_ATR_MULTIPLE_FIELD,
+    REACHED_10PCT_FIELD,
+    REACHED_15PCT_FIELD,
+    POST_EXIT_MAX_HIGH_5D_FIELD,
+    POST_EXIT_MAX_CLOSE_5D_FIELD,
+    POST_EXIT_MIN_LOW_5D_FIELD,
+    SOLD_TOO_EARLY_5D_FIELD,
+    STOP_LOSS_REBOUND_5D_FIELD,
+)
 DERIVED_ONLY_FIELDS = {
     EXIT_REASON_FIELD,
     MA60_ATR_MULTIPLE_FIELD,
@@ -96,6 +145,10 @@ DERIVED_ONLY_FIELDS = {
     INDUSTRY_WEEKLY_KDJ_STATE_FIELD,
     INDUSTRY_WEEKLY_MA_TREND_FIELD,
     INDUSTRY_WEEKLY_RELATIVE_STRENGTH_FIELD,
+    SOURCE_INDEX_FIELD,
+    *MARKET_INDEX_FIELDS,
+    *MOMENTUM_RELATIVE_FIELDS,
+    *POST_TRADE_DIAGNOSTIC_FIELDS,
 }
 
 EXIT_REASON_ENTRY_FACTOR_PAIRS: tuple[tuple[str, str], ...] = (
@@ -305,6 +358,50 @@ DERIVED_FIELD_CATALOG: dict[str, dict[str, Any]] = {
 
 DERIVED_FIELD_CATALOG.update(
     {
+        SOURCE_INDEX_FIELD: {
+            "field_key": SOURCE_INDEX_FIELD,
+            "label_zh": "股票池来源指数",
+            "value_type": "category",
+            "timing": "entry",
+            "scope": "market",
+            "bucket_rule": "stock_pool_membership",
+            "default_in_environment_fit": True,
+            "source": "run_plan.stock_pool_file",
+            "missing_policy": "missing",
+        },
+        SYMBOL_HS300_RS_20D_FIELD: {
+            "field_key": SYMBOL_HS300_RS_20D_FIELD,
+            "label_zh": "个股20日收益相对沪深300桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "momentum",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": True,
+            "source": "daily_price_cache+index_snapshot",
+            "missing_policy": "missing",
+        },
+        SYMBOL_CSI500_RS_20D_FIELD: {
+            "field_key": SYMBOL_CSI500_RS_20D_FIELD,
+            "label_zh": "个股20日收益相对中证500桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "momentum",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache+index_snapshot",
+            "missing_policy": "missing",
+        },
+        SYMBOL_INDUSTRY_RS_20D_FIELD: {
+            "field_key": SYMBOL_INDUSTRY_RS_20D_FIELD,
+            "label_zh": "个股20日收益相对所属行业桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "momentum",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": True,
+            "source": "daily_price_cache+industry_index_snapshot",
+            "missing_policy": "missing",
+        },
         SYMBOL_WEEKLY_KDJ_J_FIELD: {
             "field_key": SYMBOL_WEEKLY_KDJ_J_FIELD,
             "label_zh": "个股周线KDJ J桶",
@@ -440,6 +537,171 @@ DERIVED_FIELD_CATALOG.update(
     }
 )
 
+for market_key, _symbol, label in MARKET_INDEX_SPECS:
+    DERIVED_FIELD_CATALOG.update(
+        {
+            f"market.{market_key}.trend_state": {
+                "field_key": f"market.{market_key}.trend_state",
+                "label_zh": f"{label}日线趋势状态",
+                "value_type": "category",
+                "timing": "entry",
+                "scope": "market",
+                "bucket_rule": "fixed_explain_bucket",
+                "default_in_environment_fit": True,
+                "source": "index_snapshot",
+                "missing_policy": "missing",
+            },
+            f"market.{market_key}.return_vol_20d_bucket": {
+                "field_key": f"market.{market_key}.return_vol_20d_bucket",
+                "label_zh": f"{label}20日收益波动率桶",
+                "value_type": "bucket",
+                "timing": "entry",
+                "scope": "market",
+                "bucket_rule": "fixed_explain_bucket",
+                "default_in_environment_fit": False,
+                "source": "index_snapshot",
+                "missing_policy": "missing",
+            },
+            f"market.{market_key}.return_vol_60d_bucket": {
+                "field_key": f"market.{market_key}.return_vol_60d_bucket",
+                "label_zh": f"{label}60日收益波动率桶",
+                "value_type": "bucket",
+                "timing": "entry",
+                "scope": "market",
+                "bucket_rule": "fixed_explain_bucket",
+                "default_in_environment_fit": False,
+                "source": "index_snapshot",
+                "missing_policy": "missing",
+            },
+            f"market.{market_key}.weekly.kdj_state": {
+                "field_key": f"market.{market_key}.weekly.kdj_state",
+                "label_zh": f"{label}周线KDJ状态",
+                "value_type": "category",
+                "timing": "entry",
+                "scope": "market",
+                "bucket_rule": "fixed_explain_bucket",
+                "default_in_environment_fit": True,
+                "source": "index_snapshot",
+                "missing_policy": "missing",
+            },
+            f"market.{market_key}.weekly.ma_trend_bucket": {
+                "field_key": f"market.{market_key}.weekly.ma_trend_bucket",
+                "label_zh": f"{label}周线均线趋势桶",
+                "value_type": "bucket",
+                "timing": "entry",
+                "scope": "market",
+                "bucket_rule": "fixed_explain_bucket",
+                "default_in_environment_fit": False,
+                "source": "index_snapshot",
+                "missing_policy": "missing",
+            },
+        }
+    )
+
+DERIVED_FIELD_CATALOG.update(
+    {
+        MAX_FAVORABLE_ATR_MULTIPLE_FIELD: {
+            "field_key": MAX_FAVORABLE_ATR_MULTIPLE_FIELD,
+            "label_zh": "退出前最大浮盈ATR倍数桶",
+            "value_type": "bucket",
+            "timing": "post_trade",
+            "scope": "path",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache+attribution_reference",
+            "missing_policy": "missing",
+        },
+        MAX_ADVERSE_ATR_MULTIPLE_FIELD: {
+            "field_key": MAX_ADVERSE_ATR_MULTIPLE_FIELD,
+            "label_zh": "退出前最大浮亏ATR倍数桶",
+            "value_type": "bucket",
+            "timing": "post_trade",
+            "scope": "path",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache+attribution_reference",
+            "missing_policy": "missing",
+        },
+        REACHED_10PCT_FIELD: {
+            "field_key": REACHED_10PCT_FIELD,
+            "label_zh": "持仓期是否达到10%浮盈",
+            "value_type": "bucket",
+            "timing": "post_trade",
+            "scope": "path",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+        REACHED_15PCT_FIELD: {
+            "field_key": REACHED_15PCT_FIELD,
+            "label_zh": "持仓期是否达到15%浮盈",
+            "value_type": "bucket",
+            "timing": "post_trade",
+            "scope": "path",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+        POST_EXIT_MAX_HIGH_5D_FIELD: {
+            "field_key": POST_EXIT_MAX_HIGH_5D_FIELD,
+            "label_zh": "退出后5交易日最大High收益桶",
+            "value_type": "bucket",
+            "timing": "post_trade",
+            "scope": "path",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+        POST_EXIT_MAX_CLOSE_5D_FIELD: {
+            "field_key": POST_EXIT_MAX_CLOSE_5D_FIELD,
+            "label_zh": "退出后5交易日最大Close收益桶",
+            "value_type": "bucket",
+            "timing": "post_trade",
+            "scope": "path",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+        POST_EXIT_MIN_LOW_5D_FIELD: {
+            "field_key": POST_EXIT_MIN_LOW_5D_FIELD,
+            "label_zh": "退出后5交易日最小Low收益桶",
+            "value_type": "bucket",
+            "timing": "post_trade",
+            "scope": "path",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+        SOLD_TOO_EARLY_5D_FIELD: {
+            "field_key": SOLD_TOO_EARLY_5D_FIELD,
+            "label_zh": "止盈后5交易日是否继续上涨",
+            "value_type": "bucket",
+            "timing": "post_trade",
+            "scope": "path",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+        STOP_LOSS_REBOUND_5D_FIELD: {
+            "field_key": STOP_LOSS_REBOUND_5D_FIELD,
+            "label_zh": "止损后5交易日是否反弹",
+            "value_type": "bucket",
+            "timing": "post_trade",
+            "scope": "path",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+    }
+)
+
 
 def build_attribution_wide_samples(
     run_dir: str | Path,
@@ -469,6 +731,8 @@ def build_attribution_wide_samples(
     completed_trades = _completed_trade_rows(trade_attribution, trade_lifecycle=trade_lifecycle)
     price_context = _load_daily_price_context(daily_price_cache_dir, completed_trades)
     industry_context = _load_industry_index_context(snapshot_root, industry_source=industry_source)
+    market_context = _load_market_index_context(snapshot_root)
+    source_index_by_symbol = _source_index_by_symbol_from_run_plan(run_path, run_plan)
 
     samples = []
     for trade in completed_trades:
@@ -507,7 +771,7 @@ def build_attribution_wide_samples(
             }
 
         for key, value in _entry_factor_values(trade).items():
-            if key not in field_values:
+            if key not in field_values and key not in field_catalog:
                 field_catalog[key] = _fallback_field_catalog_item(key)
             field_values.setdefault(
                 key,
@@ -527,6 +791,21 @@ def build_attribution_wide_samples(
         _add_entry_signal_strength_fields(field_values, trade=trade, signal_date=signal_date, price_context=price_context)
         _add_weekly_symbol_fields(field_values, trade=trade, signal_date=signal_date, price_context=price_context)
         _add_industry_index_fields(field_values, signal_date=signal_date, industry_context=industry_context)
+        _add_market_source_index_field(
+            field_values,
+            symbol=symbol,
+            signal_date=signal_date,
+            source_index_by_symbol=source_index_by_symbol,
+        )
+        _add_market_index_fields(field_values, signal_date=signal_date, market_context=market_context)
+        _add_relative_momentum_fields(
+            field_values,
+            trade=trade,
+            signal_date=signal_date,
+            price_context=price_context,
+            industry_context=industry_context,
+            market_context=market_context,
+        )
         _add_exit_reason_field(field_values, trade=trade)
         for payload in field_values.values():
             exception_codes.update(_exception_codes(_as_mapping(payload).get("exception_codes")))
@@ -555,6 +834,7 @@ def build_attribution_wide_samples(
         "reference_path": str(reference["source_path"]),
         "daily_price_cache_path": str(daily_price_cache_dir) if daily_price_cache_dir is not None else None,
         "industry_index_snapshot_root": str(snapshot_root) if snapshot_root is not None else None,
+        "market_index_snapshot_root": str(snapshot_root) if snapshot_root is not None else None,
         "industry_source": industry_source,
         "sample_count": len(samples),
         "field_count": len(field_catalog),
@@ -913,6 +1193,34 @@ def _entry_factor_values(trade: Mapping[str, Any]) -> dict[str, Any]:
     return values
 
 
+def _source_index_by_symbol_from_run_plan(run_path: Path, run_plan: Mapping[str, Any]) -> dict[str, str]:
+    data = _as_mapping(run_plan.get("data"))
+    stock_pool_file = _as_str(data.get("stock_pool_file"))
+    if not stock_pool_file:
+        return {}
+    raw_path = Path(stock_pool_file)
+    candidates = [raw_path] if raw_path.is_absolute() else [
+        Path.cwd() / raw_path,
+        run_path / raw_path,
+        run_path.parent / raw_path,
+    ]
+    path = next((candidate for candidate in candidates if candidate.exists()), None)
+    if path is None:
+        return {}
+    frame = pd.read_csv(path)
+    symbol_column = next((column for column in ("ts_code", "symbol", "code") if column in frame.columns), None)
+    source_column = next((column for column in ("source_index", "index", "source") if column in frame.columns), None)
+    if symbol_column is None or source_column is None:
+        return {}
+    result = {}
+    for row in frame[[symbol_column, source_column]].dropna().itertuples(index=False):
+        symbol = str(row[0]).strip()
+        source = str(row[1]).strip()
+        if symbol and source:
+            result[symbol] = source
+    return result
+
+
 def _load_daily_price_context(
     daily_price_cache_dir: str | Path | None,
     trades: Sequence[Mapping[str, Any]],
@@ -954,6 +1262,8 @@ def _load_daily_price_context(
     data = data.dropna(subset=["symbol", "trade_date", "open", "high", "low", "close"])
     data = data.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
     grouped = data.groupby("symbol", sort=False)
+    data["return_20d"] = grouped["close"].pct_change(20)
+    data["return_60d"] = grouped["close"].pct_change(60)
     data["ma25"] = grouped["close"].transform(lambda value: value.rolling(25, min_periods=25).mean())
     data["ma60"] = grouped["close"].transform(lambda value: value.rolling(60, min_periods=60).mean())
     data["ma60_20d_ago"] = grouped["ma60"].shift(20)
@@ -1021,6 +1331,8 @@ def _load_industry_index_context(
     data = data.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
     grouped = data.groupby("symbol", sort=False)
     data["return_1d"] = grouped["close"].pct_change()
+    data["return_20d"] = grouped["close"].pct_change(20)
+    data["return_60d"] = grouped["close"].pct_change(60)
     data["return_vol_20d"] = grouped["return_1d"].transform(lambda value: value.rolling(20, min_periods=20).std())
     data["return_vol_60d"] = grouped["return_1d"].transform(lambda value: value.rolling(60, min_periods=60).std())
     data["prev_close"] = grouped["close"].shift(1)
@@ -1046,6 +1358,63 @@ def _load_industry_index_context(
             method="average",
         )
 
+    return {
+        "source_path": str(index_dir),
+        "by_symbol": {
+            str(symbol): group.reset_index(drop=True)
+            for symbol, group in data.groupby("symbol", sort=False)
+        },
+        "weekly_by_symbol": {
+            str(symbol): group.reset_index(drop=True)
+            for symbol, group in weekly.groupby("symbol", sort=False)
+        } if not weekly.empty else {},
+    }
+
+
+def _load_market_index_context(snapshot_root: str | Path | None) -> dict[str, Any]:
+    if snapshot_root is None:
+        return {}
+    index_dir = Path(snapshot_root) / "indexes"
+    if not index_dir.exists():
+        return {}
+
+    wanted = {symbol for _key, symbol, _label in MARKET_INDEX_SPECS}
+    frames = []
+    for _key, symbol, _label in MARKET_INDEX_SPECS:
+        safe_symbol = symbol.replace(".", "_")
+        for path in sorted(index_dir.glob(f"{safe_symbol}_*.parquet")):
+            frame = pd.read_parquet(path)
+            if "symbol" not in frame.columns and "ts_code" in frame.columns:
+                frame = frame.rename(columns={"ts_code": "symbol"})
+            required = {"symbol", "trade_date", "open", "high", "low", "close"}
+            if not required.issubset(frame.columns):
+                continue
+            frame = frame[["symbol", "trade_date", "open", "high", "low", "close"]]
+            frame = frame[frame["symbol"].astype(str).isin(wanted)]
+            if not frame.empty:
+                frames.append(frame)
+    if not frames:
+        return {"source_path": str(index_dir)}
+
+    data = pd.concat(frames, ignore_index=True)
+    data["symbol"] = data["symbol"].astype(str)
+    data["trade_date"] = pd.to_datetime(data["trade_date"]).dt.strftime("%Y-%m-%d")
+    for column in ("open", "high", "low", "close"):
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data = data.dropna(subset=["symbol", "trade_date", "open", "high", "low", "close"])
+    data = data.drop_duplicates(subset=["symbol", "trade_date"], keep="last")
+    data = data.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
+    grouped = data.groupby("symbol", sort=False)
+    data["return_1d"] = grouped["close"].pct_change()
+    data["return_20d"] = grouped["close"].pct_change(20)
+    data["return_60d"] = grouped["close"].pct_change(60)
+    data["return_vol_20d"] = grouped["return_1d"].transform(lambda value: value.rolling(20, min_periods=20).std())
+    data["return_vol_60d"] = grouped["return_1d"].transform(lambda value: value.rolling(60, min_periods=60).std())
+    data["ma20"] = grouped["close"].transform(lambda value: value.rolling(20, min_periods=20).mean())
+    data["ma60"] = grouped["close"].transform(lambda value: value.rolling(60, min_periods=60).mean())
+    data["trend_state"] = [_daily_trend_state(row) for row in data[["close", "ma20", "ma60"]].to_dict("records")]
+
+    weekly = _weekly_feature_frame(data)
     return {
         "source_path": str(index_dir),
         "by_symbol": {
@@ -1119,7 +1488,22 @@ def _add_trade_path_fields(
     asof_date = exit_date or entry_date
     rows = _price_rows_for_trade(price_context, symbol=symbol, entry_date=entry_date, exit_date=exit_date)
     if rows is None or rows.empty or entry_price is None or entry_price <= 0:
-        for field_key in (HOLDING_DAYS_FIELD, MAX_FAVORABLE_FIELD, MAX_ADVERSE_FIELD, MAX_DRAWDOWN_FIELD, FIRST_PROFIT_5PCT_FIELD):
+        for field_key in (
+            HOLDING_DAYS_FIELD,
+            MAX_FAVORABLE_FIELD,
+            MAX_ADVERSE_FIELD,
+            MAX_DRAWDOWN_FIELD,
+            FIRST_PROFIT_5PCT_FIELD,
+            MAX_FAVORABLE_ATR_MULTIPLE_FIELD,
+            MAX_ADVERSE_ATR_MULTIPLE_FIELD,
+            REACHED_10PCT_FIELD,
+            REACHED_15PCT_FIELD,
+            POST_EXIT_MAX_HIGH_5D_FIELD,
+            POST_EXIT_MAX_CLOSE_5D_FIELD,
+            POST_EXIT_MIN_LOW_5D_FIELD,
+            SOLD_TOO_EARLY_5D_FIELD,
+            STOP_LOSS_REBOUND_5D_FIELD,
+        ):
             field_values[field_key] = _derived_payload(
                 raw=None,
                 bucket=None,
@@ -1188,6 +1572,125 @@ def _add_trade_path_fields(
         asof_date=asof_date,
         reference_count=holding_days,
         exception_codes=[],
+    )
+
+    atr_pct = _optional_float(_as_mapping(field_values.get("entry.volatility.atr_20d_bucket")).get("raw"))
+    favorable_atr = max_favorable / atr_pct if max_favorable is not None and atr_pct and atr_pct > 0 else None
+    adverse_atr = max_adverse / atr_pct if max_adverse is not None and atr_pct and atr_pct > 0 else None
+    field_values[MAX_FAVORABLE_ATR_MULTIPLE_FIELD] = _derived_payload(
+        raw=favorable_atr,
+        bucket=_path_atr_multiple_bucket(favorable_atr),
+        asof_date=asof_date,
+        reference_count=holding_days,
+        exception_codes=[] if favorable_atr is not None else ["atr_path_multiple_missing"],
+    )
+    field_values[MAX_ADVERSE_ATR_MULTIPLE_FIELD] = _derived_payload(
+        raw=adverse_atr,
+        bucket=_path_atr_multiple_bucket(adverse_atr),
+        asof_date=asof_date,
+        reference_count=holding_days,
+        exception_codes=[] if adverse_atr is not None else ["atr_path_multiple_missing"],
+    )
+    field_values[REACHED_10PCT_FIELD] = _derived_payload(
+        raw=(max_favorable is not None and max_favorable >= 0.10),
+        bucket=_threshold_reached_bucket(max_favorable, threshold=0.10),
+        asof_date=asof_date,
+        reference_count=holding_days,
+        exception_codes=[] if max_favorable is not None else ["path_price_missing"],
+    )
+    field_values[REACHED_15PCT_FIELD] = _derived_payload(
+        raw=(max_favorable is not None and max_favorable >= 0.15),
+        bucket=_threshold_reached_bucket(max_favorable, threshold=0.15),
+        asof_date=asof_date,
+        reference_count=holding_days,
+        exception_codes=[] if max_favorable is not None else ["path_price_missing"],
+    )
+
+    _add_post_exit_path_fields(
+        field_values,
+        trade=trade,
+        price_context=price_context,
+        exit_date=exit_date,
+        exit_price=_optional_float(trade.get("exit_price")),
+    )
+
+
+def _add_post_exit_path_fields(
+    field_values: dict[str, dict[str, Any]],
+    *,
+    trade: Mapping[str, Any],
+    price_context: Mapping[str, Any],
+    exit_date: str,
+    exit_price: float | None,
+) -> None:
+    symbol = _as_str(trade.get("symbol"))
+    asof_date = exit_date or _as_str(trade.get("entry_date"))
+    rows = _post_exit_price_rows(price_context, symbol=symbol, exit_date=exit_date, limit=5)
+    if exit_price is None:
+        exit_row = _as_mapping(_price_row_for(price_context, symbol=symbol, trade_date=exit_date))
+        exit_price = _optional_float(exit_row.get("close"))
+    if rows is None or rows.empty or exit_price is None or exit_price <= 0:
+        for field_key in (
+            POST_EXIT_MAX_HIGH_5D_FIELD,
+            POST_EXIT_MAX_CLOSE_5D_FIELD,
+            POST_EXIT_MIN_LOW_5D_FIELD,
+            SOLD_TOO_EARLY_5D_FIELD,
+            STOP_LOSS_REBOUND_5D_FIELD,
+        ):
+            field_values[field_key] = _derived_payload(
+                raw=None,
+                bucket=None,
+                asof_date=asof_date,
+                reference_count=0,
+                exception_codes=["post_exit_price_missing"],
+            )
+        return
+
+    high = pd.to_numeric(rows["high"], errors="coerce")
+    close = pd.to_numeric(rows["close"], errors="coerce")
+    low = pd.to_numeric(rows["low"], errors="coerce")
+    max_high_return = _optional_float(high.max()) / exit_price - 1.0 if not high.empty and pd.notna(high.max()) else None
+    max_close_return = _optional_float(close.max()) / exit_price - 1.0 if not close.empty and pd.notna(close.max()) else None
+    min_low_return = _optional_float(low.min()) / exit_price - 1.0 if not low.empty and pd.notna(low.min()) else None
+    reference_count = int(len(rows))
+    exit_reason = _as_str(trade.get("exit_reason"))
+    sold_too_early = exit_reason == "BAOMA_MA25_PROFIT_EXIT_TRIGGERED" and max_high_return is not None and max_high_return >= 0.05
+    stop_rebound = exit_reason == "BAOMA_MA60_STOP_TRIGGERED" and max_high_return is not None and max_high_return >= 0.05
+
+    field_values[POST_EXIT_MAX_HIGH_5D_FIELD] = _derived_payload(
+        raw=max_high_return,
+        bucket=_signed_return_bucket(max_high_return),
+        asof_date=asof_date,
+        reference_count=reference_count,
+        exception_codes=[] if max_high_return is not None else ["post_exit_price_missing"],
+    )
+    field_values[POST_EXIT_MAX_CLOSE_5D_FIELD] = _derived_payload(
+        raw=max_close_return,
+        bucket=_signed_return_bucket(max_close_return),
+        asof_date=asof_date,
+        reference_count=reference_count,
+        exception_codes=[] if max_close_return is not None else ["post_exit_price_missing"],
+    )
+    field_values[POST_EXIT_MIN_LOW_5D_FIELD] = _derived_payload(
+        raw=min_low_return,
+        bucket=_signed_return_bucket(min_low_return),
+        asof_date=asof_date,
+        reference_count=reference_count,
+        exception_codes=[] if min_low_return is not None else ["post_exit_price_missing"],
+    )
+    field_values[SOLD_TOO_EARLY_5D_FIELD] = _derived_payload(
+        raw=sold_too_early if exit_reason == "BAOMA_MA25_PROFIT_EXIT_TRIGGERED" else None,
+        bucket=_diagnostic_bool_bucket(sold_too_early) if exit_reason == "BAOMA_MA25_PROFIT_EXIT_TRIGGERED" else None,
+        asof_date=asof_date,
+        reference_count=reference_count,
+        exception_codes=[] if exit_reason == "BAOMA_MA25_PROFIT_EXIT_TRIGGERED" else ["not_take_profit_exit"],
+    )
+    field_values[STOP_LOSS_REBOUND_5D_FIELD] = _derived_payload(
+        raw=stop_rebound if exit_reason == "BAOMA_MA60_STOP_TRIGGERED" else None,
+        bucket=_diagnostic_bool_bucket(stop_rebound) if exit_reason == "BAOMA_MA60_STOP_TRIGGERED" else None,
+        asof_date=asof_date,
+        reference_count=reference_count,
+        exception_codes=[] if exit_reason == "BAOMA_MA60_STOP_TRIGGERED" else ["not_stop_loss_exit"],
     )
 
 
@@ -1475,6 +1978,123 @@ def _add_industry_index_fields(
     )
 
 
+def _add_market_source_index_field(
+    field_values: dict[str, dict[str, Any]],
+    *,
+    symbol: str,
+    signal_date: str,
+    source_index_by_symbol: Mapping[str, str],
+) -> None:
+    source_index = source_index_by_symbol.get(symbol)
+    field_values[SOURCE_INDEX_FIELD] = _derived_payload(
+        raw=source_index,
+        bucket=source_index,
+        asof_date=signal_date,
+        reference_count=None,
+        exception_codes=[] if source_index else ["source_index_missing"],
+    )
+
+
+def _add_market_index_fields(
+    field_values: dict[str, dict[str, Any]],
+    *,
+    signal_date: str,
+    market_context: Mapping[str, Any],
+) -> None:
+    for market_key, symbol, _label in MARKET_INDEX_SPECS:
+        daily_row = _latest_context_row(
+            _as_mapping(market_context.get("by_symbol")),
+            symbol=symbol,
+            trade_date=signal_date,
+            strict_before=False,
+        )
+        weekly_row = _latest_context_row(
+            _as_mapping(market_context.get("weekly_by_symbol")),
+            symbol=symbol,
+            trade_date=signal_date,
+            strict_before=True,
+        )
+        daily_asof = _as_str(_as_mapping(daily_row).get("trade_date")) or signal_date
+        weekly_asof = _as_str(_as_mapping(weekly_row).get("trade_date")) or signal_date
+        daily_missing = [] if daily_row is not None else ["market_index_missing"]
+        weekly_missing = [] if weekly_row is not None else ["market_weekly_missing"]
+        trend_state = _as_str(_as_mapping(daily_row).get("trend_state")) or None
+        return_vol_20d = _optional_float(_as_mapping(daily_row).get("return_vol_20d"))
+        return_vol_60d = _optional_float(_as_mapping(daily_row).get("return_vol_60d"))
+        weekly_j = _optional_float(_as_mapping(weekly_row).get("kdj_j"))
+        weekly_state = _kdj_state(weekly_j)
+        weekly_trend = _as_str(_as_mapping(weekly_row).get("ma_trend")) or None
+
+        field_values[f"market.{market_key}.trend_state"] = _derived_payload(
+            raw=trend_state,
+            bucket=trend_state,
+            asof_date=daily_asof,
+            reference_count=None,
+            exception_codes=[] if trend_state else daily_missing,
+        )
+        field_values[f"market.{market_key}.return_vol_20d_bucket"] = _derived_payload(
+            raw=return_vol_20d,
+            bucket=_volatility_pct_bucket(return_vol_20d),
+            asof_date=daily_asof,
+            reference_count=None,
+            exception_codes=[] if return_vol_20d is not None else daily_missing,
+        )
+        field_values[f"market.{market_key}.return_vol_60d_bucket"] = _derived_payload(
+            raw=return_vol_60d,
+            bucket=_volatility_pct_bucket(return_vol_60d),
+            asof_date=daily_asof,
+            reference_count=None,
+            exception_codes=[] if return_vol_60d is not None else daily_missing,
+        )
+        field_values[f"market.{market_key}.weekly.kdj_state"] = _derived_payload(
+            raw=weekly_state,
+            bucket=weekly_state,
+            asof_date=weekly_asof,
+            reference_count=None,
+            exception_codes=[] if weekly_state else weekly_missing,
+        )
+        field_values[f"market.{market_key}.weekly.ma_trend_bucket"] = _derived_payload(
+            raw=weekly_trend,
+            bucket=weekly_trend,
+            asof_date=weekly_asof,
+            reference_count=None,
+            exception_codes=[] if weekly_trend else weekly_missing,
+        )
+
+
+def _add_relative_momentum_fields(
+    field_values: dict[str, dict[str, Any]],
+    *,
+    trade: Mapping[str, Any],
+    signal_date: str,
+    price_context: Mapping[str, Any],
+    industry_context: Mapping[str, Any],
+    market_context: Mapping[str, Any],
+) -> None:
+    symbol = _as_str(trade.get("symbol"))
+    signal_row = _as_mapping(_price_row_for(price_context, symbol=symbol, trade_date=signal_date))
+    symbol_return_20d = _optional_float(signal_row.get("return_20d"))
+
+    relative_specs = (
+        (SYMBOL_HS300_RS_20D_FIELD, _market_daily_return(market_context, "000300.SH", signal_date, "return_20d"), "relative_market_missing"),
+        (SYMBOL_CSI500_RS_20D_FIELD, _market_daily_return(market_context, "000905.SH", signal_date, "return_20d"), "relative_market_missing"),
+        (SYMBOL_INDUSTRY_RS_20D_FIELD, _industry_daily_return(field_values, industry_context, signal_date, "return_20d"), "relative_industry_missing"),
+    )
+    for field_key, benchmark_return, missing_code in relative_specs:
+        spread = (
+            symbol_return_20d - benchmark_return
+            if symbol_return_20d is not None and benchmark_return is not None
+            else None
+        )
+        field_values[field_key] = _derived_payload(
+            raw=spread,
+            bucket=_relative_return_bucket(spread),
+            asof_date=signal_date,
+            reference_count=None,
+            exception_codes=[] if spread is not None else [missing_code],
+        )
+
+
 def _add_exit_reason_field(field_values: dict[str, dict[str, Any]], *, trade: Mapping[str, Any]) -> None:
     exit_reason = _as_str(trade.get("exit_reason")) or None
     field_values[EXIT_REASON_FIELD] = _derived_payload(
@@ -1498,6 +2118,20 @@ def _price_rows_for_trade(
     if not isinstance(frame, pd.DataFrame) or not entry_date or not exit_date:
         return None
     return frame[(frame["trade_date"] >= entry_date) & (frame["trade_date"] <= exit_date)]
+
+
+def _post_exit_price_rows(
+    price_context: Mapping[str, Any],
+    *,
+    symbol: str,
+    exit_date: str,
+    limit: int,
+) -> pd.DataFrame | None:
+    by_symbol = _as_mapping(price_context.get("by_symbol"))
+    frame = by_symbol.get(symbol)
+    if not isinstance(frame, pd.DataFrame) or frame.empty or not exit_date:
+        return None
+    return frame[frame["trade_date"] > exit_date].head(limit)
 
 
 def _price_row_for(price_context: Mapping[str, Any], *, symbol: str, trade_date: str) -> Mapping[str, Any] | None:
@@ -1651,6 +2285,12 @@ def _environment_pair_whitelist(metadata: Mapping[str, Any]) -> list[list[str]]:
         pairs.extend([[str(part) for part in _as_sequence(pair)] for pair in configured if len(_as_sequence(pair)) == 2])
     else:
         pairs.extend([[left, right] for left, right in DEFAULT_ENVIRONMENT_FIT_PAIR_WHITELIST])
+    seen = {tuple(pair) for pair in pairs}
+    for left, right in DEFAULT_ENVIRONMENT_FIT_PAIR_WHITELIST:
+        pair = (left, right)
+        if pair not in seen:
+            pairs.append([left, right])
+            seen.add(pair)
     return pairs
 
 
@@ -2077,6 +2717,53 @@ def _weekly_ma_trend(row: Mapping[str, Any]) -> str | None:
     return "mixed"
 
 
+def _daily_trend_state(row: Mapping[str, Any]) -> str | None:
+    close = _optional_float(row.get("close"))
+    ma20 = _optional_float(row.get("ma20"))
+    ma60 = _optional_float(row.get("ma60"))
+    if close is None or ma20 is None or ma60 is None:
+        return None
+    if close > ma20 > ma60:
+        return "bullish"
+    if close < ma20 < ma60:
+        return "bearish"
+    return "mixed"
+
+
+def _market_daily_return(
+    market_context: Mapping[str, Any],
+    symbol: str,
+    signal_date: str,
+    column: str,
+) -> float | None:
+    row = _latest_context_row(
+        _as_mapping(market_context.get("by_symbol")),
+        symbol=symbol,
+        trade_date=signal_date,
+        strict_before=False,
+    )
+    return _optional_float(_as_mapping(row).get(column))
+
+
+def _industry_daily_return(
+    field_values: Mapping[str, Any],
+    industry_context: Mapping[str, Any],
+    signal_date: str,
+    column: str,
+) -> float | None:
+    industry_payload = _as_mapping(field_values.get("industry.sw_l1.code"))
+    industry_code = _field_raw_or_bucket(industry_payload)
+    if not industry_code:
+        return None
+    row = _latest_context_row(
+        _as_mapping(industry_context.get("by_symbol")),
+        symbol=str(industry_code),
+        trade_date=signal_date,
+        strict_before=False,
+    )
+    return _optional_float(_as_mapping(row).get(column))
+
+
 def _kdj_j_bucket(value: Any) -> str | None:
     number = _optional_float(value)
     if number is None:
@@ -2163,6 +2850,76 @@ def _ma20_distance_bucket(value: Any) -> str | None:
     if number < 0.15:
         return "above_5_15pct"
     return "above_gt_15pct"
+
+
+def _relative_return_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    if number < -0.10:
+        return "underperform_gt_10pct"
+    if number < -0.03:
+        return "underperform_3_10pct"
+    if number < 0:
+        return "underperform_0_3pct"
+    if number < 0.03:
+        return "outperform_0_3pct"
+    if number < 0.10:
+        return "outperform_3_10pct"
+    return "outperform_gt_10pct"
+
+
+def _path_atr_multiple_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    if number < -4:
+        return "negative_gt_4atr"
+    if number < -2:
+        return "negative_2_4atr"
+    if number < -1:
+        return "negative_1_2atr"
+    if number < 0:
+        return "negative_0_1atr"
+    if number < 1:
+        return "positive_0_1atr"
+    if number < 2:
+        return "positive_1_2atr"
+    if number < 4:
+        return "positive_2_4atr"
+    return "positive_gt_4atr"
+
+
+def _threshold_reached_bucket(value: Any, *, threshold: float) -> str | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    return "reached" if number >= threshold else "not_reached"
+
+
+def _signed_return_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    if number < -0.10:
+        return "down_gt_10pct"
+    if number < -0.05:
+        return "down_5_10pct"
+    if number < 0:
+        return "down_0_5pct"
+    if number < 0.03:
+        return "up_0_3pct"
+    if number < 0.05:
+        return "up_3_5pct"
+    if number < 0.10:
+        return "up_5_10pct"
+    return "up_gt_10pct"
+
+
+def _diagnostic_bool_bucket(value: bool | None) -> str | None:
+    if value is None:
+        return None
+    return "yes" if value else "no"
 
 
 def _scope_from_field(field_key: str) -> str:
