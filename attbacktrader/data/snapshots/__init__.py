@@ -40,6 +40,7 @@ from .attribution_reference import (
     apply_industry_memberships_to_frame,
     build_attribution_reference_snapshot_from_frame,
     attribution_reference_snapshot_dir,
+    load_or_fetch_all_industry_memberships,
     load_or_fetch_industry_memberships_for_symbols,
     write_attribution_reference_snapshot,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "attribution_reference_snapshot_dir",
     "apply_industry_memberships_to_frame",
     "build_attribution_reference_snapshot_from_frame",
+    "load_or_fetch_all_industry_memberships",
     "load_or_fetch_industry_memberships_for_symbols",
     "daily_bars_snapshot_path",
     "discover_index_bars_snapshot_paths",

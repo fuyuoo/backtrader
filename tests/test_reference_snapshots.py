@@ -201,6 +201,20 @@ def test_attribution_reference_snapshot_builds_buckets_and_exceptions(tmp_path, 
     pe_row = next(row for row in target_rows if row["field_key"] == "entry.valuation.pe_bucket")
     high_row = next(row for row in target_rows if row["field_key"] == "entry.price_position.near_high_20d_bucket")
     mv_row = next(row for row in target_rows if row["field_key"] == "entry.market_cap.total_mv_bucket")
+    mv_abs_row = next(row for row in target_rows if row["field_key"] == "entry.market_cap.total_mv_abs_bucket")
+    turnover_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.turnover_rate_bucket")
+    volume_ratio_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.volume_ratio_bucket")
+    amount_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.amount_bucket")
+    amount_vs_row = next(row for row in target_rows if row["field_key"] == "entry.liquidity.amount_vs_20d_bucket")
+    industry_atr_row = next(
+        row for row in target_rows if row["field_key"] == "entry.volatility.industry_atr_percentile_bucket"
+    )
+    industry_atr_ratio_row = next(
+        row for row in target_rows if row["field_key"] == "entry.volatility.symbol_atr_to_industry_median_bucket"
+    )
+    industry_amount_row = next(
+        row for row in target_rows if row["field_key"] == "entry.liquidity.industry_amount_percentile_bucket"
+    )
     st_row = next(
         row for row in rows
         if row["symbol"] == "600000.SH"
@@ -213,6 +227,14 @@ def test_attribution_reference_snapshot_builds_buckets_and_exceptions(tmp_path, 
     assert "negative_pe" in pe_row["exception_codes"]
     assert high_row["bucket"] in {"at_high", "near_high", "moderate_pullback", "deep_pullback", "far_from_high"}
     assert mv_row["bucket"] in {"p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100"}
+    assert mv_abs_row["bucket"] == "0_100yi"
+    assert turnover_row["bucket"] == "lt_1pct"
+    assert volume_ratio_row["bucket"] == "0p8_1p2x"
+    assert amount_row["bucket"] == "1_3yi"
+    assert amount_vs_row["bucket"] in {"0p8_1p2x", "1p2_1p6x"}
+    assert industry_atr_row["bucket"] in {"p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100"}
+    assert industry_atr_ratio_row["bucket"] in {"lt_0p8x", "0p8_1p2x", "1p2_1p6x", "1p6_2x", "gte_2x"}
+    assert industry_amount_row["bucket"] in {"p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100"}
     assert st_row["bucket"] is None
     assert "reference_excluded_st" in st_row["exception_codes"]
     assert metadata_path.exists()
@@ -436,6 +458,7 @@ def test_prepare_attribution_reference_cli_derives_scope_from_run_dir(tmp_path, 
 
 
 def test_prepare_attribution_reference_cli_can_emit_run_entry_scope(tmp_path, monkeypatch, capsys) -> None:
+    seen = {}
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "run_plan.json").write_text(
@@ -485,6 +508,7 @@ def test_prepare_attribution_reference_cli_can_emit_run_entry_scope(tmp_path, mo
             pass
 
         def fetch_attribution_reference_frame_for_symbols(self, *, start_date, end_date, symbols):
+            seen["symbols"] = symbols
             return _all_a_feature_frame()
 
     monkeypatch.setattr(prepare_attribution_reference_cli, "read_tushare_token", lambda path: "test-token")
@@ -497,6 +521,8 @@ def test_prepare_attribution_reference_cli_can_emit_run_entry_scope(tmp_path, mo
             "--run-dir",
             str(run_dir),
             "--emit-run-entry-scope",
+            "--reference-fetch-scope",
+            "all",
             "--min-reference-count",
             "2",
             "--output-dir",
@@ -507,13 +533,122 @@ def test_prepare_attribution_reference_cli_can_emit_run_entry_scope(tmp_path, mo
     reference = json.loads((tmp_path / "provider-reference" / "reference.json").read_text(encoding="utf-8"))
 
     assert stdout["emit_run_entry_scope"] is True
+    assert stdout["reference_fetch_scope"] == "all"
     assert stdout["emit_symbol_count"] == 2
     assert stdout["emit_date_count"] == 3
     assert stdout["emit_pair_count"] == 3
+    assert seen["symbols"] is None
     assert {
         (row["symbol"], row["trade_date"])
         for row in reference["rows"]
     } == {("000001.SZ", "2024-03-28"), ("000001.SZ", "2024-03-29"), ("600000.SH", "2024-01-01")}
+
+
+def test_prepare_attribution_reference_cli_bulk_fetches_industry_memberships_for_all_scope(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    seen = {}
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "run_plan.json").write_text(
+        json.dumps(
+            {
+                "run": {"from_date": "2024-01-01", "to_date": "2024-03-29"},
+                "data": {"symbols": ["000001.SZ", "600000.SH"]},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "trade_attribution.json").write_text(
+        json.dumps(
+            {
+                "attributions": [
+                    {"trade_index": 1, "symbol": "000001.SZ", "entry_date": "2024-03-29"},
+                    {"trade_index": 2, "symbol": "600000.SH", "entry_date": "2024-01-01"},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeProvider:
+        def __init__(self, token, *, rate_limit=None):
+            pass
+
+        def fetch_attribution_reference_frame_for_symbols(self, *, start_date, end_date, symbols):
+            seen["symbols"] = symbols
+            return _all_a_feature_frame().drop(columns=["sw_l1_code"])
+
+        def fetch_stock_industry_memberships(self, *, symbol, source="SW2021"):
+            raise AssertionError("full-A industry memberships should use the bulk provider method")
+
+        def fetch_all_stock_industry_memberships(self, *, source="SW2021"):
+            seen["bulk_source"] = source
+            return (
+                StockIndustryMembership(
+                    symbol="000001.SZ",
+                    stock_name="平安银行",
+                    level1_code="801780.SI",
+                    level1_name="银行",
+                    level2_code="801781.SI",
+                    level2_name="二级",
+                    level3_code="801782.SI",
+                    level3_name="三级",
+                    in_date=date(1990, 1, 1),
+                    out_date=None,
+                    is_new=True,
+                    source=source,
+                ),
+                StockIndustryMembership(
+                    symbol="600000.SH",
+                    stock_name="浦发银行",
+                    level1_code="801180.SI",
+                    level1_name="房地产",
+                    level2_code="801181.SI",
+                    level2_name="二级",
+                    level3_code="801182.SI",
+                    level3_name="三级",
+                    in_date=date(1990, 1, 1),
+                    out_date=None,
+                    is_new=True,
+                    source=source,
+                ),
+            )
+
+    monkeypatch.setattr(prepare_attribution_reference_cli, "read_tushare_token", lambda path: "test-token")
+    monkeypatch.setattr(prepare_attribution_reference_cli, "TushareProvider", FakeProvider)
+
+    prepare_attribution_reference_cli.main(
+        [
+            "--provider",
+            "tushare",
+            "--run-dir",
+            str(run_dir),
+            "--emit-run-entry-scope",
+            "--reference-fetch-scope",
+            "all",
+            "--fetch-industry-memberships",
+            "--min-reference-count",
+            "2",
+            "--snapshot-root",
+            str(tmp_path / "snapshots"),
+            "--output-dir",
+            str(tmp_path / "provider-reference"),
+        ]
+    )
+    reference = json.loads((tmp_path / "provider-reference" / "reference.json").read_text(encoding="utf-8"))
+
+    assert seen["symbols"] is None
+    assert seen["bulk_source"] == "SW2021"
+    assert "801780.SI" in (tmp_path / "provider-reference" / "reference.json").read_text(encoding="utf-8")
+    assert (tmp_path / "snapshots" / "industries" / "sw" / "SW2021" / "memberships" / "000001_SZ.parquet").exists()
+    assert {
+        (row["symbol"], row["trade_date"])
+        for row in reference["rows"]
+    } == {("000001.SZ", "2024-03-29"), ("600000.SH", "2024-01-01")}
 
 
 def test_industry_memberships_apply_by_effective_interval(tmp_path) -> None:
@@ -567,6 +702,7 @@ def _all_a_feature_frame() -> pd.DataFrame:
         ("000001.SZ", False, False, "SZSE", 200, True, "801780.SI", -12.0),
         ("000002.SZ", False, False, "SZSE", 200, True, "801180.SI", 18.0),
         ("600000.SH", True, False, "SSE", 200, True, "801780.SI", 20.0),
+        ("000003.SZ", False, False, "SZSE", 200, True, "801780.SI", 25.0),
     ]
     days = pd.bdate_range("2024-01-01", "2024-03-29")
     for day_index, trade_date in enumerate(days):
@@ -581,6 +717,8 @@ def _all_a_feature_frame() -> pd.DataFrame:
                     "low": base * 0.98,
                     "close": base * 1.01,
                     "amount": 100000 + symbol_index * 50000 + day_index * 1000,
+                    "turnover_rate": 0.8 + symbol_index * 1.2,
+                    "volume_ratio": 0.9 + symbol_index * 0.4,
                     "total_mv": 100 + symbol_index * 200 + day_index,
                     "circ_mv": 80 + symbol_index * 150 + day_index,
                     "pe": pe,

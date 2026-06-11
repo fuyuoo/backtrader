@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from attbacktrader.data import IndexBar
+from attbacktrader.data.snapshots import industry_index_bars_snapshot_path, write_index_bars_parquet
 from attbacktrader.cli import run_data_dictionary as run_data_dictionary_cli
 from attbacktrader.cli import run_data_drilldown as run_data_drilldown_cli
 from attbacktrader.cli import run_data_drilldown_batch as run_data_drilldown_batch_cli
@@ -309,11 +311,13 @@ def test_attribution_wide_samples_derives_path_and_signal_strength_from_daily_ca
     run_dir = _run_dir(tmp_path)
     reference_path = _reference_snapshot(tmp_path)
     daily_cache = _daily_price_cache(tmp_path)
+    snapshot_root = _industry_index_cache(tmp_path)
 
     wide_samples = build_attribution_wide_samples(
         run_dir,
         reference_snapshot=reference_path,
         daily_price_cache_dir=daily_cache,
+        snapshot_root=snapshot_root,
     )
 
     fields = wide_samples["samples"][0]["field_values"]
@@ -327,7 +331,20 @@ def test_attribution_wide_samples_derives_path_and_signal_strength_from_daily_ca
     assert fields["entry.signal_strength.macd_bar_bucket"]["bucket"] is not None
     assert fields["entry.signal_strength.signal_candle_body_bucket"]["bucket"] == "1_3pct"
     assert fields["entry.signal_strength.signal_upper_lower_shadow_bucket"]["bucket"] == "long_upper_shadow"
+    assert fields["entry.weekly.symbol_kdj_j_bucket"]["bucket"] is not None
+    assert fields["entry.weekly.symbol_kdj_state"]["bucket"] is not None
+    assert fields["entry.weekly.symbol_ma_trend_bucket"]["bucket"] is not None
+    assert fields["entry.weekly.symbol_close_vs_week_ma20_bucket"]["bucket"] is not None
+    assert fields["industry.volatility.atr_20d_bucket"]["bucket"] is not None
+    assert fields["industry.volatility.return_vol_20d_bucket"]["bucket"] is not None
+    assert fields["industry.price_position.near_high_60d_bucket"]["bucket"] is not None
+    assert fields["industry.weekly.kdj_j_bucket"]["bucket"] is not None
+    assert fields["industry.weekly.kdj_state"]["bucket"] is not None
+    assert fields["industry.weekly.ma_trend_bucket"]["bucket"] is not None
+    assert fields["industry.weekly.relative_strength_bucket"]["bucket"] is not None
     assert fields["trade.exit.reason"]["bucket"] == "FIXED_5_PERCENT_STOP"
+    assert "entry.weekly.symbol_kdj_state" in wide_samples["environment_fit_default_fields"]
+    assert "industry.weekly.kdj_state" in wide_samples["environment_fit_default_fields"]
     assert "trade.path.holding_days_bucket" not in wide_samples["environment_fit_default_fields"]
     assert "trade.exit.reason" not in wide_samples["environment_fit_default_fields"]
     assert ["trade.exit.reason", "entry.signal_strength.dea_waterline_age_trading_days_bucket"] not in wide_samples[
@@ -1010,7 +1027,7 @@ def _daily_price_cache(root: Path) -> Path:
     daily_dir = root / "daily-cache" / "daily"
     daily_dir.mkdir(parents=True)
     rows = []
-    for index, trade_date in enumerate(pd.bdate_range("2023-09-01", "2024-01-12")):
+    for index, trade_date in enumerate(pd.bdate_range("2023-07-03", "2024-01-12")):
         close = 8.0 + index * 0.025
         rows.append(
             {
@@ -1034,6 +1051,42 @@ def _daily_price_cache(root: Path) -> Path:
             row.update(overrides[row["trade_date"]])
     pd.DataFrame(rows).to_parquet(daily_dir / "daily.parquet", index=False)
     return daily_dir.parent
+
+
+def _industry_index_cache(root: Path) -> Path:
+    snapshot_root = root / "snapshots"
+    start_date = pd.Timestamp("2023-07-03").date()
+    end_date = pd.Timestamp("2024-01-12").date()
+    for symbol_index, symbol in enumerate(("801780.SI", "801180.SI")):
+        bars = []
+        for index, trade_date in enumerate(pd.bdate_range(start_date, end_date)):
+            base = 1000.0 + symbol_index * 100.0 + index * (1.5 + symbol_index * 0.3)
+            close = base * (1.0 + (0.01 if index % 7 == 0 else 0.0))
+            high = max(base, close) * 1.01
+            low = min(base, close) * 0.99
+            bars.append(
+                IndexBar(
+                    symbol=symbol,
+                    trade_date=trade_date.date(),
+                    open=base,
+                    high=high,
+                    low=low,
+                    close=close,
+                    volume=1000000.0 + index,
+                    amount=2000000.0 + index,
+                )
+            )
+        write_index_bars_parquet(
+            bars,
+            industry_index_bars_snapshot_path(
+                snapshot_root,
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                source="SW2021",
+            ),
+        )
+    return snapshot_root
 
 
 def _write_json(path: Path, payload) -> None:

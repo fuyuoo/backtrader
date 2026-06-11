@@ -183,12 +183,13 @@ reports/_tmp-baoma-100-industry-attribution-check/
 | 因子 | 字段形态 | 默认进入 `environment_fit` | 说明 |
 |---|---|---:|---|
 | 申万一级行业名称 | bucket/category | 是 | 用于回答策略是否适合某些一级行业。 |
-| 个股相对行业波动桶 | bucket | 是 | 优先解释固定 5% 减仓在高/低波动行业中是否过紧或过松。 |
-| 行业自身波动桶 | bucket | 否 | 进入宽表和字段索引，先不默认进入组合矩阵，避免与行业名称重复切样本。 |
-| 总市值绝对金额桶 | bucket | 否 | 暂缓实现；后续可按 0-100 亿、100-300 亿、300-600 亿、600-1000 亿、1000-1500 亿、1500 亿以上补充展示口径。 |
-| 总市值全 A 横截面分位桶 | bucket | 是 | 用于跨股票池、跨 run 比较大/中/小市值适配。 |
-| 流通市值绝对金额桶 | bucket | 否 | 暂缓实现；后续可按 0-100 亿、100-300 亿、300-600 亿、600-1000 亿、1000-1500 亿、1500 亿以上补充展示口径。 |
-| 流通市值全 A 横截面分位桶 | bucket | 是 | 用于跨股票池、跨 run 比较流通盘适配。 |
+| 个股 ATR 行业内分位桶 | bucket | 是 | 同一交易日、同一申万一级行业内按 ATR 百分比做 5 档分位，优先解释固定 5% 减仓在高/低波动股票中是否过紧或过松。 |
+| 个股 ATR / 行业 ATR 中位数桶 | bucket | 是 | 保留原始倍数并按固定解释桶分组，用于观察个股波动是否显著高于/低于本行业。 |
+| 行业自身波动桶 | bucket | 否 | 已实现行业指数 ATR%、20/60 日收益波动、距 60 日高点；进入宽表和字段索引，先不默认进入组合矩阵，避免与行业名称重复切样本。 |
+| 总市值绝对金额桶 | bucket | 否 | 已实现，按 0-100 亿、100-300 亿、300-600 亿、600-1000 亿、1000-1500 亿、1500 亿以上分桶。 |
+| 总市值全 A 横截面分位桶 | bucket | 否 | 已实现；用于跨股票池、跨 run 比较大/中/小市值适配，第一版不默认切分。 |
+| 流通市值绝对金额桶 | bucket | 否 | 已实现，按 0-100 亿、100-300 亿、300-600 亿、600-1000 亿、1000-1500 亿、1500 亿以上分桶。 |
+| 流通市值全 A 横截面分位桶 | bucket | 否 | 已实现；用于跨股票池、跨 run 比较流通盘适配，第一版不默认切分。 |
 | PE/PE_TTM/PB 原始值 | raw numeric | 否 | 只进宽表，用于核验和重切分桶。 |
 | PE_TTM 桶 | bucket | 是 | 负值单独进亏损估值桶；缺数据才是 `missing`。 |
 | PE 桶 | bucket | 否 | 第一版只进宽表和字段索引，避免 PE 和 PE_TTM 同时默认切分。 |
@@ -199,12 +200,15 @@ reports/_tmp-baoma-100-industry-attribution-check/
 | 近 20 日最大振幅桶 | bucket | 否 | 先进入字段索引，用于观察极端振幅。 |
 | 固定 5% 对应 ATR 倍数桶 | bucket | 是 | 直接解释固定 5% 止盈是否太紧或太松。 |
 | 入场价距 MA60 的 ATR 倍数桶 | bucket | 是 | 直接解释止损空间是否贴近 MA60。 |
-| 20 日平均成交额分位桶 | bucket | 是 | 默认观察流动性适配。 |
-| 换手率桶 | bucket | 是 | 默认观察成交活跃度适配。 |
-| 量比、相对行业成交活跃度 | raw/bucket | 否 | 进入宽表和字段索引，后续按覆盖率决定是否默认展示。 |
+| 20 日平均成交额分位桶 | bucket | 否 | 已实现，先进入字段索引，避免流动性和市值同时默认切分造成样本过碎。 |
+| 成交额、换手率、量比、成交额相对20日均额、行业内成交额分位 | raw/bucket | 否 | 已实现，进入宽表和字段索引，后续按覆盖率和归因效果决定是否默认展示。 |
 | 距近 20 日高点/近 60 日高点 | raw/bucket | 是 | 用于观察入场是否集中在追高或突破后回落；默认进入 `environment_fit`。 |
 | 近 20 日/60 日区间位置 | raw/bucket | 是 | 用于观察入场处在阶段区间底部、中部还是顶部；默认进入 `environment_fit`，并与距高点字段一起检查样本切分风险。 |
 | 距 MA25/MA60 | raw/bucket | 否 | 和 baoma 入场结构及止损适配接近，先进入宽表和字段索引，不默认进入 `environment_fit`。 |
+| 个股周线 KDJ 状态 | category | 是 | 已实现；使用信号日前最近一根已完成周线，默认进入 `environment_fit`。 |
+| 个股周线 KDJ J、周线均线趋势、周线收盘价相对 MA20 | raw/bucket | 否 | 已实现，进入宽表和字段索引，先不默认切分。 |
+| 行业周线 KDJ 状态 | category | 是 | 已实现；使用申万一级行业指数信号日前最近一根已完成周线，默认进入 `environment_fit`。 |
+| 行业周线 KDJ J、行业周线均线趋势、行业周线相对强度 | raw/bucket | 否 | 已实现，进入宽表和字段索引，行业周线相对强度按同周行业指数 4 周收益分位计算。 |
 
 下一阶段新增因子的实现规则：
 
@@ -225,15 +229,15 @@ reports/_tmp-baoma-100-industry-attribution-check/
 15. 第一版全 A 横截面分位桶统一使用 5 档：`p0_p20`、`p20_p40`、`p40_p60`、`p60_p80`、`p80_p100`；原始 percentile 数值仍进入宽表，后续可重切分桶。
 16. PE、PE_TTM、PB 的全 A 分位只对有效正值计算；PE/PE_TTM 负值进入 `negative`，缺失进入 `missing`；PB 小于等于 0 进入 `non_positive`，缺失进入 `missing`。
 17. ATR 百分比、20 日收益波动率、60 日收益波动率、近 20 日最大振幅等波动因子第一版也使用全 A 横截面 5 档分位桶，并在宽表保留原始值；固定绝对阈值桶后续按需要再补。
-18. 成交额、20 日平均成交额、换手率、量比等流动性因子第一版也使用全 A 横截面 5 档分位桶，并在宽表保留原始值；成交额使用历史实际成交额，换手率优先来自历史 `daily_basic`，缺失时记录 `missing`，不在报告层用成交量和流通股本临时拼出口径。
+18. 流动性因子第一版同时保留固定解释桶和分位桶：20 日平均成交额使用全 A 横截面 5 档分位桶；当日成交额、换手率、量比、当日成交额/20 日均额使用固定解释桶；行业内成交额分位按同日同申万一级行业内 5 档分位计算。成交额使用历史实际成交额，换手率和量比优先来自历史 `daily_basic`，缺失时记录 `missing`，不在报告层用成交量和流通股本临时拼出口径。
 19. 个股相对行业波动同时保留原始比值和行业内分位桶：原始值使用 `symbol_atr_pct / industry_median_atr_pct`，默认进入 `environment_fit` 的桶使用同日同申万一级行业内 ATR 百分比 5 档分位。
-20. 固定 5% 止盈适配因子使用固定解释桶，不使用分位桶；原始值为 `5% / ATR%`，桶为 `<1 ATR`、`1-2 ATR`、`2-3 ATR`、`3-5 ATR`、`>=5 ATR`。
+20. 固定 5% 止盈适配因子使用固定解释桶，不使用分位桶；原始值为 `5% / ATR%`，桶为 `<1 ATR`、`1-2 ATR`、`2-3 ATR`、`>=3 ATR`。
 21. 入场价距离 MA60 的 ATR 倍数使用固定解释桶，不使用分位桶；默认字段 `entry.price_position.ma60_atr_multiple_bucket` 的原始值为 `(实际入场成交价 - 入场信号日 MA60) / 入场信号日 ATR`，用于识别信号次日开盘下杀后是否已经贴近或跌破 MA60；宽表另保留 `entry.price_position.signal_close_ma60_atr_multiple_bucket`，原始值为 `(入场信号日 close - 入场信号日 MA60) / 入场信号日 ATR`，用于核验信号本身的位置。
 22. 距近 20 日高点和近 60 日高点默认进入 `environment_fit`，使用入场信号日 close 计量，使用固定解释桶，不使用分位桶；宽表保留原始距离百分比 `signal_day_close / rolling_high - 1`，桶为 `at_high`（0% 到 -1%）、`near_high`（-1% 到 -3%）、`moderate_pullback`（-3% 到 -8%）、`deep_pullback`（-8% 到 -15%）、`far_from_high`（小于 -15%）。全 A 参考快照按信号日对齐，`entry_date` 仅保留为实际成交日。
 23. 近 20 日和 60 日区间位置默认进入 `environment_fit`，使用入场信号日 close 计量；原始值为 `(signal_day_close - rolling_low) / (rolling_high - rolling_low)`，桶为 `bottom`（0-20%）、`lower_mid`（20-40%）、`middle`（40-60%）、`upper_mid`（60-80%）、`top`（80-100%）。当 `rolling_high == rolling_low` 时记录 `flat_range` 异常，不默认填充。
 24. 行业适配使用入场信号日的历史申万一级行业，不使用当前行业回填历史；行业映射不套用 5 个交易日 staleness 限制，而是按历史行业关系有效区间判断，`start_date <= signal_date <= end_date` 时视为有效。若只有变更点数据，则最近一次变更后的行业有效到下一次变更前；完全找不到覆盖区间时记录 `industry_missing`。
 25. `environment_fit` 第一版默认只输出入场前或入场时可见因子的单因子统计和白名单二因子组合；三因子及以上组合先留给字段索引、样本 drilldown 或后续专项报告，避免默认矩阵样本切分过碎。第二批归因字段加入交易路径诊断和入场信号强度归因：交易路径字段包括 `trade.path.holding_days_bucket`、`trade.path.max_favorable_return_before_exit_bucket`、`trade.path.max_adverse_return_before_exit_bucket`、`trade.path.max_drawdown_from_peak_bucket`、`trade.path.first_profit_5pct_days_bucket`；这些是事后路径结果，只能用于解释交易如何结束，不能进入 `environment_fit` 排名，也不能当作入场可见因子。入场信号强度字段包括 `entry.signal_strength.dea_waterline_age_trading_days_bucket`、`entry.signal_strength.dea_value_bucket`、`entry.signal_strength.macd_bar_bucket`、`entry.signal_strength.dif_dea_distance_bucket`、`entry.signal_strength.ma25_above_ma60_spread_bucket`、`entry.signal_strength.ma60_slope_20d_bucket`、`entry.signal_strength.signal_candle_body_bucket`、`entry.signal_strength.signal_upper_lower_shadow_bucket`，这些字段可以进入 `environment_fit`。
-26. 第一版二因子组合白名单为：申万一级行业 x 个股相对行业波动桶、申万一级行业 x 固定 5% 对应 ATR 倍数桶、申万一级行业 x 入场距 MA60 ATR 倍数桶、ATR 百分比桶 x 固定 5% 对应 ATR 倍数桶、ATR 百分比桶 x 入场距 MA60 ATR 倍数桶、流通市值分位桶 x 20 日平均成交额分位桶、距 20 日高点桶 x 20 日区间位置桶、距 60 日高点桶 x 60 日区间位置桶；PE/PB 先只进宽表和字段索引，PE_TTM 作为第一版默认估值主轴。`trade.exit.reason` x 入场因子白名单组合单独作为 `outcome_diagnostic`，用于回答止损/止盈分别在哪些入场环境高发；它不是 `environment_fit` 组合，不参与最佳/最差环境排名，也不自动生成过滤或参数优化建议。
+26. 第一版二因子组合白名单为：申万一级行业 x 个股相对行业波动桶、申万一级行业 x 行业周线 KDJ 状态、申万一级行业 x 固定 5% 对应 ATR 倍数桶、申万一级行业 x 入场距 MA60 ATR 倍数桶、ATR 百分比桶 x 固定 5% 对应 ATR 倍数桶、ATR 百分比桶 x 入场距 MA60 ATR 倍数桶、个股行业内 ATR 分位 x 个股周线 KDJ 状态、个股周线 KDJ 状态 x 行业周线 KDJ 状态、流通市值分位桶 x 20 日平均成交额分位桶、距 20 日高点桶 x 20 日区间位置桶、距 60 日高点桶 x 60 日区间位置桶；PE/PB 先只进宽表和字段索引，PE_TTM 作为第一版默认估值主轴。`trade.exit.reason` x 入场因子白名单组合单独作为 `outcome_diagnostic`，用于回答止损/止盈分别在哪些入场环境高发；它不是 `environment_fit` 组合，不参与最佳/最差环境排名，也不自动生成过滤或参数优化建议。
 27. `environment_fit` 第一版低样本阈值为：单因子分组少于 10 笔、二因子组合少于 20 笔时标记 `low_sample`。低样本分组仍保留在 JSON 中，但中文报告首页最佳/最差结论候选不采用低样本分组。
 28. `Attribution Wide Sample` 同时输出 JSON 和 CSV：JSON 保留嵌套字段、exception、asof、provenance，供程序和 AI review 使用；CSV 使用扁平字段名，供人工用 Excel/WPS/脚本筛选。
 29. 新增归因产物文件名固定为：`attribution_wide_samples.json`、`attribution_wide_samples.csv`、`attribution_field_index.json`、`attribution_field_index.zh.md`。
@@ -245,24 +249,25 @@ reports/_tmp-baoma-100-industry-attribution-check/
 35. 全 A 参考快照存放在 `data/snapshots/attribution_reference/<reference_universe>/<start_date>_<end_date>/`，例如 `data/snapshots/attribution_reference/full_a_main_chinext_star/2022-10-01_2024-12-31/`；该目录属于 `Data Snapshot`，不属于 run-specific `reports/`。
 36. 全 A 参考快照中表格数据使用 Parquet，metadata/provenance/参数/字段版本/异常统计使用 JSON。
 37. 全 A 横截面 percentile reference 在 `att-prepare-attribution-reference` 阶段预计算并保存；归因宽表生成阶段只读取并 join 已保存的 percentile/bucket，不临时重算分位。
-38. 第一版参考字段版本为 `attribution_reference_fields.v1`；metadata 必须记录字段清单、计算公式、分桶规则、reference universe 过滤规则、历史 ST 数据源策略、percentile 计算方法、生成时间和数据范围。后续改桶或新增字段时升级版本，不覆盖 v1 语义。
-39. Percentile 使用平均名次法处理同值，等价于 `rank(pct=True, method="average")`；同值样本获得相同 percentile。5 档桶边界为 `[0,0.2]`、`(0.2,0.4]`、`(0.4,0.6]`、`(0.6,0.8]`、`(0.8,1.0]`。每个 percentile/bucket 记录 `reference_count`；某日某字段有效参考样本数少于 100 时标记 `reference_low_count`。
-40. 如果回测交易样本的入场信号日股票因停牌等原因被全 A reference universe 排除，宽表仍保留该交易样本；对应 percentile/bucket 字段标记 `reference_excluded_suspended` 等排除原因，不给分位桶。原始指标值是否可用按各字段自己的历史取值规则处理。
-41. 如果回测交易样本的入场信号日股票处于历史 ST 状态，宽表仍保留该交易样本；全 A percentile/bucket 字段标记 `reference_excluded_st`，交易级 `attribution_exceptions[]` 汇总该异常。
-42. `Attribution Wide Sample` 第一版只包含 completed trades，对齐 `environment_fit` 的利润归因口径；blocked/rejected/opportunity 样本后续做单独 opportunity attribution，不混入同一张宽表。
-43. 期末强制清仓样本进入 `Attribution Wide Sample`，但标记 `exit_type=forced_end_liquidation`，默认不进入 `environment_fit` 首页最佳/最差结论候选；自然退出 completed trades 默认进入。Open-position excluded 样本不混入 completed-trade 宽表，后续单独做 open position attribution。
-44. `Attribution Wide Sample` 保留收益与持有期解释列：`return_pct`、`net_pnl`、`gross_pnl`（如已有毛口径）、`return_on_entry_value`、`holding_days`、`max_favorable_excursion_pct`、`max_adverse_excursion_pct`。`environment_fit` 第一版排序仍主要使用 win rate、average return、net PnL 和 return on entry value。
-45. `max_favorable_excursion_pct` 和 `max_adverse_excursion_pct` 第一版使用持有期日线 high/low 路径计算：MFE 为 `(holding_high_max - entry_price) / entry_price`，MAE 为 `(holding_low_min - entry_price) / entry_price`。若 high/low 缺失则记录 missing，不退化为 close 路径。
-46. MFE/MAE 持有期范围包含实际入场成交日到退出成交日之间的整日 high/low；由于日线无法精确切分开盘成交前后路径，metadata 必须标记为 `daily_bar_path_approximation`。
-47. 从宽表生成的增强版 `environment_fit` 第一版写新文件，不覆盖旧口径：`environment_fit.enriched.json` 和 `environment_fit.enriched.zh.md`。验证稳定后再决定是否替换默认 `environment_fit.json`。
-48. `attribution_field_index.zh.md` 首先作为可用性审计报告：先展示覆盖率低和异常最多的字段，再单列默认进入 `environment_fit` 的字段，最后列候选但未默认进入的字段。每个字段展示覆盖率、missing 数、exception top codes、主要桶分布和代表 `trade_index` refs。
-49. 字段索引代表样本每个字段每个主要桶最多保留 5 条 `trade_index`，优先选择最高正收益、最大亏损、最大净 PnL、最大负 PnL 和中位收益附近样本，避免随机样本不利于核验。
-50. `environment_fit.enriched.zh.md` 首页按高胜率环境候选、高净 PnL 贡献环境候选、亏损集中环境候选、固定止盈/止损适配归因、低样本和数据异常提醒组织；当前阶段只做归因和证据展示，不输出 deterministic risk label，也不自动改策略参数。固定止盈/止损适配归因只展示分组交易数、胜率、平均收益、净 PnL、MFE/MAE 中位数、止损退出占比等事实，不写“太紧/太松/应该调整”的判断结论。
-51. 止损退出占比在每个归因桶内计算，分母为该桶自然退出 completed trades，分子为 `exit_reason` 属于 MA60 止损的交易数；期末强制清仓样本不进入默认分母。
-52. 固定 5% 分批减仓触发统计作为归因事实输出：`scale_out_5pct_trade_count`、`scale_out_5pct_trade_rate`、`scale_out_any_trade_rate`、`median_first_scale_out_days`、`median_mfe_pct`。默认分母为自然退出 completed trades，期末强制清仓单独标记。
-53. `median_first_scale_out_days` 从实际入场成交日到第一笔 5% scale-out 成交日按交易日数计算；未触发 5% scale-out 的样本该字段为 missing，不用退出日替代。桶内中位数只对已触发 5% scale-out 的样本计算，并同时展示触发样本数。
-54. `median_first_scale_out_days`、`holding_days` 等持续时间字段使用交易日数，优先读取 run artifact 或 prepared data 的交易日历；如果交易日历缺失，记录 `trading_calendar_missing`，不退化为自然日差。
-55. `holding_days` 优先沿用现有 run artifact 中已可信的值；如缺失则按交易日历计算并标记来源 `computed_from_calendar`。若现有值与按交易日历计算值不一致，记录 `holding_days_mismatch`，不静默覆盖。
+38. 当需要严格全 A 横截面时，`att-prepare-attribution-reference` 必须使用 `--reference-fetch-scope all` 拉取全 A 行情/基础字段，同时用 `--emit-run-entry-scope` 只输出本次 run 实际入场样本；不能用 run 股票池白名单作为 reference 截面。
+39. 第一版参考字段版本为 `attribution_reference_fields.v1`；metadata 必须记录字段清单、计算公式、分桶规则、reference universe 过滤规则、历史 ST 数据源策略、percentile 计算方法、生成时间和数据范围。后续改桶或新增字段时升级版本，不覆盖 v1 语义。
+40. Percentile 使用平均名次法处理同值，等价于 `rank(pct=True, method="average")`；同值样本获得相同 percentile。5 档桶边界为 `[0,0.2]`、`(0.2,0.4]`、`(0.4,0.6]`、`(0.6,0.8]`、`(0.8,1.0]`。每个 percentile/bucket 记录 `reference_count`；某日某字段有效参考样本数少于 100 时标记 `reference_low_count`。
+41. 如果回测交易样本的入场信号日股票因停牌等原因被全 A reference universe 排除，宽表仍保留该交易样本；对应 percentile/bucket 字段标记 `reference_excluded_suspended` 等排除原因，不给分位桶。原始指标值是否可用按各字段自己的历史取值规则处理。
+42. 如果回测交易样本的入场信号日股票处于历史 ST 状态，宽表仍保留该交易样本；全 A percentile/bucket 字段标记 `reference_excluded_st`，交易级 `attribution_exceptions[]` 汇总该异常。
+43. `Attribution Wide Sample` 第一版只包含 completed trades，对齐 `environment_fit` 的利润归因口径；blocked/rejected/opportunity 样本后续做单独 opportunity attribution，不混入同一张宽表。
+44. 期末强制清仓样本进入 `Attribution Wide Sample`，但标记 `exit_type=forced_end_liquidation`，默认不进入 `environment_fit` 首页最佳/最差结论候选；自然退出 completed trades 默认进入。Open-position excluded 样本不混入 completed-trade 宽表，后续单独做 open position attribution。
+45. `Attribution Wide Sample` 保留收益与持有期解释列：`return_pct`、`net_pnl`、`gross_pnl`（如已有毛口径）、`return_on_entry_value`、`holding_days`、`max_favorable_excursion_pct`、`max_adverse_excursion_pct`。`environment_fit` 第一版排序仍主要使用 win rate、average return、net PnL 和 return on entry value。
+46. `max_favorable_excursion_pct` 和 `max_adverse_excursion_pct` 第一版使用持有期日线 high/low 路径计算：MFE 为 `(holding_high_max - entry_price) / entry_price`，MAE 为 `(holding_low_min - entry_price) / entry_price`。若 high/low 缺失则记录 missing，不退化为 close 路径。
+47. MFE/MAE 持有期范围包含实际入场成交日到退出成交日之间的整日 high/low；由于日线无法精确切分开盘成交前后路径，metadata 必须标记为 `daily_bar_path_approximation`。
+48. 从宽表生成的增强版 `environment_fit` 第一版写新文件，不覆盖旧口径：`environment_fit.enriched.json` 和 `environment_fit.enriched.zh.md`。验证稳定后再决定是否替换默认 `environment_fit.json`。
+49. `attribution_field_index.zh.md` 首先作为可用性审计报告：先展示覆盖率低和异常最多的字段，再单列默认进入 `environment_fit` 的字段，最后列候选但未默认进入的字段。每个字段展示覆盖率、missing 数、exception top codes、主要桶分布和代表 `trade_index` refs。
+50. 字段索引代表样本每个字段每个主要桶最多保留 5 条 `trade_index`，优先选择最高正收益、最大亏损、最大净 PnL、最大负 PnL 和中位收益附近样本，避免随机样本不利于核验。
+51. `environment_fit.enriched.zh.md` 首页按高胜率环境候选、高净 PnL 贡献环境候选、亏损集中环境候选、固定止盈/止损适配归因、低样本和数据异常提醒组织；当前阶段只做归因和证据展示，不输出 deterministic risk label，也不自动改策略参数。固定止盈/止损适配归因只展示分组交易数、胜率、平均收益、净 PnL、MFE/MAE 中位数、止损退出占比等事实，不写“太紧/太松/应该调整”的判断结论。
+52. 止损退出占比在每个归因桶内计算，分母为该桶自然退出 completed trades，分子为 `exit_reason` 属于 MA60 止损的交易数；期末强制清仓样本不进入默认分母。
+53. 固定 5% 分批减仓触发统计作为归因事实输出：`scale_out_5pct_trade_count`、`scale_out_5pct_trade_rate`、`scale_out_any_trade_rate`、`median_first_scale_out_days`、`median_mfe_pct`。默认分母为自然退出 completed trades，期末强制清仓单独标记。
+54. `median_first_scale_out_days` 从实际入场成交日到第一笔 5% scale-out 成交日按交易日数计算；未触发 5% scale-out 的样本该字段为 missing，不用退出日替代。桶内中位数只对已触发 5% scale-out 的样本计算，并同时展示触发样本数。
+55. `median_first_scale_out_days`、`holding_days` 等持续时间字段使用交易日数，优先读取 run artifact 或 prepared data 的交易日历；如果交易日历缺失，记录 `trading_calendar_missing`，不退化为自然日差。
+56. `holding_days` 优先沿用现有 run artifact 中已可信的值；如缺失则按交易日历计算并标记来源 `computed_from_calendar`。若现有值与按交易日历计算值不一致，记录 `holding_days_mismatch`，不静默覆盖。
 56. `Attribution Wide Sample` JSON 需要保留字段级或分组级 provenance，至少可追溯到 `trade_lifecycle.json`、`trade_review.json` 等 run artifact、attribution reference snapshot path/version、measurement date 和 factor timing；CSV 保持扁平字段，优先服务人工筛选。
 57. `Attribution Wide Sample` CSV 中异常信息只扁平化保留每个字段的 `*.exception_code`、适用字段的 `*.asof_date` / `*.staleness_trading_days`，以及交易级 `attribution_exception_codes`（用 `;` 拼接）；完整 exception detail 只放 JSON。
 58. `attribution_field_index.json` 同时作为机器可读字段目录和统计结果；每个字段包含 `field_key`、`label_zh`、`value_type`、`timing`、`scope`、`bucket_rule`、`default_in_environment_fit`、`source`、`missing_policy`、`coverage_stats`、`bucket_distribution` 和 `sample_refs`。

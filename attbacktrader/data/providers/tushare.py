@@ -37,6 +37,8 @@ REFERENCE_DAILY_BASIC_FIELDS = (
     "ts_code,trade_date,turnover_rate,volume_ratio,pe,pe_ttm,pb,total_mv,circ_mv"
 )
 NAMECHANGE_FIELDS = "ts_code,name,start_date,end_date,change_reason"
+INDEX_MEMBER_ALL_FIELDS = "ts_code,name,l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,in_date,out_date,is_new"
+INDEX_MEMBER_ALL_PAGE_LIMIT = 3000
 DEFAULT_TUSHARE_REQUESTS_PER_MINUTE = 180.0
 DEFAULT_TUSHARE_RETRY_ATTEMPTS = 5
 DEFAULT_TUSHARE_RETRY_BASE_SECONDS = 2.0
@@ -303,6 +305,7 @@ class TushareProvider:
                 start_date=start_date,
                 end_date=end_date,
                 symbols=symbols,
+                raw_cache_dir=raw_cache_dir,
             )
         )
         namechange_frame = self._call_tushare(
@@ -388,6 +391,7 @@ class TushareProvider:
         start_date: date,
         end_date: date,
         symbols: Sequence[str] | None,
+        raw_cache_dir: str | Path | None,
     ) -> list[Any]:
         if symbols and len(symbols) < REFERENCE_SYMBOL_ALL_MARKET_THRESHOLD:
             return [
@@ -402,11 +406,12 @@ class TushareProvider:
                 for symbol in symbols
             ]
         frames = [
-            self._fetch_date_windowed(
+            self._fetch_trade_date_windowed(
                 self._pro.suspend_d,
                 api_name="suspend_d",
                 start_date=start_date,
                 end_date=end_date,
+                raw_cache_dir=raw_cache_dir,
                 fields=SUSPEND_FIELDS,
             )
         ]
@@ -429,10 +434,41 @@ class TushareProvider:
         symbol: str,
         source: str = "SW2021",
     ) -> tuple[StockIndustryMembership, ...]:
-        frame = self._call_tushare(self._pro.index_member_all, api_name="index_member_all", ts_code=symbol)
+        frame = self._call_tushare(
+            self._pro.index_member_all,
+            api_name="index_member_all",
+            ts_code=symbol,
+            fields=INDEX_MEMBER_ALL_FIELDS,
+        )
         if frame is None or frame.empty:
             return ()
 
+        return _stock_industry_memberships_from_frame(frame, source=source)
+
+    def fetch_all_stock_industry_memberships(
+        self,
+        *,
+        source: str = "SW2021",
+    ) -> tuple[StockIndustryMembership, ...]:
+        frames = []
+        offset = 0
+        while True:
+            frame = self._call_tushare(
+                self._pro.index_member_all,
+                api_name="index_member_all",
+                limit=INDEX_MEMBER_ALL_PAGE_LIMIT,
+                offset=offset,
+                fields=INDEX_MEMBER_ALL_FIELDS,
+            )
+            if frame is None or frame.empty:
+                break
+            frames.append(frame)
+            if len(frame) < INDEX_MEMBER_ALL_PAGE_LIMIT:
+                break
+            offset += INDEX_MEMBER_ALL_PAGE_LIMIT
+        frame = _concat_frames(frames)
+        if frame is None or frame.empty:
+            return ()
         return _stock_industry_memberships_from_frame(frame, source=source)
 
     def fetch_tradability_statuses(

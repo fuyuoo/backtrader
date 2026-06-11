@@ -20,6 +20,8 @@ def main(argv: list[str] | None = None) -> int:
         run_dir,
         reference_snapshot=args.reference_snapshot,
         daily_price_cache_dir=args.daily_price_cache_dir,
+        snapshot_root=args.snapshot_root,
+        industry_source=args.industry_source,
         max_staleness_trading_days=args.max_staleness_trading_days,
     )
     wide_path, csv_path, index_path, markdown_path = write_attribution_wide_samples(
@@ -58,6 +60,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="Optional Tushare daily raw cache root or daily subdirectory for holding-path attribution",
     )
+    parser.add_argument(
+        "--snapshot-root",
+        default=None,
+        help="Optional snapshot root used to read industry index bars for industry daily/weekly factors",
+    )
+    parser.add_argument("--industry-source", default="SW2021")
     parser.add_argument("--max-staleness-trading-days", type=int, default=5)
     parser.add_argument("--output-dir", default=None, help="Output directory; defaults to run dir")
     parser.add_argument("--print-markdown", action="store_true", help="Print field index Chinese Markdown instead of JSON")

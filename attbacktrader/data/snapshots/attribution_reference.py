@@ -24,14 +24,23 @@ PERCENTILE_BUCKETS = ("p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100")
 FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"field_key": "entry.market_cap.total_mv_bucket", "label_zh": "总市值分位桶", "scope": "market_cap", "value_type": "bucket"},
     {"field_key": "entry.market_cap.circulating_mv_bucket", "label_zh": "流通市值分位桶", "scope": "market_cap", "value_type": "bucket"},
+    {"field_key": "entry.market_cap.total_mv_abs_bucket", "label_zh": "总市值绝对金额桶（亿元）", "scope": "market_cap", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
+    {"field_key": "entry.market_cap.circulating_mv_abs_bucket", "label_zh": "流通市值绝对金额桶（亿元）", "scope": "market_cap", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
     {"field_key": "entry.valuation.pe_bucket", "label_zh": "PE桶", "scope": "valuation", "value_type": "bucket"},
     {"field_key": "entry.valuation.pe_ttm_bucket", "label_zh": "PE_TTM桶", "scope": "valuation", "value_type": "bucket", "default_in_environment_fit": True},
     {"field_key": "entry.valuation.pb_bucket", "label_zh": "PB桶", "scope": "valuation", "value_type": "bucket"},
     {"field_key": "entry.volatility.return_vol_20d_bucket", "label_zh": "20日收益波动率分位桶", "scope": "volatility", "value_type": "bucket"},
     {"field_key": "entry.volatility.return_vol_60d_bucket", "label_zh": "60日收益波动率分位桶", "scope": "volatility", "value_type": "bucket"},
     {"field_key": "entry.volatility.atr_20d_bucket", "label_zh": "ATR百分比分位桶", "scope": "volatility", "value_type": "bucket", "default_in_environment_fit": True},
+    {"field_key": "entry.volatility.industry_atr_percentile_bucket", "label_zh": "个股ATR在行业内分位桶", "scope": "volatility", "value_type": "bucket", "default_in_environment_fit": True},
+    {"field_key": "entry.volatility.symbol_atr_to_industry_median_bucket", "label_zh": "个股ATR相对行业中位数桶", "scope": "volatility", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket", "default_in_environment_fit": True},
     {"field_key": "entry.volatility.max_amplitude_20d_bucket", "label_zh": "近20日最大振幅分位桶", "scope": "volatility", "value_type": "bucket"},
     {"field_key": "entry.liquidity.amount_20d_bucket", "label_zh": "20日平均成交额分位桶", "scope": "liquidity", "value_type": "bucket"},
+    {"field_key": "entry.liquidity.turnover_rate_bucket", "label_zh": "换手率桶", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
+    {"field_key": "entry.liquidity.volume_ratio_bucket", "label_zh": "量比桶", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
+    {"field_key": "entry.liquidity.amount_bucket", "label_zh": "当日成交额桶（亿元）", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
+    {"field_key": "entry.liquidity.amount_vs_20d_bucket", "label_zh": "当日成交额相对20日均额桶", "scope": "liquidity", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
+    {"field_key": "entry.liquidity.industry_amount_percentile_bucket", "label_zh": "成交额在行业内分位桶", "scope": "liquidity", "value_type": "bucket"},
     {"field_key": "entry.price_position.near_high_20d_bucket", "label_zh": "距近20日高点桶", "scope": "price_position", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket", "default_in_environment_fit": True},
     {"field_key": "entry.price_position.near_high_60d_bucket", "label_zh": "距近60日高点桶", "scope": "price_position", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket", "default_in_environment_fit": True},
     {"field_key": "entry.price_position.interval_20d_bucket", "label_zh": "20日区间位置桶", "scope": "price_position", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
@@ -43,11 +52,16 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
 )
 
 DEFAULT_ENVIRONMENT_FIT_PAIR_WHITELIST = (
+    ("industry.sw_l1.code", "entry.volatility.industry_atr_percentile_bucket"),
+    ("industry.sw_l1.code", "industry.weekly.kdj_state"),
     ("industry.sw_l1.code", "entry.volatility.atr_20d_bucket"),
     ("industry.sw_l1.code", "entry.stop_fit.fixed_atr_multiple_bucket"),
     ("industry.sw_l1.code", "entry.price_position.ma60_atr_multiple_bucket"),
     ("entry.volatility.atr_20d_bucket", "entry.stop_fit.fixed_atr_multiple_bucket"),
     ("entry.volatility.atr_20d_bucket", "entry.price_position.ma60_atr_multiple_bucket"),
+    ("entry.volatility.industry_atr_percentile_bucket", "entry.volatility.symbol_atr_to_industry_median_bucket"),
+    ("entry.volatility.industry_atr_percentile_bucket", "entry.weekly.symbol_kdj_state"),
+    ("entry.weekly.symbol_kdj_state", "industry.weekly.kdj_state"),
     ("entry.market_cap.circulating_mv_bucket", "entry.liquidity.amount_20d_bucket"),
     ("entry.price_position.near_high_20d_bucket", "entry.price_position.interval_20d_bucket"),
     ("entry.price_position.near_high_60d_bucket", "entry.price_position.interval_60d_bucket"),
@@ -115,6 +129,7 @@ def build_attribution_reference_snapshot_from_frame(
         reference_day = day[reference_mask]
         exclusion_codes = _exclusion_codes(day)
         percentiles = _day_percentiles(reference_day, percentile_specs)
+        industry_stats = _day_industry_stats(reference_day)
         reference_counts = {
             spec["column"]: int(reference_day[spec["column"]].notna().sum())
             for spec in percentile_specs
@@ -132,6 +147,7 @@ def build_attribution_reference_snapshot_from_frame(
                 symbol=symbol,
                 trade_date=trade_date,
                 percentiles=percentiles,
+                industry_stats=industry_stats,
                 reference_counts=reference_counts,
                 min_reference_count=min_reference_count,
                 excluded_codes=symbol_exclusions,
@@ -195,6 +211,34 @@ def load_or_fetch_industry_memberships_for_symbols(
         if memberships:
             write_stock_industry_memberships_parquet(memberships, path)
         result[symbol] = memberships
+    return result
+
+
+def load_or_fetch_all_industry_memberships(
+    *,
+    snapshot_root: str | Path,
+    provider: Any | None,
+    source: str = "SW2021",
+    refresh: bool = False,
+) -> dict[str, tuple[StockIndustryMembership, ...]]:
+    """Fetch full-universe stock industry memberships and persist per-symbol snapshots."""
+
+    fetch_all = getattr(provider, "fetch_all_stock_industry_memberships", None) if provider is not None else None
+    if not callable(fetch_all):
+        return {}
+
+    memberships = tuple(fetch_all(source=source))
+    grouped: dict[str, list[StockIndustryMembership]] = {}
+    for membership in memberships:
+        grouped.setdefault(membership.symbol, []).append(membership)
+
+    result: dict[str, tuple[StockIndustryMembership, ...]] = {}
+    for symbol, symbol_memberships in sorted(grouped.items()):
+        ordered = tuple(sorted(symbol_memberships, key=lambda item: (item.in_date, item.level3_code)))
+        path = stock_industry_membership_snapshot_path(snapshot_root, symbol=symbol, source=source)
+        if refresh or not path.exists():
+            write_stock_industry_memberships_parquet(ordered, path)
+        result[symbol] = ordered
     return result
 
 
@@ -265,6 +309,13 @@ def _active_membership_for(
 
 
 def _derive_symbol_features(data: pd.DataFrame) -> pd.DataFrame:
+    if "total_mv" in data.columns:
+        data["total_mv_yi"] = pd.to_numeric(data["total_mv"], errors="coerce") / 10000.0
+    if "circ_mv" in data.columns:
+        data["circ_mv_yi"] = pd.to_numeric(data["circ_mv"], errors="coerce") / 10000.0
+    if "amount" in data.columns:
+        data["amount"] = pd.to_numeric(data["amount"], errors="coerce")
+        data["amount_yi"] = data["amount"] / 100000.0
     grouped = data.groupby("symbol", sort=False)
     data["return_1d"] = grouped["close"].pct_change()
     data["return_vol_20d"] = grouped["return_1d"].transform(lambda value: value.rolling(20, min_periods=20).std())
@@ -295,6 +346,7 @@ def _derive_symbol_features(data: pd.DataFrame) -> pd.DataFrame:
     data["fixed_atr_multiple"] = 0.05 / data["atr_pct"]
     if "amount" in data.columns:
         data["amount_20d"] = grouped["amount"].transform(lambda value: value.rolling(20, min_periods=20).mean())
+        data["amount_vs_20d"] = data["amount"] / data["amount_20d"]
     return data
 
 
@@ -322,12 +374,54 @@ def _day_percentiles(day: pd.DataFrame, specs: Sequence[Mapping[str, str]]) -> d
     return result
 
 
+def _day_industry_stats(day: pd.DataFrame) -> dict[str, dict[str, float | int]]:
+    if day.empty or "sw_l1_code" not in day.columns:
+        return {}
+    data = day.copy()
+    data["sw_l1_code"] = data["sw_l1_code"].map(lambda value: str(value).strip() if pd.notna(value) else "")
+    data = data[data["sw_l1_code"] != ""]
+    if data.empty:
+        return {}
+
+    result: dict[str, dict[str, float | int]] = {}
+    for _, group in data.groupby("sw_l1_code", sort=False):
+        stats_by_symbol: dict[str, dict[str, float | int]] = {
+            str(symbol): {} for symbol in group["symbol"]
+        }
+        if "atr_pct" in group.columns:
+            atr_values = pd.to_numeric(group["atr_pct"], errors="coerce")
+            atr_count = int(atr_values.notna().sum())
+            atr_median = _optional_float(atr_values.median()) if atr_count else None
+            atr_ranks = atr_values.rank(pct=True, method="average")
+            for symbol, value, percentile in zip(group["symbol"], atr_values, atr_ranks):
+                symbol_key = str(symbol)
+                stats_by_symbol[symbol_key]["industry_atr_reference_count"] = atr_count
+                if pd.notna(percentile):
+                    stats_by_symbol[symbol_key]["industry_atr_percentile"] = float(percentile)
+                if atr_median is not None and atr_median > 0 and pd.notna(value):
+                    stats_by_symbol[symbol_key]["symbol_atr_to_industry_median"] = float(value) / atr_median
+
+        amount_column = "amount_20d" if "amount_20d" in group.columns else "amount"
+        if amount_column in group.columns:
+            amount_values = pd.to_numeric(group[amount_column], errors="coerce")
+            amount_count = int(amount_values.notna().sum())
+            amount_ranks = amount_values.rank(pct=True, method="average")
+            for symbol, percentile in zip(group["symbol"], amount_ranks):
+                symbol_key = str(symbol)
+                stats_by_symbol[symbol_key]["industry_amount_reference_count"] = amount_count
+                if pd.notna(percentile):
+                    stats_by_symbol[symbol_key]["industry_amount_percentile"] = float(percentile)
+        result.update(stats_by_symbol)
+    return result
+
+
 def _field_rows_for_record(
     record: pd.Series,
     *,
     symbol: str,
     trade_date: date,
     percentiles: Mapping[str, Mapping[str, float]],
+    industry_stats: Mapping[str, Mapping[str, float | int]],
     reference_counts: Mapping[str, int],
     min_reference_count: int,
     excluded_codes: Sequence[str],
@@ -354,10 +448,57 @@ def _field_rows_for_record(
             exception_codes=exceptions,
         ))
 
+    stats = _as_mapping(industry_stats.get(symbol))
+    industry_reference_fields = (
+        (
+            "entry.volatility.industry_atr_percentile_bucket",
+            stats.get("industry_atr_percentile"),
+            _percentile_bucket(_optional_float(stats.get("industry_atr_percentile"))),
+            _optional_float(stats.get("industry_atr_percentile")),
+            _optional_int(stats.get("industry_atr_reference_count")),
+        ),
+        (
+            "entry.volatility.symbol_atr_to_industry_median_bucket",
+            stats.get("symbol_atr_to_industry_median"),
+            _relative_ratio_bucket(stats.get("symbol_atr_to_industry_median")),
+            None,
+            _optional_int(stats.get("industry_atr_reference_count")),
+        ),
+        (
+            "entry.liquidity.industry_amount_percentile_bucket",
+            stats.get("industry_amount_percentile"),
+            _percentile_bucket(_optional_float(stats.get("industry_amount_percentile"))),
+            _optional_float(stats.get("industry_amount_percentile")),
+            _optional_int(stats.get("industry_amount_reference_count")),
+        ),
+    )
+    for field_key, value, bucket, percentile, reference_count in industry_reference_fields:
+        exceptions = list(excluded_codes)
+        if _is_missing_text(record.get("sw_l1_code")):
+            exceptions.append("industry_missing")
+        if reference_count is not None and reference_count < min_reference_count:
+            exceptions.append("industry_reference_low_count")
+        rows.append(_row(
+            symbol=symbol,
+            trade_date=trade_date,
+            field_key=field_key,
+            value=_optional_float(value),
+            bucket=bucket,
+            percentile=percentile,
+            reference_count=reference_count,
+            exception_codes=exceptions,
+        ))
+
     fixed_fields = (
+        ("entry.market_cap.total_mv_abs_bucket", record.get("total_mv_yi"), _market_cap_abs_bucket(record.get("total_mv_yi"))),
+        ("entry.market_cap.circulating_mv_abs_bucket", record.get("circ_mv_yi"), _market_cap_abs_bucket(record.get("circ_mv_yi"))),
         ("entry.valuation.pe_bucket", record.get("pe"), _pe_bucket(record.get("pe"))),
         ("entry.valuation.pe_ttm_bucket", record.get("pe_ttm"), _pe_bucket(record.get("pe_ttm"))),
         ("entry.valuation.pb_bucket", record.get("pb"), _pb_bucket(record.get("pb"))),
+        ("entry.liquidity.turnover_rate_bucket", record.get("turnover_rate"), _turnover_rate_bucket(record.get("turnover_rate"))),
+        ("entry.liquidity.volume_ratio_bucket", record.get("volume_ratio"), _volume_ratio_bucket(record.get("volume_ratio"))),
+        ("entry.liquidity.amount_bucket", record.get("amount_yi"), _amount_abs_bucket(record.get("amount_yi"))),
+        ("entry.liquidity.amount_vs_20d_bucket", record.get("amount_vs_20d"), _relative_ratio_bucket(record.get("amount_vs_20d"))),
         ("entry.price_position.near_high_20d_bucket", record.get("near_high_20d"), _near_high_bucket(record.get("near_high_20d"))),
         ("entry.price_position.near_high_60d_bucket", record.get("near_high_60d"), _near_high_bucket(record.get("near_high_60d"))),
         ("entry.price_position.interval_20d_bucket", record.get("interval_20d"), _interval_bucket(record.get("interval_20d"))),
@@ -368,10 +509,12 @@ def _field_rows_for_record(
     )
     for field_key, value, bucket in fixed_fields:
         exceptions = list(excluded_codes)
-        if field_key == "industry.sw_l1.code" and not bucket:
+        if field_key == "industry.sw_l1.code" and _is_missing_text(bucket):
             exceptions.append("industry_missing")
         if field_key.endswith("pe_bucket") and _optional_float(value) is not None and (_optional_float(value) or 0.0) < 0:
             exceptions.append("negative_pe")
+        if field_key == "entry.liquidity.amount_vs_20d_bucket" and bucket is None:
+            exceptions.append("liquidity_lookback_missing")
         rows.append(_row(
             symbol=symbol,
             trade_date=trade_date,
@@ -519,6 +662,83 @@ def _pb_bucket(value: Any) -> str | None:
     return "gt_5"
 
 
+def _market_cap_abs_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None or number < 0:
+        return None
+    if number < 100:
+        return "0_100yi"
+    if number < 300:
+        return "100_300yi"
+    if number < 600:
+        return "300_600yi"
+    if number < 1000:
+        return "600_1000yi"
+    if number < 1500:
+        return "1000_1500yi"
+    return "gte_1500yi"
+
+
+def _amount_abs_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None or number < 0:
+        return None
+    if number < 0.5:
+        return "0_0p5yi"
+    if number < 1:
+        return "0p5_1yi"
+    if number < 3:
+        return "1_3yi"
+    if number < 10:
+        return "3_10yi"
+    return "gte_10yi"
+
+
+def _turnover_rate_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None or number < 0:
+        return None
+    if number < 1:
+        return "lt_1pct"
+    if number < 3:
+        return "1_3pct"
+    if number < 5:
+        return "3_5pct"
+    if number < 10:
+        return "5_10pct"
+    return "gte_10pct"
+
+
+def _volume_ratio_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None or number < 0:
+        return None
+    if number < 0.8:
+        return "lt_0p8x"
+    if number < 1.2:
+        return "0p8_1p2x"
+    if number < 2:
+        return "1p2_2x"
+    if number < 4:
+        return "2_4x"
+    return "gte_4x"
+
+
+def _relative_ratio_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None or number < 0:
+        return None
+    if number < 0.8:
+        return "lt_0p8x"
+    if number < 1.2:
+        return "0p8_1p2x"
+    if number < 1.6:
+        return "1p2_1p6x"
+    if number < 2:
+        return "1p6_2x"
+    return "gte_2x"
+
+
 def _atr_multiple_bucket(value: Any) -> str | None:
     number = _optional_float(value)
     if number is None:
@@ -556,6 +776,21 @@ def _optional_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool) or pd.isna(value):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_missing_text(value: Any) -> bool:
+    if value is None or pd.isna(value):
+        return True
+    return not str(value).strip()
 
 
 def _jsonable(value: Any) -> Any:

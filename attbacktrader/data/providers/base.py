@@ -63,6 +63,13 @@ class IndustryProvider(Protocol):
     ) -> tuple[StockIndustryMembership, ...]:
         """Fetch Shenwan industry membership history for one stock."""
 
+    def fetch_all_stock_industry_memberships(
+        self,
+        *,
+        source: str = "SW2021",
+    ) -> tuple[StockIndustryMembership, ...]:
+        """Fetch Shenwan industry membership history for the full A-share universe."""
+
 
 class TradabilityProvider(Protocol):
     def fetch_tradability_statuses(

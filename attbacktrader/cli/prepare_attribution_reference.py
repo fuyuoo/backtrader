@@ -16,6 +16,7 @@ from attbacktrader.data.snapshots import (
     apply_industry_memberships_to_frame,
     attribution_reference_snapshot_dir,
     build_attribution_reference_snapshot_from_frame,
+    load_or_fetch_all_industry_memberships,
     load_or_fetch_industry_memberships_for_symbols,
     write_attribution_reference_snapshot,
 )
@@ -61,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
                 "effective_start_date": start_date.isoformat(),
                 "effective_end_date": end_date.isoformat(),
                 "run_dir": args.run_dir,
+                "reference_fetch_scope": args.reference_fetch_scope,
                 "symbol_count": len(_symbols_from_args(args, run_defaults=run_defaults)),
                 "emit_run_entry_scope": args.emit_run_entry_scope,
                 "emit_symbol_count": len(emit_scope["symbols"]),
@@ -99,6 +101,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--symbol", action="append", default=[], help="Repeatable symbol whitelist for provider fetch")
     parser.add_argument("--symbol-file", default=None, help="Text file with one symbol per line for provider fetch")
+    parser.add_argument(
+        "--reference-fetch-scope",
+        choices=["run_symbols", "all"],
+        default="run_symbols",
+        help="Provider fetch universe: run_symbols keeps the existing whitelist behavior; all fetches all-A rows for cross-section reference.",
+    )
     parser.add_argument("--token-file", default=".secrets/tushare_token.txt")
     parser.add_argument("--start-date", default=None, help="YYYY-MM-DD")
     parser.add_argument("--end-date", default=None, help="YYYY-MM-DD")
@@ -156,10 +164,11 @@ def _fetch_provider_frame(args: argparse.Namespace, start_date: date, end_date: 
         rate_limit=tushare_rate_limit_config_from_args(args),
     )
     symbols = _symbols_from_args(args, run_defaults=_run_defaults_from_args(args))
+    fetch_symbols = None if args.reference_fetch_scope == "all" else symbols or None
     fetch_kwargs = {
         "start_date": start_date,
         "end_date": end_date,
-        "symbols": symbols or None,
+        "symbols": fetch_symbols,
     }
     if args.raw_cache_dir is not None:
         fetch_kwargs["raw_cache_dir"] = args.raw_cache_dir
@@ -167,13 +176,29 @@ def _fetch_provider_frame(args: argparse.Namespace, start_date: date, end_date: 
     if not args.fetch_industry_memberships:
         return frame
     symbols = sorted(str(symbol) for symbol in frame["symbol"].dropna().unique())
-    memberships = load_or_fetch_industry_memberships_for_symbols(
-        symbols,
-        snapshot_root=args.snapshot_root,
-        provider=provider,
-        source=args.industry_source,
-        refresh=args.refresh_industry_memberships,
-    )
+    if args.reference_fetch_scope == "all":
+        memberships = load_or_fetch_all_industry_memberships(
+            snapshot_root=args.snapshot_root,
+            provider=provider,
+            source=args.industry_source,
+            refresh=args.refresh_industry_memberships,
+        )
+        if not memberships:
+            memberships = load_or_fetch_industry_memberships_for_symbols(
+                symbols,
+                snapshot_root=args.snapshot_root,
+                provider=provider,
+                source=args.industry_source,
+                refresh=args.refresh_industry_memberships,
+            )
+    else:
+        memberships = load_or_fetch_industry_memberships_for_symbols(
+            symbols,
+            snapshot_root=args.snapshot_root,
+            provider=provider,
+            source=args.industry_source,
+            refresh=args.refresh_industry_memberships,
+        )
     return apply_industry_memberships_to_frame(frame, memberships)
 
 

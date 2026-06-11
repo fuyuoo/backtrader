@@ -6,10 +6,13 @@ import csv
 import json
 import math
 from collections import Counter, defaultdict
+from datetime import date
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import pandas as pd
+
+from attbacktrader.features import calculate_kdj
 
 
 ATTRIBUTION_WIDE_SAMPLES_SCHEMA = "attbacktrader.attribution_wide_samples.v1"
@@ -22,10 +25,13 @@ DEFAULT_FIELD_INDEX_MARKDOWN = "attribution_field_index.zh.md"
 
 DEFAULT_ENVIRONMENT_FIT_PAIR_WHITELIST: tuple[tuple[str, str], ...] = (
     ("industry.sw_l1.code", "entry.volatility.industry_atr_percentile_bucket"),
+    ("industry.sw_l1.code", "industry.weekly.kdj_state"),
     ("industry.sw_l1.code", "entry.stop_fit.fixed_atr_multiple_bucket"),
     ("industry.sw_l1.code", "entry.price_position.ma60_atr_multiple_bucket"),
     ("entry.volatility.atr_20d_bucket", "entry.stop_fit.fixed_atr_multiple_bucket"),
     ("entry.volatility.atr_20d_bucket", "entry.price_position.ma60_atr_multiple_bucket"),
+    ("entry.volatility.industry_atr_percentile_bucket", "entry.weekly.symbol_kdj_state"),
+    ("entry.weekly.symbol_kdj_state", "industry.weekly.kdj_state"),
     ("entry.market_cap.circulating_mv_bucket", "entry.liquidity.amount_20d_bucket"),
     ("entry.price_position.near_high_20d_bucket", "entry.price_position.interval_20d_bucket"),
     ("entry.price_position.near_high_60d_bucket", "entry.price_position.interval_60d_bucket"),
@@ -48,6 +54,18 @@ MA25_MA60_SPREAD_FIELD = "entry.signal_strength.ma25_above_ma60_spread_bucket"
 MA60_SLOPE_20D_FIELD = "entry.signal_strength.ma60_slope_20d_bucket"
 SIGNAL_CANDLE_BODY_FIELD = "entry.signal_strength.signal_candle_body_bucket"
 SIGNAL_SHADOW_FIELD = "entry.signal_strength.signal_upper_lower_shadow_bucket"
+SYMBOL_WEEKLY_KDJ_J_FIELD = "entry.weekly.symbol_kdj_j_bucket"
+SYMBOL_WEEKLY_KDJ_STATE_FIELD = "entry.weekly.symbol_kdj_state"
+SYMBOL_WEEKLY_MA_TREND_FIELD = "entry.weekly.symbol_ma_trend_bucket"
+SYMBOL_WEEKLY_CLOSE_VS_MA20_FIELD = "entry.weekly.symbol_close_vs_week_ma20_bucket"
+INDUSTRY_ATR_20D_FIELD = "industry.volatility.atr_20d_bucket"
+INDUSTRY_RETURN_VOL_20D_FIELD = "industry.volatility.return_vol_20d_bucket"
+INDUSTRY_RETURN_VOL_60D_FIELD = "industry.volatility.return_vol_60d_bucket"
+INDUSTRY_NEAR_HIGH_60D_FIELD = "industry.price_position.near_high_60d_bucket"
+INDUSTRY_WEEKLY_KDJ_J_FIELD = "industry.weekly.kdj_j_bucket"
+INDUSTRY_WEEKLY_KDJ_STATE_FIELD = "industry.weekly.kdj_state"
+INDUSTRY_WEEKLY_MA_TREND_FIELD = "industry.weekly.ma_trend_bucket"
+INDUSTRY_WEEKLY_RELATIVE_STRENGTH_FIELD = "industry.weekly.relative_strength_bucket"
 DERIVED_ONLY_FIELDS = {
     EXIT_REASON_FIELD,
     MA60_ATR_MULTIPLE_FIELD,
@@ -66,6 +84,18 @@ DERIVED_ONLY_FIELDS = {
     MA60_SLOPE_20D_FIELD,
     SIGNAL_CANDLE_BODY_FIELD,
     SIGNAL_SHADOW_FIELD,
+    SYMBOL_WEEKLY_KDJ_J_FIELD,
+    SYMBOL_WEEKLY_KDJ_STATE_FIELD,
+    SYMBOL_WEEKLY_MA_TREND_FIELD,
+    SYMBOL_WEEKLY_CLOSE_VS_MA20_FIELD,
+    INDUSTRY_ATR_20D_FIELD,
+    INDUSTRY_RETURN_VOL_20D_FIELD,
+    INDUSTRY_RETURN_VOL_60D_FIELD,
+    INDUSTRY_NEAR_HIGH_60D_FIELD,
+    INDUSTRY_WEEKLY_KDJ_J_FIELD,
+    INDUSTRY_WEEKLY_KDJ_STATE_FIELD,
+    INDUSTRY_WEEKLY_MA_TREND_FIELD,
+    INDUSTRY_WEEKLY_RELATIVE_STRENGTH_FIELD,
 }
 
 EXIT_REASON_ENTRY_FACTOR_PAIRS: tuple[tuple[str, str], ...] = (
@@ -273,12 +303,151 @@ DERIVED_FIELD_CATALOG: dict[str, dict[str, Any]] = {
     },
 }
 
+DERIVED_FIELD_CATALOG.update(
+    {
+        SYMBOL_WEEKLY_KDJ_J_FIELD: {
+            "field_key": SYMBOL_WEEKLY_KDJ_J_FIELD,
+            "label_zh": "个股周线KDJ J桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "weekly",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+        SYMBOL_WEEKLY_KDJ_STATE_FIELD: {
+            "field_key": SYMBOL_WEEKLY_KDJ_STATE_FIELD,
+            "label_zh": "个股周线KDJ状态",
+            "value_type": "category",
+            "timing": "entry",
+            "scope": "weekly",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": True,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+        SYMBOL_WEEKLY_MA_TREND_FIELD: {
+            "field_key": SYMBOL_WEEKLY_MA_TREND_FIELD,
+            "label_zh": "个股周线均线趋势桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "weekly",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+        SYMBOL_WEEKLY_CLOSE_VS_MA20_FIELD: {
+            "field_key": SYMBOL_WEEKLY_CLOSE_VS_MA20_FIELD,
+            "label_zh": "个股周线收盘价相对MA20桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "weekly",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+        INDUSTRY_ATR_20D_FIELD: {
+            "field_key": INDUSTRY_ATR_20D_FIELD,
+            "label_zh": "行业指数ATR百分比桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "industry",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "industry_index_snapshot",
+            "missing_policy": "missing",
+        },
+        INDUSTRY_RETURN_VOL_20D_FIELD: {
+            "field_key": INDUSTRY_RETURN_VOL_20D_FIELD,
+            "label_zh": "行业指数20日收益波动率桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "industry",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "industry_index_snapshot",
+            "missing_policy": "missing",
+        },
+        INDUSTRY_RETURN_VOL_60D_FIELD: {
+            "field_key": INDUSTRY_RETURN_VOL_60D_FIELD,
+            "label_zh": "行业指数60日收益波动率桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "industry",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "industry_index_snapshot",
+            "missing_policy": "missing",
+        },
+        INDUSTRY_NEAR_HIGH_60D_FIELD: {
+            "field_key": INDUSTRY_NEAR_HIGH_60D_FIELD,
+            "label_zh": "行业指数距60日高点桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "industry",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "industry_index_snapshot",
+            "missing_policy": "missing",
+        },
+        INDUSTRY_WEEKLY_KDJ_J_FIELD: {
+            "field_key": INDUSTRY_WEEKLY_KDJ_J_FIELD,
+            "label_zh": "行业周线KDJ J桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "industry",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "industry_index_snapshot",
+            "missing_policy": "missing",
+        },
+        INDUSTRY_WEEKLY_KDJ_STATE_FIELD: {
+            "field_key": INDUSTRY_WEEKLY_KDJ_STATE_FIELD,
+            "label_zh": "行业周线KDJ状态",
+            "value_type": "category",
+            "timing": "entry",
+            "scope": "industry",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": True,
+            "source": "industry_index_snapshot",
+            "missing_policy": "missing",
+        },
+        INDUSTRY_WEEKLY_MA_TREND_FIELD: {
+            "field_key": INDUSTRY_WEEKLY_MA_TREND_FIELD,
+            "label_zh": "行业周线均线趋势桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "industry",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "industry_index_snapshot",
+            "missing_policy": "missing",
+        },
+        INDUSTRY_WEEKLY_RELATIVE_STRENGTH_FIELD: {
+            "field_key": INDUSTRY_WEEKLY_RELATIVE_STRENGTH_FIELD,
+            "label_zh": "行业周线相对强度分位桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "industry",
+            "bucket_rule": "industry_weekly_cross_section",
+            "default_in_environment_fit": False,
+            "source": "industry_index_snapshot",
+            "missing_policy": "missing",
+        },
+    }
+)
+
 
 def build_attribution_wide_samples(
     run_dir: str | Path,
     *,
     reference_snapshot: str | Path,
     daily_price_cache_dir: str | Path | None = None,
+    snapshot_root: str | Path | None = None,
+    industry_source: str = "SW2021",
     max_staleness_trading_days: int = 5,
 ) -> dict[str, Any]:
     """Build completed-trade attribution wide samples from persisted run artifacts."""
@@ -299,6 +468,7 @@ def build_attribution_wide_samples(
     field_catalog.update(DERIVED_FIELD_CATALOG)
     completed_trades = _completed_trade_rows(trade_attribution, trade_lifecycle=trade_lifecycle)
     price_context = _load_daily_price_context(daily_price_cache_dir, completed_trades)
+    industry_context = _load_industry_index_context(snapshot_root, industry_source=industry_source)
 
     samples = []
     for trade in completed_trades:
@@ -355,6 +525,8 @@ def build_attribution_wide_samples(
         _add_execution_derived_fields(field_values, trade=trade, signal_date=signal_date)
         _add_trade_path_fields(field_values, trade=trade, price_context=price_context)
         _add_entry_signal_strength_fields(field_values, trade=trade, signal_date=signal_date, price_context=price_context)
+        _add_weekly_symbol_fields(field_values, trade=trade, signal_date=signal_date, price_context=price_context)
+        _add_industry_index_fields(field_values, signal_date=signal_date, industry_context=industry_context)
         _add_exit_reason_field(field_values, trade=trade)
         for payload in field_values.values():
             exception_codes.update(_exception_codes(_as_mapping(payload).get("exception_codes")))
@@ -382,6 +554,8 @@ def build_attribution_wide_samples(
         "source_dir": str(run_path),
         "reference_path": str(reference["source_path"]),
         "daily_price_cache_path": str(daily_price_cache_dir) if daily_price_cache_dir is not None else None,
+        "industry_index_snapshot_root": str(snapshot_root) if snapshot_root is not None else None,
+        "industry_source": industry_source,
         "sample_count": len(samples),
         "field_count": len(field_catalog),
         "environment_fit_default_fields": _environment_default_fields(field_catalog, reference["metadata"]),
@@ -800,11 +974,136 @@ def _load_daily_price_context(
         (str(row.symbol), str(row.trade_date)): row._asdict()
         for row in data.itertuples(index=False)
     }
+    weekly = _weekly_feature_frame(data)
+    weekly_by_symbol = {
+        str(symbol): group.reset_index(drop=True)
+        for symbol, group in weekly.groupby("symbol", sort=False)
+    } if not weekly.empty else {}
     return {
         "source_path": str(daily_dir),
         "by_symbol": by_symbol,
         "by_symbol_date": by_symbol_date,
+        "weekly_by_symbol": weekly_by_symbol,
     }
+
+
+def _load_industry_index_context(
+    snapshot_root: str | Path | None,
+    *,
+    industry_source: str,
+) -> dict[str, Any]:
+    if snapshot_root is None:
+        return {}
+    index_dir = Path(snapshot_root) / "industries" / "sw" / industry_source / "index_bars"
+    if not index_dir.exists():
+        return {}
+
+    frames = []
+    for path in sorted(index_dir.glob("*.parquet")):
+        frame = pd.read_parquet(path)
+        if "symbol" not in frame.columns and "ts_code" in frame.columns:
+            frame = frame.rename(columns={"ts_code": "symbol"})
+        required = {"symbol", "trade_date", "open", "high", "low", "close"}
+        if not required.issubset(frame.columns):
+            continue
+        frame = frame[["symbol", "trade_date", "open", "high", "low", "close"]]
+        if not frame.empty:
+            frames.append(frame)
+    if not frames:
+        return {"source_path": str(index_dir)}
+
+    data = pd.concat(frames, ignore_index=True)
+    data["symbol"] = data["symbol"].astype(str)
+    data["trade_date"] = pd.to_datetime(data["trade_date"]).dt.strftime("%Y-%m-%d")
+    for column in ("open", "high", "low", "close"):
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data = data.dropna(subset=["symbol", "trade_date", "open", "high", "low", "close"])
+    data = data.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
+    grouped = data.groupby("symbol", sort=False)
+    data["return_1d"] = grouped["close"].pct_change()
+    data["return_vol_20d"] = grouped["return_1d"].transform(lambda value: value.rolling(20, min_periods=20).std())
+    data["return_vol_60d"] = grouped["return_1d"].transform(lambda value: value.rolling(60, min_periods=60).std())
+    data["prev_close"] = grouped["close"].shift(1)
+    true_range = pd.concat(
+        [
+            data["high"] - data["low"],
+            (data["high"] - data["prev_close"]).abs(),
+            (data["low"] - data["prev_close"]).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    data["true_range"] = true_range
+    data["atr_20d"] = grouped["true_range"].transform(lambda value: value.rolling(20, min_periods=20).mean())
+    data["atr_pct"] = data["atr_20d"] / data["close"]
+    data["rolling_high_60d"] = grouped["high"].transform(lambda value: value.rolling(60, min_periods=60).max())
+    data["near_high_60d"] = data["close"] / data["rolling_high_60d"] - 1.0
+
+    weekly = _weekly_feature_frame(data)
+    if not weekly.empty:
+        weekly["return_4w"] = weekly.groupby("symbol", sort=False)["close"].pct_change(4)
+        weekly["relative_strength_percentile"] = weekly.groupby("trade_date", sort=False)["return_4w"].rank(
+            pct=True,
+            method="average",
+        )
+
+    return {
+        "source_path": str(index_dir),
+        "by_symbol": {
+            str(symbol): group.reset_index(drop=True)
+            for symbol, group in data.groupby("symbol", sort=False)
+        },
+        "weekly_by_symbol": {
+            str(symbol): group.reset_index(drop=True)
+            for symbol, group in weekly.groupby("symbol", sort=False)
+        } if not weekly.empty else {},
+    }
+
+
+def _weekly_feature_frame(data: pd.DataFrame) -> pd.DataFrame:
+    if data.empty:
+        return pd.DataFrame()
+    source = data[["symbol", "trade_date", "open", "high", "low", "close"]].copy()
+    source["_trade_date_dt"] = pd.to_datetime(source["trade_date"])
+    iso = source["_trade_date_dt"].dt.isocalendar()
+    source["_iso_year"] = iso.year.astype(int)
+    source["_iso_week"] = iso.week.astype(int)
+    source = source.sort_values(["symbol", "_trade_date_dt"]).reset_index(drop=True)
+    weekly = (
+        source.groupby(["symbol", "_iso_year", "_iso_week"], sort=False)
+        .agg(
+            trade_date=("trade_date", "last"),
+            open=("open", "first"),
+            high=("high", "max"),
+            low=("low", "min"),
+            close=("close", "last"),
+        )
+        .reset_index()
+        .drop(columns=["_iso_year", "_iso_week"])
+    )
+    if weekly.empty:
+        return weekly
+
+    frames = []
+    for _, group in weekly.groupby("symbol", sort=False):
+        item = group.reset_index(drop=True).copy()
+        kdj_values = calculate_kdj(
+            item["high"].astype(float).tolist(),
+            item["low"].astype(float).tolist(),
+            item["close"].astype(float).tolist(),
+        )
+        item["kdj_k"] = [value.k for value in kdj_values]
+        item["kdj_d"] = [value.d for value in kdj_values]
+        item["kdj_j"] = [value.j for value in kdj_values]
+        item["ma5"] = item["close"].rolling(5, min_periods=5).mean()
+        item["ma10"] = item["close"].rolling(10, min_periods=10).mean()
+        item["ma20"] = item["close"].rolling(20, min_periods=20).mean()
+        item["close_vs_ma20"] = item["close"] / item["ma20"] - 1.0
+        item["ma_trend"] = [
+            _weekly_ma_trend(row)
+            for row in item[["close", "ma5", "ma10", "ma20"]].to_dict("records")
+        ]
+        frames.append(item)
+    return pd.concat(frames, ignore_index=True).sort_values(["symbol", "trade_date"]).reset_index(drop=True)
 
 
 def _add_trade_path_fields(
@@ -993,6 +1292,180 @@ def _add_entry_signal_strength_fields(
         asof_date=signal_date,
         reference_count=None,
         exception_codes=[] if shadow_bucket is not None else ["path_price_missing"],
+    )
+
+
+def _add_weekly_symbol_fields(
+    field_values: dict[str, dict[str, Any]],
+    *,
+    trade: Mapping[str, Any],
+    signal_date: str,
+    price_context: Mapping[str, Any],
+) -> None:
+    symbol = _as_str(trade.get("symbol"))
+    entry_factors = _entry_factor_values(trade)
+    weekly_row = _latest_context_row(
+        _as_mapping(price_context.get("weekly_by_symbol")),
+        symbol=symbol,
+        trade_date=signal_date,
+        strict_before=True,
+    )
+
+    factor_j = _optional_float(entry_factors.get("symbol.kdj.week.j"))
+    row_j = _optional_float(_as_mapping(weekly_row).get("kdj_j"))
+    kdj_j = factor_j if factor_j is not None else row_j
+    kdj_bucket = (
+        _as_str(entry_factors.get("symbol.kdj.week.j_bucket"))
+        or _kdj_j_bucket(kdj_j)
+    )
+    kdj_state = (
+        _as_str(entry_factors.get("symbol.kdj.week.state"))
+        or _kdj_state(kdj_j)
+    )
+    weekly_asof = _as_str(_as_mapping(weekly_row).get("trade_date")) or signal_date
+    weekly_exception = [] if weekly_row is not None or factor_j is not None else ["weekly_price_missing"]
+
+    field_values[SYMBOL_WEEKLY_KDJ_J_FIELD] = _derived_payload(
+        raw=kdj_j,
+        bucket=kdj_bucket or None,
+        asof_date=weekly_asof,
+        reference_count=None,
+        exception_codes=[] if kdj_j is not None else weekly_exception,
+    )
+    field_values[SYMBOL_WEEKLY_KDJ_STATE_FIELD] = _derived_payload(
+        raw=kdj_state or None,
+        bucket=kdj_state or None,
+        asof_date=weekly_asof,
+        reference_count=None,
+        exception_codes=[] if kdj_state else weekly_exception,
+    )
+
+    ma_trend = _as_str(_as_mapping(weekly_row).get("ma_trend")) or None
+    close_vs_ma20 = _optional_float(_as_mapping(weekly_row).get("close_vs_ma20"))
+    field_values[SYMBOL_WEEKLY_MA_TREND_FIELD] = _derived_payload(
+        raw=ma_trend,
+        bucket=ma_trend,
+        asof_date=weekly_asof,
+        reference_count=None,
+        exception_codes=[] if ma_trend else ["weekly_price_missing"],
+    )
+    field_values[SYMBOL_WEEKLY_CLOSE_VS_MA20_FIELD] = _derived_payload(
+        raw=close_vs_ma20,
+        bucket=_ma20_distance_bucket(close_vs_ma20),
+        asof_date=weekly_asof,
+        reference_count=None,
+        exception_codes=[] if close_vs_ma20 is not None else ["weekly_price_missing"],
+    )
+
+
+def _add_industry_index_fields(
+    field_values: dict[str, dict[str, Any]],
+    *,
+    signal_date: str,
+    industry_context: Mapping[str, Any],
+) -> None:
+    industry_code = _field_raw_or_bucket(field_values.get("industry.sw_l1.code"))
+    if not industry_code:
+        _set_missing_fields(
+            field_values,
+            (
+                INDUSTRY_ATR_20D_FIELD,
+                INDUSTRY_RETURN_VOL_20D_FIELD,
+                INDUSTRY_RETURN_VOL_60D_FIELD,
+                INDUSTRY_NEAR_HIGH_60D_FIELD,
+                INDUSTRY_WEEKLY_KDJ_J_FIELD,
+                INDUSTRY_WEEKLY_KDJ_STATE_FIELD,
+                INDUSTRY_WEEKLY_MA_TREND_FIELD,
+                INDUSTRY_WEEKLY_RELATIVE_STRENGTH_FIELD,
+            ),
+            asof_date=signal_date,
+            code="industry_missing",
+        )
+        return
+
+    daily_row = _latest_context_row(
+        _as_mapping(industry_context.get("by_symbol")),
+        symbol=str(industry_code),
+        trade_date=signal_date,
+        strict_before=False,
+    )
+    weekly_row = _latest_context_row(
+        _as_mapping(industry_context.get("weekly_by_symbol")),
+        symbol=str(industry_code),
+        trade_date=signal_date,
+        strict_before=True,
+    )
+
+    daily_asof = _as_str(_as_mapping(daily_row).get("trade_date")) or signal_date
+    daily_missing = [] if daily_row is not None else ["industry_index_missing"]
+    atr_pct = _optional_float(_as_mapping(daily_row).get("atr_pct"))
+    return_vol_20d = _optional_float(_as_mapping(daily_row).get("return_vol_20d"))
+    return_vol_60d = _optional_float(_as_mapping(daily_row).get("return_vol_60d"))
+    near_high_60d = _optional_float(_as_mapping(daily_row).get("near_high_60d"))
+
+    field_values[INDUSTRY_ATR_20D_FIELD] = _derived_payload(
+        raw=atr_pct,
+        bucket=_volatility_pct_bucket(atr_pct),
+        asof_date=daily_asof,
+        reference_count=None,
+        exception_codes=[] if atr_pct is not None else daily_missing,
+    )
+    field_values[INDUSTRY_RETURN_VOL_20D_FIELD] = _derived_payload(
+        raw=return_vol_20d,
+        bucket=_volatility_pct_bucket(return_vol_20d),
+        asof_date=daily_asof,
+        reference_count=None,
+        exception_codes=[] if return_vol_20d is not None else daily_missing,
+    )
+    field_values[INDUSTRY_RETURN_VOL_60D_FIELD] = _derived_payload(
+        raw=return_vol_60d,
+        bucket=_volatility_pct_bucket(return_vol_60d),
+        asof_date=daily_asof,
+        reference_count=None,
+        exception_codes=[] if return_vol_60d is not None else daily_missing,
+    )
+    field_values[INDUSTRY_NEAR_HIGH_60D_FIELD] = _derived_payload(
+        raw=near_high_60d,
+        bucket=_near_high_bucket(near_high_60d),
+        asof_date=daily_asof,
+        reference_count=None,
+        exception_codes=[] if near_high_60d is not None else daily_missing,
+    )
+
+    weekly_asof = _as_str(_as_mapping(weekly_row).get("trade_date")) or signal_date
+    weekly_missing = [] if weekly_row is not None else ["industry_weekly_missing"]
+    weekly_j = _optional_float(_as_mapping(weekly_row).get("kdj_j"))
+    weekly_state = _kdj_state(weekly_j)
+    weekly_trend = _as_str(_as_mapping(weekly_row).get("ma_trend")) or None
+    relative_strength = _optional_float(_as_mapping(weekly_row).get("relative_strength_percentile"))
+
+    field_values[INDUSTRY_WEEKLY_KDJ_J_FIELD] = _derived_payload(
+        raw=weekly_j,
+        bucket=_kdj_j_bucket(weekly_j),
+        asof_date=weekly_asof,
+        reference_count=None,
+        exception_codes=[] if weekly_j is not None else weekly_missing,
+    )
+    field_values[INDUSTRY_WEEKLY_KDJ_STATE_FIELD] = _derived_payload(
+        raw=weekly_state,
+        bucket=weekly_state,
+        asof_date=weekly_asof,
+        reference_count=None,
+        exception_codes=[] if weekly_state else weekly_missing,
+    )
+    field_values[INDUSTRY_WEEKLY_MA_TREND_FIELD] = _derived_payload(
+        raw=weekly_trend,
+        bucket=weekly_trend,
+        asof_date=weekly_asof,
+        reference_count=None,
+        exception_codes=[] if weekly_trend else weekly_missing,
+    )
+    field_values[INDUSTRY_WEEKLY_RELATIVE_STRENGTH_FIELD] = _derived_payload(
+        raw=relative_strength,
+        bucket=_percentile_bucket(relative_strength),
+        asof_date=weekly_asof,
+        reference_count=None,
+        exception_codes=[] if relative_strength is not None else weekly_missing,
     )
 
 
@@ -1540,6 +2013,150 @@ def _signal_shadow_payload(
     if upper >= 0.01 and lower >= 0.01:
         return payload, "both_long_shadows"
     return payload, "balanced_shadows"
+
+
+def _latest_context_row(
+    by_symbol: Mapping[str, Any],
+    *,
+    symbol: str,
+    trade_date: str,
+    strict_before: bool,
+) -> Mapping[str, Any] | None:
+    frame = by_symbol.get(symbol)
+    if not isinstance(frame, pd.DataFrame) or frame.empty or not trade_date:
+        return None
+    if strict_before:
+        rows = frame[frame["trade_date"] < trade_date]
+    else:
+        rows = frame[frame["trade_date"] <= trade_date]
+    if rows.empty:
+        return None
+    return rows.iloc[-1].dropna().to_dict()
+
+
+def _field_raw_or_bucket(payload: Any) -> Any:
+    item = _as_mapping(payload)
+    raw = item.get("raw")
+    return raw if raw not in (None, "") else item.get("bucket")
+
+
+def _set_missing_fields(
+    field_values: dict[str, dict[str, Any]],
+    field_keys: Sequence[str],
+    *,
+    asof_date: str,
+    code: str,
+) -> None:
+    for field_key in field_keys:
+        field_values[field_key] = _derived_payload(
+            raw=None,
+            bucket=None,
+            asof_date=asof_date,
+            reference_count=None,
+            exception_codes=[code],
+        )
+
+
+def _weekly_ma_trend(row: Mapping[str, Any]) -> str | None:
+    close = _optional_float(row.get("close"))
+    ma5 = _optional_float(row.get("ma5"))
+    ma10 = _optional_float(row.get("ma10"))
+    ma20 = _optional_float(row.get("ma20"))
+    if close is None or ma5 is None or ma10 is None or ma20 is None:
+        return None
+    if close > ma20 and ma5 > ma10 > ma20:
+        return "uptrend"
+    if close < ma20 and ma5 < ma10 < ma20:
+        return "downtrend"
+    return "mixed"
+
+
+def _kdj_j_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    if number < 13:
+        return "<13"
+    if number < 30:
+        return "13-30"
+    if number < 50:
+        return "30-50"
+    if number < 80:
+        return "50-80"
+    return ">=80"
+
+
+def _kdj_state(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    if number < 13:
+        return "oversold"
+    if number < 50:
+        return "recovering"
+    if number < 80:
+        return "strong"
+    return "overheated"
+
+
+def _near_high_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    if number >= -0.01:
+        return "at_high"
+    if number >= -0.03:
+        return "near_high"
+    if number >= -0.08:
+        return "moderate_pullback"
+    if number >= -0.15:
+        return "deep_pullback"
+    return "far_from_high"
+
+
+def _percentile_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    if number <= 0.2:
+        return "p0_p20"
+    if number <= 0.4:
+        return "p20_p40"
+    if number <= 0.6:
+        return "p40_p60"
+    if number <= 0.8:
+        return "p60_p80"
+    return "p80_p100"
+
+
+def _volatility_pct_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None or number < 0:
+        return None
+    if number < 0.01:
+        return "lt_1pct"
+    if number < 0.02:
+        return "1_2pct"
+    if number < 0.03:
+        return "2_3pct"
+    if number < 0.05:
+        return "3_5pct"
+    return "gte_5pct"
+
+
+def _ma20_distance_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    if number < -0.10:
+        return "below_gt_10pct"
+    if number < 0:
+        return "below_0_10pct"
+    if number < 0.05:
+        return "above_0_5pct"
+    if number < 0.15:
+        return "above_5_15pct"
+    return "above_gt_15pct"
 
 
 def _scope_from_field(field_key: str) -> str:

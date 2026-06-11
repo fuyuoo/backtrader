@@ -328,6 +328,77 @@ def test_tushare_provider_fetches_stock_names(monkeypatch: pytest.MonkeyPatch) -
     assert names == {"000001.SZ": "平安银行", "600519.SH": "贵州茅台"}
 
 
+def test_tushare_provider_fetches_all_stock_industry_memberships_by_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    pages = [
+        pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "name": "平安银行",
+                    "l1_code": "801780.SI",
+                    "l1_name": "银行",
+                    "l2_code": "801781.SI",
+                    "l2_name": "二级",
+                    "l3_code": "801782.SI",
+                    "l3_name": "三级",
+                    "in_date": "19910403",
+                    "out_date": None,
+                    "is_new": "Y",
+                },
+                {
+                    "ts_code": "600000.SH",
+                    "name": "浦发银行",
+                    "l1_code": "801780.SI",
+                    "l1_name": "银行",
+                    "l2_code": "801781.SI",
+                    "l2_name": "二级",
+                    "l3_code": "801783.SI",
+                    "l3_name": "三级",
+                    "in_date": "19991110",
+                    "out_date": None,
+                    "is_new": "Y",
+                },
+            ]
+        ),
+        pd.DataFrame(
+            [
+                {
+                    "ts_code": "600519.SH",
+                    "name": "贵州茅台",
+                    "l1_code": "801120.SI",
+                    "l1_name": "食品饮料",
+                    "l2_code": "801121.SI",
+                    "l2_name": "二级",
+                    "l3_code": "801122.SI",
+                    "l3_name": "三级",
+                    "in_date": "20010827",
+                    "out_date": None,
+                    "is_new": "Y",
+                },
+            ]
+        ),
+    ]
+
+    class FakeApi:
+        def index_member_all(self, **kwargs):
+            calls.append(kwargs)
+            return pages[len(calls) - 1]
+
+    monkeypatch.setattr("attbacktrader.data.providers.tushare.INDEX_MEMBER_ALL_PAGE_LIMIT", 2)
+    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: FakeApi()))
+
+    provider = TushareProvider("test-token", rate_limit=TushareRateLimitConfig(requests_per_minute=600))
+    memberships = provider.fetch_all_stock_industry_memberships(source="SW2021")
+
+    assert [call["offset"] for call in calls] == [0, 2]
+    assert [call["limit"] for call in calls] == [2, 2]
+    assert "ts_code" not in calls[0]
+    assert calls[0]["fields"].startswith("ts_code,name,l1_code")
+    assert {item.symbol for item in memberships} == {"000001.SZ", "600000.SH", "600519.SH"}
+    assert memberships[-1].level1_name == "食品饮料"
+
+
 def test_tushare_provider_fetches_attribution_reference_frame(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {}
     daily_frame = pd.DataFrame(
