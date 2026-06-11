@@ -100,6 +100,8 @@ def build_attribution_reference_snapshot_from_frame(
     emit_date_set = {_coerce_date(value) for value in emit_dates or []}
     emit_date_set.discard(None)
     for trade_date, day in data.groupby("trade_date", sort=True):
+        if emit_date_set and trade_date not in emit_date_set:
+            continue
         reference_mask = _reference_universe_mask(day)
         reference_day = day[reference_mask]
         exclusion_codes = _exclusion_codes(day)
@@ -108,12 +110,11 @@ def build_attribution_reference_snapshot_from_frame(
             spec["column"]: int(reference_day[spec["column"]].notna().sum())
             for spec in percentile_specs
         }
-        for _, record in day.iterrows():
+        emit_day = day
+        if emit_symbol_set:
+            emit_day = emit_day[emit_day["symbol"].astype(str).isin(emit_symbol_set)]
+        for _, record in emit_day.iterrows():
             symbol = str(record["symbol"])
-            if emit_symbol_set and symbol not in emit_symbol_set:
-                continue
-            if emit_date_set and trade_date not in emit_date_set:
-                continue
             symbol_exclusions = exclusion_codes.get(record.name, [])
             rows.extend(_field_rows_for_record(
                 record,

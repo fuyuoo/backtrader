@@ -808,14 +808,20 @@ def _listing_trading_days(daily: Any) -> list[int | None]:
 
     if "list_date" not in daily.columns:
         return [None] * len(daily)
-    values: list[int | None] = []
-    for row in daily.itertuples(index=False):
-        list_date = getattr(row, "list_date", None)
-        trade_date = getattr(row, "trade_date", None)
-        if list_date is None or trade_date is None or pd.isna(list_date):
-            values.append(None)
-            continue
-        values.append(len(pd.bdate_range(start=list_date, end=trade_date)))
+    import numpy as np
+
+    list_dates = pd.to_datetime(daily["list_date"], errors="coerce")
+    trade_dates = pd.to_datetime(daily["trade_date"], errors="coerce")
+    valid = list_dates.notna() & trade_dates.notna() & (list_dates <= trade_dates)
+    values: list[int | None] = [None] * len(daily)
+    if not bool(valid.any()):
+        return values
+
+    start = list_dates[valid].to_numpy(dtype="datetime64[D]")
+    end = trade_dates[valid].to_numpy(dtype="datetime64[D]") + np.timedelta64(1, "D")
+    counts = np.busday_count(start, end)
+    for index, count in zip(np.flatnonzero(valid.to_numpy()), counts):
+        values[int(index)] = int(count)
     return values
 
 
