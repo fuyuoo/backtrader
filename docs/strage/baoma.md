@@ -210,6 +210,26 @@ reports/_tmp-baoma-100-industry-attribution-check/
 | 行业周线 KDJ 状态 | category | 是 | 已实现；使用申万一级行业指数信号日前最近一根已完成周线，默认进入 `environment_fit`。 |
 | 行业周线 KDJ J、行业周线均线趋势、行业周线相对强度 | raw/bucket | 否 | 已实现，进入宽表和字段索引，行业周线相对强度按同周行业指数 4 周收益分位计算。 |
 
+已确认的下一批五类因子 backlog：
+
+| backlog | 因子方向 | 第一批字段候选 | 状态 |
+|---|---|---|---|
+| `NEXT-01` | 大盘环境因子 | 沪深300/中证500日线趋势、周线 KDJ/MACD、20/60 日指数波动率、个股来源指数环境、市场宽度 | 待实现；先用现有 92 字段完成归因解读封板，再开始。 |
+| `NEXT-02` | 亏损/盈利质量因子 | `loss_making`、扣非净利润同比、营收同比、ROE、毛利率、净利率、经营现金流质量 | 待实现；需要新增财务数据源，不依赖实时 PE/PB。 |
+| `NEXT-03` | 相对强弱/动量因子 | 个股 20/60 日收益率、相对沪深300/中证500强弱、相对所属行业强弱、行业相对大盘强弱、20/60/120 日新高 | 待实现。 |
+| `NEXT-04` | 成交活跃度趋势因子 | 5/20 日换手均值、成交额连续放大/萎缩、成交额相对 60 日均额、放量突破/缩量回踩 | 待实现。 |
+| `NEXT-05` | 更细出场后验因子 | 最大浮盈/浮亏对应 ATR 倍数、是否达到 10%/15%、止盈后继续上涨、止损后反弹、卖飞幅度、错杀幅度 | 待实现；只用于路径诊断，不能作为入场环境因子。 |
+
+现有 92 字段归因解读封板记录：
+
+| 项目 | 封板内容 |
+|---|---|
+| 报告入口 | `reports/baoma-v1-fixed-sample-2023-2024/full_entry_scope_environment_fit_review/environment_attribution_review.zh.md`、`strategy_stage_attribution_review.zh.md` |
+| 数据口径 | 只使用已落盘 `attribution_wide_samples.json`、`attribution_field_index.json`、`environment_fit.enriched.json`；不重新拉行情，不重新跑策略。 |
+| 样本口径 | 3567 笔 completed trades；默认 `environment_fit` 字段 19 个，字段索引 92 个。 |
+| 解读边界 | 入场环境只看信号日/入场时可见字段；`trade.path.*` 只用于路径诊断；MA25/MA60 退出原因不得反推为利润/亏损原因。 |
+| 当前结论用途 | 用于决定下一批归因因子和人工复盘重点；不直接输出参数优化建议。 |
+
 下一阶段新增因子的实现规则：
 
 1. 新因子先进入因子注册和 `include/not_include`，不能直接写死进报告。
