@@ -538,6 +538,62 @@ def test_tushare_reference_fetch_large_symbol_list_uses_market_window(monkeypatc
     assert set(frame["symbol"]) == {"000001.SZ", "600000.SH"}
 
 
+def test_tushare_reference_fetch_caches_market_trade_date_frames(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    calls = {"daily": 0, "daily_basic": 0}
+    daily_frame = pd.DataFrame(
+        [
+            {"ts_code": "000001.SZ", "trade_date": "20240102", "open": 10, "high": 11, "low": 9, "close": 10.5, "vol": 1000, "amount": 10000},
+        ]
+    )
+    daily_basic_frame = pd.DataFrame(
+        [
+            {"ts_code": "000001.SZ", "trade_date": "20240102", "turnover_rate": 1.2, "volume_ratio": 1.1, "pe": 10.0, "pe_ttm": 11.0, "pb": 1.3, "total_mv": 100.0, "circ_mv": 90.0},
+        ]
+    )
+    stock_basic_frame = pd.DataFrame(
+        [{"ts_code": "000001.SZ", "name": "平安银行", "exchange": "SZSE", "market": "主板", "list_date": "19910403"}]
+    )
+
+    class FakeApi:
+        def daily(self, **kwargs):
+            calls["daily"] += 1
+            return daily_frame
+
+        def daily_basic(self, **kwargs):
+            calls["daily_basic"] += 1
+            return daily_basic_frame
+
+        def stock_basic(self, **kwargs):
+            return stock_basic_frame
+
+        def suspend_d(self, **kwargs):
+            return pd.DataFrame()
+
+        def namechange(self, **kwargs):
+            return pd.DataFrame()
+
+    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: FakeApi()))
+
+    provider = TushareProvider("test-token", rate_limit=TushareRateLimitConfig(requests_per_minute=600))
+    symbols = ["000001.SZ"] + [f"000{i:03d}.SZ" for i in range(100)]
+    cache_dir = tmp_path / "raw-cache"
+    for _ in range(2):
+        frame = provider.fetch_attribution_reference_frame_for_symbols(
+            start_date=date(2024, 1, 2),
+            end_date=date(2024, 1, 2),
+            symbols=symbols,
+            raw_cache_dir=cache_dir,
+        )
+        assert set(frame["symbol"]) == {"000001.SZ"}
+
+    assert calls == {"daily": 1, "daily_basic": 1}
+    assert list((cache_dir / "daily").glob("*.parquet"))
+    assert list((cache_dir / "daily_basic").glob("*.parquet"))
+
+
 def test_tushare_provider_fetches_tradability_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {}
     limit_frame = pd.DataFrame(

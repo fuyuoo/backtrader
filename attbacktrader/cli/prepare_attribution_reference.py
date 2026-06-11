@@ -115,6 +115,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--min-reference-count", type=int, default=100)
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--raw-cache-dir",
+        default=None,
+        help="Optional parquet cache directory for per-trade-date raw Tushare reference API responses.",
+    )
     add_tushare_rate_limit_args(parser)
     args = parser.parse_args(argv)
     if args.input is None and args.provider is None:
@@ -149,11 +154,14 @@ def _fetch_provider_frame(args: argparse.Namespace, start_date: date, end_date: 
         rate_limit=tushare_rate_limit_config_from_args(args),
     )
     symbols = _symbols_from_args(args, run_defaults=_run_defaults_from_args(args))
-    frame = provider.fetch_attribution_reference_frame_for_symbols(
-        start_date=start_date,
-        end_date=end_date,
-        symbols=symbols or None,
-    )
+    fetch_kwargs = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "symbols": symbols or None,
+    }
+    if args.raw_cache_dir is not None:
+        fetch_kwargs["raw_cache_dir"] = args.raw_cache_dir
+    frame = provider.fetch_attribution_reference_frame_for_symbols(**fetch_kwargs)
     if not args.fetch_industry_memberships:
         return frame
     symbols = sorted(str(symbol) for symbol in frame["symbol"].dropna().unique())

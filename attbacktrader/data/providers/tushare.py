@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -243,7 +245,13 @@ class TushareProvider:
             return {}
         return _stock_names_from_frame(frame)
 
-    def fetch_attribution_reference_frame(self, *, start_date: date, end_date: date) -> Any:
+    def fetch_attribution_reference_frame(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+        raw_cache_dir: str | Path | None = None,
+    ) -> Any:
         """Fetch all-A daily rows needed by attribution reference preparation."""
 
         if end_date < start_date:
@@ -253,6 +261,7 @@ class TushareProvider:
             start_date=start_date,
             end_date=end_date,
             symbols=None,
+            raw_cache_dir=raw_cache_dir,
         )
 
     def fetch_attribution_reference_frame_for_symbols(
@@ -261,6 +270,7 @@ class TushareProvider:
         start_date: date,
         end_date: date,
         symbols: Sequence[str] | None,
+        raw_cache_dir: str | Path | None = None,
     ) -> Any:
         """Fetch attribution reference rows for all A or a specified symbol list."""
 
@@ -272,6 +282,7 @@ class TushareProvider:
                 start_date=start_date,
                 end_date=end_date,
                 symbols=symbols,
+                raw_cache_dir=raw_cache_dir,
             )
         )
         daily_basic_frame = _concat_frames(
@@ -279,6 +290,7 @@ class TushareProvider:
                 start_date=start_date,
                 end_date=end_date,
                 symbols=symbols,
+                raw_cache_dir=raw_cache_dir,
             )
         )
         stock_basic_frame = self._call_tushare(
@@ -312,6 +324,7 @@ class TushareProvider:
         start_date: date,
         end_date: date,
         symbols: Sequence[str] | None,
+        raw_cache_dir: str | Path | None,
     ) -> list[Any]:
         if symbols and len(symbols) < REFERENCE_SYMBOL_ALL_MARKET_THRESHOLD:
             return [
@@ -331,6 +344,7 @@ class TushareProvider:
                 api_name="daily",
                 start_date=start_date,
                 end_date=end_date,
+                raw_cache_dir=raw_cache_dir,
                 fields=REFERENCE_DAILY_FIELDS,
             )
         ]
@@ -342,6 +356,7 @@ class TushareProvider:
         start_date: date,
         end_date: date,
         symbols: Sequence[str] | None,
+        raw_cache_dir: str | Path | None,
     ) -> list[Any]:
         if symbols and len(symbols) < REFERENCE_SYMBOL_ALL_MARKET_THRESHOLD:
             return [
@@ -361,6 +376,7 @@ class TushareProvider:
                 api_name="daily_basic",
                 start_date=start_date,
                 end_date=end_date,
+                raw_cache_dir=raw_cache_dir,
                 fields=REFERENCE_DAILY_BASIC_FIELDS,
             )
         ]
@@ -514,18 +530,41 @@ class TushareProvider:
         api_name: str,
         start_date: date,
         end_date: date,
+        raw_cache_dir: str | Path | None = None,
         **kwargs: Any,
     ) -> Any:
         frames = [
-            self._call_tushare(
+            self._call_tushare_cached(
                 call,
                 api_name=api_name,
+                raw_cache_dir=Path(raw_cache_dir) if raw_cache_dir is not None else None,
                 trade_date=_format_tushare_date(trade_date),
                 **kwargs,
             )
             for trade_date in _business_dates(start_date, end_date)
         ]
         return _concat_frames(frames)
+
+    def _call_tushare_cached(
+        self,
+        call: Callable[..., Any],
+        *,
+        api_name: str,
+        raw_cache_dir: Path | None,
+        **kwargs: Any,
+    ) -> Any:
+        if raw_cache_dir is None:
+            return self._call_tushare(call, api_name=api_name, **kwargs)
+        path = _raw_tushare_cache_path(raw_cache_dir, api_name=api_name, kwargs=kwargs)
+        if path.exists():
+            import pandas as pd
+
+            return pd.read_parquet(path)
+        frame = self._call_tushare(call, api_name=api_name, **kwargs)
+        if frame is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            frame.to_parquet(path, index=False)
+        return frame
 
     def _call_tushare(self, call: Callable[..., Any], *, api_name: str, **kwargs: Any) -> Any:
         attempt = 0
@@ -805,6 +844,13 @@ def _business_dates(start_date: date, end_date: date) -> Iterable[date]:
 
     for value in pd.bdate_range(start=start_date, end=end_date):
         yield value.date()
+
+
+def _raw_tushare_cache_path(raw_cache_dir: Path, *, api_name: str, kwargs: dict[str, Any]) -> Path:
+    payload = json.dumps(kwargs, sort_keys=True, ensure_ascii=True, default=str)
+    digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
+    date_part = str(kwargs.get("trade_date") or kwargs.get("start_date") or "undated")
+    return raw_cache_dir / api_name / f"{date_part}_{digest}.parquet"
 
 
 def _concat_frames(frames: Iterable[Any]) -> Any:
