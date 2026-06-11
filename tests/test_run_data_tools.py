@@ -14,6 +14,7 @@ from attbacktrader.cli import run_data_attribution_summary as run_data_attributi
 from attbacktrader.cli import attribution_wide_samples as attribution_wide_samples_cli
 from attbacktrader.cli import environment_fit as environment_fit_cli
 from attbacktrader.reports import (
+    build_attribution_field_index,
     build_attribution_wide_samples,
     build_environment_fit_report_from_wide_samples,
     build_run_data_attribution_index,
@@ -282,6 +283,54 @@ def test_attribution_wide_samples_builds_field_index_and_enriched_environment_fi
         summary["field"] == "entry.price_position.near_high_20d_bucket"
         for summary in enriched["single_factor_summaries"]
     )
+
+
+def test_attribution_field_index_does_not_fallback_raw_for_bucket_fields() -> None:
+    wide_samples = {
+        "schema": "attbacktrader.attribution_wide_samples.v1",
+        "run_id": "field-index-bucket-test",
+        "source_dir": "reports/field-index-bucket-test",
+        "reference_path": "reference",
+        "samples": [
+            {
+                "trade_index": 1,
+                "return_pct": -0.01,
+                "field_values": {
+                    "entry.volatility.atr_20d_bucket": {
+                        "raw": 0.032,
+                        "bucket": None,
+                        "exception_codes": ["reference_excluded_st"],
+                    }
+                },
+            },
+            {
+                "trade_index": 2,
+                "return_pct": 0.02,
+                "field_values": {
+                    "entry.volatility.atr_20d_bucket": {
+                        "raw": 0.025,
+                        "bucket": "p20_p40",
+                        "exception_codes": [],
+                    }
+                },
+            },
+        ],
+    }
+
+    index = build_attribution_field_index(
+        wide_samples,
+        field_catalog={
+            "entry.volatility.atr_20d_bucket": {
+                "field_key": "entry.volatility.atr_20d_bucket",
+                "value_type": "bucket",
+            }
+        },
+    )
+
+    field = index["fields"][0]
+    values = {bucket["value"]: bucket["count"] for bucket in field["bucket_distribution"]}
+    assert field["coverage_stats"]["missing_count"] == 1
+    assert values == {"p20_p40": 1, None: 1}
 
 
 def test_attribution_wide_samples_treats_stale_reference_rows_as_missing(tmp_path: Path) -> None:

@@ -848,6 +848,17 @@ def build_attribution_wide_samples(
     return payload
 
 
+def _field_index_value(field_key: str, field_catalog_item: Mapping[str, Any], payload: Mapping[str, Any]) -> Any:
+    if _is_bucket_field(field_key, field_catalog_item):
+        return payload.get("bucket")
+    bucket = payload.get("bucket")
+    return bucket if bucket is not None else payload.get("raw")
+
+
+def _is_bucket_field(field_key: str, field_catalog_item: Mapping[str, Any]) -> bool:
+    return field_catalog_item.get("value_type") == "bucket" or str(field_key).endswith("_bucket")
+
+
 def build_attribution_field_index(
     wide_samples: Mapping[str, Any],
     *,
@@ -878,9 +889,7 @@ def build_attribution_field_index(
             if field_key not in stats:
                 continue
             item = _as_mapping(payload)
-            bucket = item.get("bucket")
-            raw = item.get("raw")
-            value = bucket if bucket is not None else raw
+            value = _field_index_value(field_key, _as_mapping(catalog.get(field_key)), item)
             value_key = _stable_value_key(value if value is not None else "__missing__")
             stats[field_key]["sample_count"] += 1
             if value is None:
