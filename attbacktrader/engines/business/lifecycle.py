@@ -63,6 +63,18 @@ class LifecycleClosedTrade:
     original_entry_price: float | None = None
     remaining_cost_basis_at_exit: float | None = None
     entry_quantity: int | None = None
+    entry_gross_value: float | None = None
+    exit_gross_value: float | None = None
+    net_pnl: float | None = None
+    realized_return_pct: float | None = None
+
+    @property
+    def return_pct(self) -> float:
+        if self.realized_return_pct is not None:
+            return self.realized_return_pct
+        if self.entry_price <= 0:
+            return 0.0
+        return self.exit_price / self.entry_price - 1.0
 
 
 @dataclass(frozen=True)
@@ -103,6 +115,8 @@ class ExecutionLifecycleComponent:
         self._primary_entry_date: date | None = None
         self._primary_entry_price: float | None = None
         self._total_entry_quantity = 0
+        self._total_entry_gross_value = 0.0
+        self._total_exit_gross_value = 0.0
         self.pending_exit_reason: str | None = None
         self.ever_profitable = False
         self.cost_recovered = False
@@ -158,9 +172,13 @@ class ExecutionLifecycleComponent:
             self._primary_entry_date = trade_date
             self._primary_entry_price = price
             self._total_entry_quantity = 0
+            self._total_entry_gross_value = 0.0
+            self._total_exit_gross_value = 0.0
         self._lots.append(LifecycleLot(trade_date=trade_date, quantity=quantity, price=price))
-        self._remaining_cost_value += quantity * price
+        gross_value = quantity * price
+        self._remaining_cost_value += gross_value
         self._total_entry_quantity += quantity
+        self._total_entry_gross_value += gross_value
         self.state = LifecycleState.ENTRY_LOCKED_T1
         return LifecycleExecutionEvent(
             trade_date=trade_date,
@@ -244,9 +262,12 @@ class ExecutionLifecycleComponent:
         closing_cost_basis = self.adjusted_remaining_cost_basis
         entry_price = original_entry_price if original_entry_price is not None else closing_cost_basis or 0.0
         entry_quantity = self._total_entry_quantity or requested_quantity
+        exit_gross_value = executable_quantity * price
         self._remove_quantity_from_lots(executable_quantity, trade_date=trade_date)
-        self._remaining_cost_value = max(0.0, self._remaining_cost_value - executable_quantity * price)
+        self._remaining_cost_value = max(0.0, self._remaining_cost_value - exit_gross_value)
+        self._total_exit_gross_value += exit_gross_value
         if self.total_quantity <= 0:
+            net_pnl = self._total_exit_gross_value - self._total_entry_gross_value
             self._closed_trades.append(
                 LifecycleClosedTrade(
                     symbol=self.symbol,
@@ -259,12 +280,22 @@ class ExecutionLifecycleComponent:
                     original_entry_price=entry_price,
                     remaining_cost_basis_at_exit=closing_cost_basis,
                     entry_quantity=entry_quantity,
+                    entry_gross_value=self._total_entry_gross_value,
+                    exit_gross_value=self._total_exit_gross_value,
+                    net_pnl=net_pnl,
+                    realized_return_pct=(
+                        net_pnl / self._total_entry_gross_value
+                        if self._total_entry_gross_value > 0
+                        else None
+                    ),
                 )
             )
             self._remaining_cost_value = 0.0
             self._primary_entry_date = None
             self._primary_entry_price = None
             self._total_entry_quantity = 0
+            self._total_entry_gross_value = 0.0
+            self._total_exit_gross_value = 0.0
             self.state = LifecycleState.CLOSED
             self.pending_exit_reason = None
         else:
@@ -336,6 +367,8 @@ class ExecutionLifecycleComponent:
         closing_cost_basis = self.adjusted_remaining_cost_basis
         entry_price = original_entry_price if original_entry_price is not None else closing_cost_basis or 0.0
         entry_quantity = self._total_entry_quantity or open_quantity
+        self._total_exit_gross_value += open_quantity * price
+        net_pnl = self._total_exit_gross_value - self._total_entry_gross_value
         self._lots = []
         self._remaining_cost_value = 0.0
         self._primary_entry_date = None
@@ -353,8 +386,18 @@ class ExecutionLifecycleComponent:
                 original_entry_price=entry_price,
                 remaining_cost_basis_at_exit=closing_cost_basis,
                 entry_quantity=entry_quantity,
+                entry_gross_value=self._total_entry_gross_value,
+                exit_gross_value=self._total_exit_gross_value,
+                net_pnl=net_pnl,
+                realized_return_pct=(
+                    net_pnl / self._total_entry_gross_value
+                    if self._total_entry_gross_value > 0
+                    else None
+                ),
             )
         )
+        self._total_entry_gross_value = 0.0
+        self._total_exit_gross_value = 0.0
         self.state = LifecycleState.CLOSED
         return LifecycleEndRunResult(
             end_date=end_date,
@@ -402,8 +445,10 @@ class ExecutionLifecycleComponent:
                 blocked_by="SCALE_OUT_TOO_SMALL",
             )
 
+        exit_gross_value = executable_quantity * price
         self._remove_quantity_from_lots(executable_quantity, trade_date=trade_date)
-        self._remaining_cost_value -= executable_quantity * price
+        self._remaining_cost_value -= exit_gross_value
+        self._total_exit_gross_value += exit_gross_value
         if self.total_quantity <= 0:
             self._remaining_cost_value = 0.0
             self.state = LifecycleState.CLOSED

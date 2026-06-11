@@ -237,6 +237,43 @@ def test_baoma_business_runner_full_exit_has_priority_over_scale_out() -> None:
     assert all("SCALE_OUT" not in event.reason_code for event in result.lifecycle_events)
 
 
+def test_baoma_business_runner_closed_trade_return_includes_scale_out_cashflows() -> None:
+    bars, frame, trade_dates = _baoma_fixture(
+        opens=(10.0, 12.0, 10.0, 10.0, 10.0, 9.0, 9.0),
+        closes=(10.0, 11.0, 10.0, 11.0, 11.2, 9.0, 8.8),
+        dea_values=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6),
+        ma60_values=(7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0),
+        ma25_values=(9.0, 9.0, 9.0, 9.0, 9.0, 10.0, 10.0),
+    )
+
+    result = run_baoma_v1_business(
+        {SYMBOL: bars},
+        indicators_by_symbol={SYMBOL: frame},
+        config=_three_lot_config(),
+    )
+
+    execution_summary = [
+        (event.side, event.trade_date, event.price, event.reason_code, event.executed_quantity)
+        for event in result.lifecycle_events
+    ]
+    assert execution_summary == [
+        ("buy", trade_dates[2], 10.0, "BAOMA_ENTRY_TRIGGERED", 300),
+        ("sell", trade_dates[3], 11.0, "BAOMA_SCALE_OUT_5_PERCENT_TRIGGERED", 100),
+        ("sell", trade_dates[4], 11.2, "BAOMA_SCALE_OUT_15_PERCENT_TRIGGERED", 100),
+        ("sell", trade_dates[6], 8.8, "BAOMA_MA25_PROFIT_EXIT_TRIGGERED", 100),
+    ]
+
+    assert len(result.closed_trades) == 1
+    closed_trade = result.closed_trades[0]
+    assert closed_trade.entry_price == pytest.approx(10.0)
+    assert closed_trade.exit_price == pytest.approx(8.8)
+    assert closed_trade.entry_gross_value == pytest.approx(3000.0)
+    assert closed_trade.exit_gross_value == pytest.approx(3100.0)
+    assert closed_trade.net_pnl == pytest.approx(100.0)
+    assert closed_trade.return_pct == pytest.approx(100.0 / 3000.0)
+    assert closed_trade.return_pct != pytest.approx(8.8 / 10.0 - 1.0)
+
+
 def _one_lot_config() -> BaomaBusinessRunConfig:
     return BaomaBusinessRunConfig(
         total_asset_value=1_000.0,

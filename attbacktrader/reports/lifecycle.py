@@ -90,6 +90,10 @@ class TradeLifecycle:
     original_entry_price: float | None = None
     remaining_cost_basis_at_exit: float | None = None
     entry_quantity: int | None = None
+    entry_gross_value: float | None = None
+    exit_gross_value: float | None = None
+    net_pnl: float | None = None
+    realized_return_pct: float | None = None
 
 
 @dataclass(frozen=True)
@@ -260,6 +264,10 @@ def _trade_lifecycle(
         original_entry_price=getattr(trade, "original_entry_price", None),
         remaining_cost_basis_at_exit=getattr(trade, "remaining_cost_basis_at_exit", None),
         entry_quantity=getattr(trade, "entry_quantity", None),
+        entry_gross_value=getattr(trade, "entry_gross_value", None),
+        exit_gross_value=getattr(trade, "exit_gross_value", None),
+        net_pnl=getattr(trade, "net_pnl", None),
+        realized_return_pct=getattr(trade, "realized_return_pct", None),
         events=tuple(events),
     )
 

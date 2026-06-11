@@ -199,6 +199,10 @@ def test_lgs_05b_closed_trade_keeps_primary_entry_date_after_scale_out_and_add_o
     assert closed_trade.original_entry_price == 10.0
     assert closed_trade.entry_quantity == 600
     assert closed_trade.remaining_cost_basis_at_exit == 7.0
+    assert closed_trade.entry_gross_value == 6300.0
+    assert closed_trade.exit_gross_value == 6700.0
+    assert closed_trade.net_pnl == 400.0
+    assert closed_trade.realized_return_pct == 400.0 / 6300.0
 
 
 def test_lgs_06_confirmed_full_exit_rejection_enters_pending_exit() -> None:

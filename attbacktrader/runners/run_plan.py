@@ -443,6 +443,10 @@ def _portfolio_result_from_baoma(result: BaomaBusinessRunResult) -> TrendTemplat
                 original_entry_price=trade.original_entry_price,
                 remaining_cost_basis_at_exit=trade.remaining_cost_basis_at_exit,
                 entry_quantity=trade.entry_quantity,
+                entry_gross_value=trade.entry_gross_value,
+                exit_gross_value=trade.exit_gross_value,
+                net_pnl=trade.net_pnl,
+                realized_return_pct=trade.realized_return_pct,
             )
             for trade in result.closed_trades
         ),
