@@ -614,7 +614,7 @@ def _attribution_reference_frame_from_frames(
         for row in daily.itertuples(index=False)
     ]
     daily["is_st"] = _historical_st_flags(daily, namechange_frame)
-    daily["listing_trading_days"] = daily.groupby("symbol").cumcount() + 1
+    daily["listing_trading_days"] = _listing_trading_days(daily)
     daily["is_tradable"] = True
     return daily.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
 
@@ -646,6 +646,22 @@ def _historical_st_flags(daily: Any, namechange_frame: Any) -> list[bool]:
                 break
         flags.append(active)
     return flags
+
+
+def _listing_trading_days(daily: Any) -> list[int | None]:
+    import pandas as pd
+
+    if "list_date" not in daily.columns:
+        return [None] * len(daily)
+    values: list[int | None] = []
+    for row in daily.itertuples(index=False):
+        list_date = getattr(row, "list_date", None)
+        trade_date = getattr(row, "trade_date", None)
+        if list_date is None or trade_date is None or pd.isna(list_date):
+            values.append(None)
+            continue
+        values.append(len(pd.bdate_range(start=list_date, end=trade_date)))
+    return values
 
 
 def _date_windows(start_date: date, end_date: date, *, window_days: int) -> Iterable[tuple[date, date]]:
