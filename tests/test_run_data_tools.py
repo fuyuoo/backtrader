@@ -7,7 +7,11 @@ from attbacktrader.cli import run_data_drilldown_batch as run_data_drilldown_bat
 from attbacktrader.cli import run_data_overview as run_data_overview_cli
 from attbacktrader.cli import run_data_attribution_index as run_data_attribution_index_cli
 from attbacktrader.cli import run_data_attribution_summary as run_data_attribution_summary_cli
+from attbacktrader.cli import attribution_wide_samples as attribution_wide_samples_cli
+from attbacktrader.cli import environment_fit as environment_fit_cli
 from attbacktrader.reports import (
+    build_attribution_wide_samples,
+    build_environment_fit_report_from_wide_samples,
     build_run_data_attribution_index,
     build_run_data_attribution_summary,
     build_run_data_dictionary,
@@ -20,6 +24,7 @@ from attbacktrader.reports import (
     render_run_data_drilldown_markdown_zh,
     render_run_data_drilldown_batch_markdown_zh,
     render_run_data_overview_markdown_zh,
+    write_attribution_wide_samples,
     write_run_data_attribution_index,
     write_run_data_attribution_summary,
     write_run_data_dictionary,
@@ -230,6 +235,38 @@ def test_run_data_attribution_summary_compacts_top_and_bottom_factor_candidates(
     assert markdown_path.exists()
 
 
+def test_attribution_wide_samples_builds_field_index_and_enriched_environment_fit(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    reference_path = _reference_snapshot(tmp_path)
+
+    wide_samples = build_attribution_wide_samples(run_dir, reference_snapshot=reference_path)
+    wide_path, csv_path, index_path, markdown_path = write_attribution_wide_samples(
+        wide_samples,
+        output_dir=tmp_path / "wide",
+    )
+    enriched = build_environment_fit_report_from_wide_samples(
+        wide_path,
+        field_index=index_path,
+        min_sample_count=1,
+    )
+
+    assert wide_samples["schema"] == "attbacktrader.attribution_wide_samples.v1"
+    assert wide_samples["sample_count"] == 1
+    assert wide_samples["field_index"]["schema"] == "attbacktrader.attribution_field_index.v1"
+    assert "entry.price_position.near_high_20d_bucket" in wide_samples["environment_fit_default_fields"]
+    assert "entry.valuation.pe_bucket" in [field["field_key"] for field in wide_samples["field_index"]["fields"]]
+    assert wide_path.exists()
+    assert csv_path.exists()
+    assert index_path.exists()
+    assert markdown_path.exists()
+    assert enriched["variant"] == "enriched"
+    assert enriched["trade_count"] == 1
+    assert any(
+        summary["field"] == "entry.price_position.near_high_20d_bucket"
+        for summary in enriched["single_factor_summaries"]
+    )
+
+
 def test_run_data_clis_write_outputs(tmp_path: Path, capsys) -> None:
     run_dir = _run_dir(tmp_path)
     output_dir = tmp_path / "cli-out"
@@ -286,6 +323,31 @@ def test_run_data_clis_write_outputs(tmp_path: Path, capsys) -> None:
         ]
     )
     summary_stdout = json.loads(capsys.readouterr().out)
+    reference_path = _reference_snapshot(tmp_path)
+    wide_exit = attribution_wide_samples_cli.main(
+        [
+            "--run-dir",
+            str(run_dir),
+            "--reference-snapshot",
+            str(reference_path),
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+    wide_stdout = json.loads(capsys.readouterr().out)
+    enriched_exit = environment_fit_cli.main(
+        [
+            "--wide-samples",
+            str(output_dir / "attribution_wide_samples.json"),
+            "--field-index",
+            str(output_dir / "attribution_field_index.json"),
+            "--min-sample-count",
+            "1",
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+    enriched_stdout = json.loads(capsys.readouterr().out)
 
     assert dictionary_exit == 0
     assert overview_exit == 0
@@ -293,6 +355,8 @@ def test_run_data_clis_write_outputs(tmp_path: Path, capsys) -> None:
     assert batch_exit == 0
     assert index_exit == 0
     assert summary_exit == 0
+    assert wide_exit == 0
+    assert enriched_exit == 0
     assert dictionary_stdout["artifacts"]["run_data_dictionary_json_path"] == str(output_dir / "run_data_dictionary.json")
     assert overview_stdout["closed_trade_count"] == 2
     assert drilldown_stdout["sample_id"] == "trade.1"
@@ -300,11 +364,18 @@ def test_run_data_clis_write_outputs(tmp_path: Path, capsys) -> None:
     assert index_stdout["matching_sample_ids"] == ["trade.1"]
     assert summary_stdout["preferred_count"] > 0
     assert summary_stdout["preferred_combination_count"] > 0
+    assert wide_stdout["sample_count"] == 1
+    assert enriched_stdout["schema"] == "attbacktrader.environment_fit.v1"
     assert (output_dir / "run_data_overview.zh.md").exists()
     assert (output_dir / "run_data_drilldown.trade.1.zh.md").exists()
     assert (output_dir / "run_data_drilldown_batch.zh.md").exists()
     assert (output_dir / "run_data_attribution_index.zh.md").exists()
     assert (output_dir / "run_data_attribution_summary.zh.md").exists()
+    assert (output_dir / "attribution_wide_samples.json").exists()
+    assert (output_dir / "attribution_wide_samples.csv").exists()
+    assert (output_dir / "attribution_field_index.zh.md").exists()
+    assert (output_dir / "environment_fit.enriched.json").exists()
+    assert (output_dir / "environment_fit.enriched.zh.md").exists()
 
 
 def _run_dir(root: Path) -> Path:
@@ -689,6 +760,121 @@ def _run_dir(root: Path) -> Path:
                         "max_high_return_pct": 0.03,
                     },
                 }
+            ],
+        },
+    )
+    return path
+
+
+def _reference_snapshot(root: Path) -> Path:
+    path = root / "reference.json"
+    _write_json(
+        path,
+        {
+            "metadata": {
+                "fields": [
+                    {
+                        "field_key": "industry.sw_l1.code",
+                        "label_zh": "申万一级行业",
+                        "value_type": "category",
+                        "scope": "industry",
+                        "default_in_environment_fit": True,
+                    },
+                    {
+                        "field_key": "entry.price_position.near_high_20d_bucket",
+                        "label_zh": "距20日高点桶",
+                        "value_type": "bucket",
+                        "scope": "price_position",
+                        "bucket_rule": "fixed_explain_bucket",
+                        "default_in_environment_fit": True,
+                    },
+                    {
+                        "field_key": "entry.valuation.pe_bucket",
+                        "label_zh": "PE桶",
+                        "value_type": "bucket",
+                        "scope": "valuation",
+                        "bucket_rule": "fixed_explain_bucket",
+                        "default_in_environment_fit": False,
+                    },
+                    {
+                        "field_key": "entry.volatility.atr_20d_bucket",
+                        "label_zh": "ATR百分比桶",
+                        "value_type": "bucket",
+                        "scope": "volatility",
+                        "default_in_environment_fit": True,
+                    },
+                    {
+                        "field_key": "entry.stop_fit.fixed_atr_multiple_bucket",
+                        "label_zh": "5%止盈对应ATR倍数桶",
+                        "value_type": "bucket",
+                        "scope": "stop_fit",
+                        "default_in_environment_fit": True,
+                    },
+                ],
+                "environment_fit_default_fields": [
+                    "industry.sw_l1.code",
+                    "entry.price_position.near_high_20d_bucket",
+                    "entry.volatility.atr_20d_bucket",
+                    "entry.stop_fit.fixed_atr_multiple_bucket",
+                ],
+                "environment_fit_pair_whitelist": [
+                    ["industry.sw_l1.code", "entry.stop_fit.fixed_atr_multiple_bucket"],
+                    ["entry.volatility.atr_20d_bucket", "entry.stop_fit.fixed_atr_multiple_bucket"],
+                ],
+            },
+            "rows": [
+                {
+                    "symbol": "000001.SZ",
+                    "trade_date": "2024-01-05",
+                    "field_key": "industry.sw_l1.code",
+                    "value": "801780.SI",
+                    "bucket": "801780.SI",
+                    "asof_date": "2024-01-05",
+                    "staleness_trading_days": 0,
+                    "reference_count": 4000,
+                },
+                {
+                    "symbol": "000001.SZ",
+                    "trade_date": "2024-01-05",
+                    "field_key": "entry.price_position.near_high_20d_bucket",
+                    "value": -0.02,
+                    "bucket": "near_high",
+                    "asof_date": "2024-01-05",
+                    "staleness_trading_days": 0,
+                    "reference_count": 4000,
+                },
+                {
+                    "symbol": "000001.SZ",
+                    "trade_date": "2024-01-05",
+                    "field_key": "entry.valuation.pe_bucket",
+                    "value": -12.3,
+                    "bucket": "negative",
+                    "asof_date": "2024-01-05",
+                    "staleness_trading_days": 0,
+                    "exception_codes": ["negative_pe"],
+                    "reference_count": 4000,
+                },
+                {
+                    "symbol": "000001.SZ",
+                    "trade_date": "2024-01-05",
+                    "field_key": "entry.volatility.atr_20d_bucket",
+                    "value": 0.035,
+                    "bucket": "p60_p80",
+                    "percentile": 0.72,
+                    "asof_date": "2024-01-05",
+                    "staleness_trading_days": 0,
+                    "reference_count": 4000,
+                },
+                {
+                    "symbol": "000001.SZ",
+                    "trade_date": "2024-01-05",
+                    "field_key": "entry.stop_fit.fixed_atr_multiple_bucket",
+                    "value": 1.42,
+                    "bucket": "one_to_two_atr",
+                    "asof_date": "2024-01-05",
+                    "staleness_trading_days": 0,
+                    "reference_count": 4000,
+                },
             ],
         },
     )

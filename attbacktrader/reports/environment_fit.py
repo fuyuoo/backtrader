@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from attbacktrader.strategies.attribution import entry_attribution_declaration_by_key
+from attbacktrader.reports.attribution_wide_samples import (
+    load_attribution_field_index,
+    load_attribution_wide_samples,
+)
 
 
 ENVIRONMENT_FIT_SCHEMA = "attbacktrader.environment_fit.v1"
@@ -112,6 +116,96 @@ def build_environment_fit_report_from_artifacts(
             "字段缺失表示当时没有足够证据，不能当成 false、0 或中性结果。",
             "胜率和平均收益按交易 return_pct 统计；利润贡献按已完成执行的成交额和佣金统计。",
             "组合环境只统计所有配置字段都存在的交易，样本数低于 min_sample_count 的组合只能作为线索。",
+        ],
+    }
+
+
+def build_environment_fit_report_from_wide_samples(
+    wide_samples: Mapping[str, Any] | str | Path,
+    *,
+    field_index: Mapping[str, Any] | str | Path | None = None,
+    environment_fields: Sequence[str] | None = None,
+    pair_whitelist: Sequence[Sequence[str]] | None = None,
+    min_sample_count: int = 5,
+) -> dict[str, Any]:
+    """Build an enriched environment-fit report from attribution wide samples."""
+
+    if min_sample_count <= 0:
+        raise ValueError("min_sample_count must be greater than 0")
+
+    wide = load_attribution_wide_samples(wide_samples)
+    if field_index is None:
+        index = _as_mapping(wide.get("field_index"))
+    else:
+        index = load_attribution_field_index(field_index)
+
+    fields = tuple(
+        str(field)
+        for field in (
+            environment_fields
+            if environment_fields is not None
+            else _as_sequence(index.get("environment_fit_default_fields"))
+            or _as_sequence(wide.get("environment_fit_default_fields"))
+        )
+    )
+    pairs = tuple(
+        tuple(str(part) for part in pair)
+        for pair in (
+            pair_whitelist
+            if pair_whitelist is not None
+            else _as_sequence(index.get("environment_fit_pair_whitelist"))
+            or _as_sequence(wide.get("environment_fit_pair_whitelist"))
+        )
+        if len(_as_sequence(pair)) == 2
+    )
+
+    trades = _trade_rows_from_wide_samples(wide, environment_fields=fields)
+    single_factor_summaries = _single_factor_summaries(trades, fields)
+    combination_summaries = _pair_combination_summaries(trades, pairs)
+    trade_contributions = _trade_contributions(trades)
+    return {
+        "schema": ENVIRONMENT_FIT_SCHEMA,
+        "variant": "enriched",
+        "run_id": wide.get("run_id"),
+        "source_dir": wide.get("source_dir"),
+        "source_artifacts": {
+            "wide_samples": wide.get("reference_path"),
+            "field_index": index.get("reference_path"),
+        },
+        "environment_fields": [
+            {
+                "field": field,
+                "label_zh": _factor_label(field),
+            }
+            for field in fields
+        ],
+        "environment_pair_whitelist": [list(pair) for pair in pairs],
+        "min_sample_count": min_sample_count,
+        "trade_count": len(trades),
+        "contribution_available_count": sum(
+            1
+            for trade in trades
+            if _as_mapping(trade.get("profit_contribution")).get("contribution_available") is True
+        ),
+        "overall": _stats(trades),
+        "best_environments": _best_environments(
+            single_factor_summaries=single_factor_summaries,
+            combination_summaries=combination_summaries,
+            min_sample_count=min_sample_count,
+        ),
+        "sample_warnings": _sample_warnings(
+            single_factor_summaries=single_factor_summaries,
+            combination_summaries=combination_summaries,
+            min_sample_count=min_sample_count,
+        ),
+        "single_factor_summaries": single_factor_summaries,
+        "combination_summaries": combination_summaries,
+        "trade_contributions": trade_contributions,
+        "ai_usage_rules": [
+            "该 enriched 报告消费 attribution_wide_samples，不重跑策略、不联网拉取数据。",
+            "默认字段和白名单二因子组合来自 attribution_field_index，可用命令行临时覆盖。",
+            "字段缺失表示当时没有足够证据，不能当成 false、0 或中性结果。",
+            "当前阶段只做归因和证据展示，不自动输出调参或风控结论。",
         ],
     }
 
@@ -292,13 +386,14 @@ def write_environment_fit_report(
     report: Mapping[str, Any],
     *,
     output_dir: str | Path | None = None,
+    artifact_stem: str = "environment_fit",
 ) -> tuple[Path, Path]:
     """Write environment fit JSON and Chinese Markdown artifacts."""
 
     target_dir = Path(output_dir) if output_dir is not None else Path(str(report["source_dir"]))
     target_dir.mkdir(parents=True, exist_ok=True)
-    json_path = target_dir / "environment_fit.json"
-    markdown_path = target_dir / "environment_fit.zh.md"
+    json_path = target_dir / f"{artifact_stem}.json"
+    markdown_path = target_dir / f"{artifact_stem}.zh.md"
     json_path.write_text(_to_pretty_json(report), encoding="utf-8")
     markdown_path.write_text(render_environment_fit_markdown_zh(report), encoding="utf-8")
     return json_path, markdown_path
@@ -342,6 +437,43 @@ def _trade_rows(
                     "entry_checks": dict(entry_checks),
                     "environment": environment,
                     "profit_contribution": contribution,
+                }
+            )
+        )
+    return rows
+
+
+def _trade_rows_from_wide_samples(
+    wide_samples: Mapping[str, Any],
+    *,
+    environment_fields: Sequence[str],
+) -> list[dict[str, Any]]:
+    rows = []
+    for sample in _as_sequence(wide_samples.get("samples")):
+        sample_map = _as_mapping(sample)
+        field_values = _as_mapping(sample_map.get("field_values"))
+        environment = {}
+        for field in environment_fields:
+            payload = _as_mapping(field_values.get(field))
+            if not payload:
+                continue
+            value = payload.get("bucket") if payload.get("bucket") is not None else payload.get("raw")
+            if value is not None:
+                environment[field] = value
+        rows.append(
+            _drop_empty(
+                {
+                    "trade_index": sample_map.get("trade_index"),
+                    "symbol": sample_map.get("symbol"),
+                    "outcome": sample_map.get("outcome"),
+                    "entry_date": sample_map.get("entry_date"),
+                    "exit_date": sample_map.get("exit_date"),
+                    "exit_reason": sample_map.get("exit_reason"),
+                    "return_pct": _optional_float(sample_map.get("return_pct")),
+                    "entry_checks": dict(environment),
+                    "environment": environment,
+                    "profit_contribution": _as_mapping(sample_map.get("profit_contribution")),
+                    "attribution_exception_codes": sample_map.get("attribution_exception_codes"),
                 }
             )
         )
@@ -480,6 +612,52 @@ def _combination_summaries(
             }
         )
         summaries.append(summary)
+    return sorted(
+        summaries,
+        key=lambda item: (
+            -(item.get("net_pnl") if item.get("net_pnl") is not None else float("-inf")),
+            -int(item.get("sample_count", 0)),
+            str(item.get("profile_key")),
+        ),
+    )
+
+
+def _pair_combination_summaries(
+    trades: Sequence[Mapping[str, Any]],
+    pair_whitelist: Sequence[Sequence[str]],
+) -> list[dict[str, Any]]:
+    summaries = []
+    seen: set[tuple[str, str]] = set()
+    for pair in pair_whitelist:
+        if len(pair) != 2:
+            continue
+        left, right = str(pair[0]), str(pair[1])
+        key_pair = tuple(sorted((left, right)))
+        if key_pair in seen:
+            continue
+        seen.add(key_pair)
+        buckets: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+        values_by_key: dict[str, dict[str, Any]] = {}
+        for trade in trades:
+            environment = _as_mapping(trade.get("environment"))
+            if left not in environment or right not in environment:
+                continue
+            values = {left: environment[left], right: environment[right]}
+            bucket_key = _stable_value_key(values)
+            values_by_key[bucket_key] = values
+            buckets[bucket_key].append(trade)
+        for bucket_key, items in buckets.items():
+            values = values_by_key[bucket_key]
+            summary = _stats(items)
+            summary.update(
+                {
+                    "summary_kind": "combination",
+                    "fields": _jsonable_value(values),
+                    "profile_key": "|".join(f"{field}={_stable_value_key(values[field])}" for field in sorted(values)),
+                    "label_zh": _format_environment(values),
+                }
+            )
+            summaries.append(summary)
     return sorted(
         summaries,
         key=lambda item: (

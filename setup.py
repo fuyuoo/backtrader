@@ -156,6 +156,7 @@ setuptools.setup(
         'att-strategy-variant-attribution=attbacktrader.cli.strategy_variant_attribution:main',
         'att-attribution-matrix=attbacktrader.cli.attribution_matrix:main',
         'att-attribution-summary=attbacktrader.cli.attribution_summary:main',
+        'att-attribution-wide-samples=attbacktrader.cli.attribution_wide_samples:main',
         'att-environment-fit=attbacktrader.cli.environment_fit:main',
         'att-strategy-environment-profile=attbacktrader.cli.strategy_environment_profile:main',
         'att-review-brief=attbacktrader.cli.review_brief:main',
