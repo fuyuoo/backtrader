@@ -19,6 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     wide_samples = build_attribution_wide_samples(
         run_dir,
         reference_snapshot=args.reference_snapshot,
+        daily_price_cache_dir=args.daily_price_cache_dir,
         max_staleness_trading_days=args.max_staleness_trading_days,
     )
     wide_path, csv_path, index_path, markdown_path = write_attribution_wide_samples(
@@ -52,6 +53,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--report-root", default="reports")
     parser.add_argument("--run-id", default=None, help="Run id under report root")
     parser.add_argument("--reference-snapshot", required=True, help="Prepared attribution reference JSON/Parquet/dir")
+    parser.add_argument(
+        "--daily-price-cache-dir",
+        default=None,
+        help="Optional Tushare daily raw cache root or daily subdirectory for holding-path attribution",
+    )
     parser.add_argument("--max-staleness-trading-days", type=int, default=5)
     parser.add_argument("--output-dir", default=None, help="Output directory; defaults to run dir")
     parser.add_argument("--print-markdown", action="store_true", help="Print field index Chinese Markdown instead of JSON")

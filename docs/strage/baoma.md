@@ -228,12 +228,12 @@ reports/_tmp-baoma-100-industry-attribution-check/
 18. 成交额、20 日平均成交额、换手率、量比等流动性因子第一版也使用全 A 横截面 5 档分位桶，并在宽表保留原始值；成交额使用历史实际成交额，换手率优先来自历史 `daily_basic`，缺失时记录 `missing`，不在报告层用成交量和流通股本临时拼出口径。
 19. 个股相对行业波动同时保留原始比值和行业内分位桶：原始值使用 `symbol_atr_pct / industry_median_atr_pct`，默认进入 `environment_fit` 的桶使用同日同申万一级行业内 ATR 百分比 5 档分位。
 20. 固定 5% 止盈适配因子使用固定解释桶，不使用分位桶；原始值为 `5% / ATR%`，桶为 `<1 ATR`、`1-2 ATR`、`2-3 ATR`、`3-5 ATR`、`>=5 ATR`。
-21. 入场价距离 MA60 的 ATR 倍数使用固定解释桶，不使用分位桶；原始值为 `(实际入场成交价 - 入场信号日 MA60) / 入场信号日 ATR`，桶为 `<0 ATR`、`0-0.5 ATR`、`0.5-1 ATR`、`1-2 ATR`、`2-3 ATR`、`>=3 ATR`。
-22. 距近 20 日高点和近 60 日高点默认进入 `environment_fit`，使用入场信号日 close 计量，使用固定解释桶，不使用分位桶；宽表保留原始距离百分比 `signal_day_close / rolling_high - 1`，桶为 `at_high`（0% 到 -1%）、`near_high`（-1% 到 -3%）、`moderate_pullback`（-3% 到 -8%）、`deep_pullback`（-8% 到 -15%）、`far_from_high`（小于 -15%）。
+21. 入场价距离 MA60 的 ATR 倍数使用固定解释桶，不使用分位桶；默认字段 `entry.price_position.ma60_atr_multiple_bucket` 的原始值为 `(实际入场成交价 - 入场信号日 MA60) / 入场信号日 ATR`，用于识别信号次日开盘下杀后是否已经贴近或跌破 MA60；宽表另保留 `entry.price_position.signal_close_ma60_atr_multiple_bucket`，原始值为 `(入场信号日 close - 入场信号日 MA60) / 入场信号日 ATR`，用于核验信号本身的位置。
+22. 距近 20 日高点和近 60 日高点默认进入 `environment_fit`，使用入场信号日 close 计量，使用固定解释桶，不使用分位桶；宽表保留原始距离百分比 `signal_day_close / rolling_high - 1`，桶为 `at_high`（0% 到 -1%）、`near_high`（-1% 到 -3%）、`moderate_pullback`（-3% 到 -8%）、`deep_pullback`（-8% 到 -15%）、`far_from_high`（小于 -15%）。全 A 参考快照按信号日对齐，`entry_date` 仅保留为实际成交日。
 23. 近 20 日和 60 日区间位置默认进入 `environment_fit`，使用入场信号日 close 计量；原始值为 `(signal_day_close - rolling_low) / (rolling_high - rolling_low)`，桶为 `bottom`（0-20%）、`lower_mid`（20-40%）、`middle`（40-60%）、`upper_mid`（60-80%）、`top`（80-100%）。当 `rolling_high == rolling_low` 时记录 `flat_range` 异常，不默认填充。
 24. 行业适配使用入场信号日的历史申万一级行业，不使用当前行业回填历史；行业映射不套用 5 个交易日 staleness 限制，而是按历史行业关系有效区间判断，`start_date <= signal_date <= end_date` 时视为有效。若只有变更点数据，则最近一次变更后的行业有效到下一次变更前；完全找不到覆盖区间时记录 `industry_missing`。
-25. `environment_fit` 第一版默认只输出单因子统计和白名单二因子组合；三因子及以上组合先留给字段索引、样本 drilldown 或后续专项报告，避免默认矩阵样本切分过碎。
-26. 第一版二因子组合白名单为：申万一级行业 x 个股相对行业波动桶、申万一级行业 x 固定 5% 对应 ATR 倍数桶、申万一级行业 x 入场距 MA60 ATR 倍数桶、ATR 百分比桶 x 固定 5% 对应 ATR 倍数桶、ATR 百分比桶 x 入场距 MA60 ATR 倍数桶、流通市值分位桶 x 20 日平均成交额分位桶、距 20 日高点桶 x 20 日区间位置桶、距 60 日高点桶 x 60 日区间位置桶；PE/PB 先只进宽表和字段索引，PE_TTM 作为第一版默认估值主轴。
+25. `environment_fit` 第一版默认只输出入场前或入场时可见因子的单因子统计和白名单二因子组合；三因子及以上组合先留给字段索引、样本 drilldown 或后续专项报告，避免默认矩阵样本切分过碎。第二批归因字段加入交易路径诊断和入场信号强度归因：交易路径字段包括 `trade.path.holding_days_bucket`、`trade.path.max_favorable_return_before_exit_bucket`、`trade.path.max_adverse_return_before_exit_bucket`、`trade.path.max_drawdown_from_peak_bucket`、`trade.path.first_profit_5pct_days_bucket`；这些是事后路径结果，只能用于解释交易如何结束，不能进入 `environment_fit` 排名，也不能当作入场可见因子。入场信号强度字段包括 `entry.signal_strength.dea_waterline_age_trading_days_bucket`、`entry.signal_strength.dea_value_bucket`、`entry.signal_strength.macd_bar_bucket`、`entry.signal_strength.dif_dea_distance_bucket`、`entry.signal_strength.ma25_above_ma60_spread_bucket`、`entry.signal_strength.ma60_slope_20d_bucket`、`entry.signal_strength.signal_candle_body_bucket`、`entry.signal_strength.signal_upper_lower_shadow_bucket`，这些字段可以进入 `environment_fit`。
+26. 第一版二因子组合白名单为：申万一级行业 x 个股相对行业波动桶、申万一级行业 x 固定 5% 对应 ATR 倍数桶、申万一级行业 x 入场距 MA60 ATR 倍数桶、ATR 百分比桶 x 固定 5% 对应 ATR 倍数桶、ATR 百分比桶 x 入场距 MA60 ATR 倍数桶、流通市值分位桶 x 20 日平均成交额分位桶、距 20 日高点桶 x 20 日区间位置桶、距 60 日高点桶 x 60 日区间位置桶；PE/PB 先只进宽表和字段索引，PE_TTM 作为第一版默认估值主轴。`trade.exit.reason` x 入场因子白名单组合单独作为 `outcome_diagnostic`，用于回答止损/止盈分别在哪些入场环境高发；它不是 `environment_fit` 组合，不参与最佳/最差环境排名，也不自动生成过滤或参数优化建议。
 27. `environment_fit` 第一版低样本阈值为：单因子分组少于 10 笔、二因子组合少于 20 笔时标记 `low_sample`。低样本分组仍保留在 JSON 中，但中文报告首页最佳/最差结论候选不采用低样本分组。
 28. `Attribution Wide Sample` 同时输出 JSON 和 CSV：JSON 保留嵌套字段、exception、asof、provenance，供程序和 AI review 使用；CSV 使用扁平字段名，供人工用 Excel/WPS/脚本筛选。
 29. 新增归因产物文件名固定为：`attribution_wide_samples.json`、`attribution_wide_samples.csv`、`attribution_field_index.json`、`attribution_field_index.zh.md`。
@@ -982,6 +982,7 @@ DEA 上水计算：
 - 第一版继续计算费用、税费和滑点，但这是 `Adjusted Price Cost Simulation`：在前复权模拟成交金额上应用配置成本，主结论看带成本净口径，去成本毛口径从同一批成交事件派生；报告不得把它描述成券商真实现金扣费。
 - 第一版继续用前复权价格模拟订单数量、一手约束、T+1 可卖数量和分批减仓数量；报告标记为 `Adjusted Price Quantity Simulation`，不得描述成券商真实股数。
 - 当前回测框架的目的不是得到完美收益结果，而是 `Strategy Environment Discovery`：找到策略适合的土壤和不适合的地方，用于后续趋利避害、提高实际使用收益。
+- 当前阶段只做归因和环境证据积累，不做参数优化、过滤规则优化或买卖逻辑调整；所有优化建议先作为 `Attribution Candidate` 记录，等归因样本、字段和稳定性判断足够后，再进入独立优化实验。
 - 第一版环境发现报告先固定大盘环境、行业环境、个股入场结构、交易执行状态四类 `Environment Dimension`；这些维度只是第一版起点，后续可以新增维度，也可以把每个维度里的字段继续细化。
 - 第一版环境字段先采用少量但有解释力的 `Environment Factor`：大盘趋势/市场温度，行业名称/行业趋势，个股 MA60/MA25/DEA 上水/阴线，执行拒绝或挂起状态；后续可以继续新增字段。
 - 环境字段通过 `Post-Trade Environment Lookup` 产生：先有交易记录，再反查该笔交易对应的指数、行业、个股和执行环境；这些字段只做归因和环境矩阵，不进入第一版买卖规则。

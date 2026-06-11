@@ -452,8 +452,27 @@ def test_prepare_attribution_reference_cli_can_emit_run_entry_scope(tmp_path, mo
         json.dumps(
             {
                 "attributions": [
-                    {"symbol": "000001.SZ", "entry_date": "2024-03-29"},
-                    {"symbol": "600000.SH", "entry_date": "2024-01-01"},
+                    {"trade_index": 1, "symbol": "000001.SZ", "entry_date": "2024-03-29"},
+                    {"trade_index": 2, "symbol": "600000.SH", "entry_date": "2024-01-01"},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "trade_lifecycle.json").write_text(
+        json.dumps(
+            {
+                "lifecycles": [
+                    {
+                        "trade_index": 1,
+                        "events": [
+                            {
+                                "event_type": "entry",
+                                "values": {"signal_trade_date": "2024-03-28"},
+                            }
+                        ],
+                    }
                 ]
             },
             ensure_ascii=False,
@@ -489,12 +508,12 @@ def test_prepare_attribution_reference_cli_can_emit_run_entry_scope(tmp_path, mo
 
     assert stdout["emit_run_entry_scope"] is True
     assert stdout["emit_symbol_count"] == 2
-    assert stdout["emit_date_count"] == 2
-    assert stdout["emit_pair_count"] == 2
+    assert stdout["emit_date_count"] == 3
+    assert stdout["emit_pair_count"] == 3
     assert {
         (row["symbol"], row["trade_date"])
         for row in reference["rows"]
-    } == {("000001.SZ", "2024-03-29"), ("600000.SH", "2024-01-01")}
+    } == {("000001.SZ", "2024-03-28"), ("000001.SZ", "2024-03-29"), ("600000.SH", "2024-01-01")}
 
 
 def test_industry_memberships_apply_by_effective_interval(tmp_path) -> None:

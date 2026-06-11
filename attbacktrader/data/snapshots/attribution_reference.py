@@ -37,6 +37,7 @@ FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"field_key": "entry.price_position.interval_20d_bucket", "label_zh": "20日区间位置桶", "scope": "price_position", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
     {"field_key": "entry.price_position.interval_60d_bucket", "label_zh": "60日区间位置桶", "scope": "price_position", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
     {"field_key": "entry.price_position.ma60_atr_multiple_bucket", "label_zh": "入场价距MA60的ATR倍数桶", "scope": "price_position", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket", "default_in_environment_fit": True},
+    {"field_key": "entry.price_position.signal_close_ma60_atr_multiple_bucket", "label_zh": "信号日close距MA60的ATR倍数桶", "scope": "price_position", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket"},
     {"field_key": "entry.stop_fit.fixed_atr_multiple_bucket", "label_zh": "固定5%对应ATR倍数桶", "scope": "stop_fit", "value_type": "bucket", "bucket_rule": "fixed_explain_bucket", "default_in_environment_fit": True},
     {"field_key": "industry.sw_l1.code", "label_zh": "申万一级行业", "scope": "industry", "value_type": "category", "bucket_rule": "effective_interval", "default_in_environment_fit": True},
 )
@@ -361,7 +362,7 @@ def _field_rows_for_record(
         ("entry.price_position.near_high_60d_bucket", record.get("near_high_60d"), _near_high_bucket(record.get("near_high_60d"))),
         ("entry.price_position.interval_20d_bucket", record.get("interval_20d"), _interval_bucket(record.get("interval_20d"))),
         ("entry.price_position.interval_60d_bucket", record.get("interval_60d"), _interval_bucket(record.get("interval_60d"))),
-        ("entry.price_position.ma60_atr_multiple_bucket", record.get("ma60_atr_multiple"), _atr_multiple_bucket(record.get("ma60_atr_multiple"))),
+        ("entry.price_position.signal_close_ma60_atr_multiple_bucket", record.get("ma60_atr_multiple"), _atr_multiple_bucket(record.get("ma60_atr_multiple"))),
         ("entry.stop_fit.fixed_atr_multiple_bucket", record.get("fixed_atr_multiple"), _fixed_atr_multiple_bucket(record.get("fixed_atr_multiple"))),
         ("industry.sw_l1.code", record.get("sw_l1_code"), record.get("sw_l1_code")),
     )

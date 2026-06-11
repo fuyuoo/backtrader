@@ -249,6 +249,7 @@ def _run_entry_scope(run_dir: str | None) -> dict[str, list[str]]:
     if not path.exists():
         raise FileNotFoundError(f"trade_attribution.json does not exist under run dir: {run_dir}")
     payload = json.loads(path.read_text(encoding="utf-8"))
+    signal_dates = _signal_dates_by_trade_index(Path(run_dir))
     symbols = []
     dates = []
     pairs = []
@@ -261,7 +262,45 @@ def _run_entry_scope(run_dir: str | None) -> dict[str, list[str]]:
             symbols.append(str(symbol))
             dates.append(str(entry_date))
             pairs.append((str(symbol), str(entry_date)))
+        trade_index = _optional_int(item.get("trade_index"))
+        signal_date = signal_dates.get(trade_index) if trade_index is not None else None
+        if symbol and signal_date:
+            symbols.append(str(symbol))
+            dates.append(str(signal_date))
+            pairs.append((str(symbol), str(signal_date)))
     return {"symbols": _dedupe_symbols(symbols), "dates": _dedupe_symbols(dates), "pairs": _dedupe_pairs(pairs)}
+
+
+def _signal_dates_by_trade_index(run_dir: Path) -> dict[int, str]:
+    path = run_dir / "trade_lifecycle.json"
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    result: dict[int, str] = {}
+    for lifecycle in payload.get("lifecycles") or []:
+        if not isinstance(lifecycle, dict):
+            continue
+        trade_index = _optional_int(lifecycle.get("trade_index"))
+        if trade_index is None:
+            continue
+        for event in lifecycle.get("events") or []:
+            if not isinstance(event, dict) or str(event.get("event_type")) != "entry":
+                continue
+            values = event.get("values") if isinstance(event.get("values"), dict) else {}
+            signal_date = values.get("signal_trade_date")
+            if signal_date:
+                result[trade_index] = str(signal_date)
+                break
+    return result
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _symbols_from_args(args: argparse.Namespace, *, run_defaults: dict[str, object] | None = None) -> list[str]:

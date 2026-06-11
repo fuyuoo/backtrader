@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pandas as pd
+
 from attbacktrader.cli import run_data_dictionary as run_data_dictionary_cli
 from attbacktrader.cli import run_data_drilldown as run_data_drilldown_cli
 from attbacktrader.cli import run_data_drilldown_batch as run_data_drilldown_batch_cli
@@ -252,8 +254,21 @@ def test_attribution_wide_samples_builds_field_index_and_enriched_environment_fi
 
     assert wide_samples["schema"] == "attbacktrader.attribution_wide_samples.v1"
     assert wide_samples["sample_count"] == 1
+    assert wide_samples["samples"][0]["signal_date"] == "2024-01-04"
     assert wide_samples["field_index"]["schema"] == "attbacktrader.attribution_field_index.v1"
     assert "entry.price_position.near_high_20d_bucket" in wide_samples["environment_fit_default_fields"]
+    assert (
+        wide_samples["samples"][0]["field_values"]["entry.price_position.near_high_20d_bucket"]["asof_date"]
+        == "2024-01-04"
+    )
+    assert (
+        wide_samples["samples"][0]["field_values"]["entry.price_position.ma60_atr_multiple_bucket"]["bucket"]
+        == "above_ma60_1_2atr"
+    )
+    assert (
+        wide_samples["samples"][0]["field_values"]["entry.price_position.signal_close_ma60_atr_multiple_bucket"]["bucket"]
+        == "above_ma60_0_1atr"
+    )
     assert "entry.valuation.pe_bucket" in [field["field_key"] for field in wide_samples["field_index"]["fields"]]
     assert wide_path.exists()
     assert csv_path.exists()
@@ -288,6 +303,39 @@ def test_attribution_wide_samples_treats_stale_reference_rows_as_missing(tmp_pat
     assert near_high["bucket"] is None
     assert near_high["exception_codes"] == ["reference_record_missing"]
     assert "reference_record_missing" in sample["attribution_exception_codes"]
+
+
+def test_attribution_wide_samples_derives_path_and_signal_strength_from_daily_cache(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    reference_path = _reference_snapshot(tmp_path)
+    daily_cache = _daily_price_cache(tmp_path)
+
+    wide_samples = build_attribution_wide_samples(
+        run_dir,
+        reference_snapshot=reference_path,
+        daily_price_cache_dir=daily_cache,
+    )
+
+    fields = wide_samples["samples"][0]["field_values"]
+    assert fields["trade.path.holding_days_bucket"]["bucket"] == "d4_10"
+    assert fields["trade.path.max_favorable_return_before_exit_bucket"]["bucket"] == "5_10pct"
+    assert fields["trade.path.max_adverse_return_before_exit_bucket"]["bucket"] == "minus5_to_minus10pct"
+    assert fields["trade.path.first_profit_5pct_days_bucket"]["bucket"] == "day_1"
+    assert fields["entry.signal_strength.dea_waterline_age_trading_days_bucket"]["bucket"] == "day_1_3"
+    assert fields["entry.signal_strength.ma25_above_ma60_spread_bucket"]["bucket"] == "2_5pct"
+    assert fields["entry.signal_strength.dif_dea_distance_bucket"]["bucket"] is not None
+    assert fields["entry.signal_strength.macd_bar_bucket"]["bucket"] is not None
+    assert fields["entry.signal_strength.signal_candle_body_bucket"]["bucket"] == "1_3pct"
+    assert fields["entry.signal_strength.signal_upper_lower_shadow_bucket"]["bucket"] == "long_upper_shadow"
+    assert fields["trade.exit.reason"]["bucket"] == "FIXED_5_PERCENT_STOP"
+    assert "trade.path.holding_days_bucket" not in wide_samples["environment_fit_default_fields"]
+    assert "trade.exit.reason" not in wide_samples["environment_fit_default_fields"]
+    assert ["trade.exit.reason", "entry.signal_strength.dea_waterline_age_trading_days_bucket"] not in wide_samples[
+        "environment_fit_pair_whitelist"
+    ]
+    assert ["trade.exit.reason", "entry.signal_strength.dea_waterline_age_trading_days_bucket"] in wide_samples[
+        "outcome_diagnostic_pair_whitelist"
+    ]
 
 
 def test_run_data_clis_write_outputs(tmp_path: Path, capsys) -> None:
@@ -616,8 +664,27 @@ def _run_dir(root: Path) -> Path:
                     "entry_date": "2024-01-05",
                     "exit_date": "2024-01-10",
                     "exit_reason": "FIXED_5_PERCENT_STOP",
+                    "entry_price": 10.0,
                     "return_pct": -0.06,
-                    "events": [],
+                    "events": [
+                        {
+                            "event_type": "entry",
+                            "trade_date": "2024-01-05",
+                            "values": {
+                                "signal_trade_date": "2024-01-04",
+                                "close": 9.8,
+                                "ma60": 9.0,
+                            },
+                            "executions": [
+                                {
+                                    "event_type": "completed",
+                                    "side": "buy",
+                                    "executed_price": 10.0,
+                                    "executed_quantity": 1000,
+                                }
+                            ],
+                        }
+                    ],
                 }
             ],
         },
@@ -647,6 +714,14 @@ def _run_dir(root: Path) -> Path:
                             {"key": "industry.kdj.j_below_threshold", "value": True, "missing": False},
                             {"key": "industry.kdj.j", "value": 10.0, "missing": False},
                             {"key": "industry.sw_l1.code", "value": "801780.SI", "missing": False},
+                            {"key": "symbol.open", "value": 10.0, "missing": False},
+                            {"key": "symbol.close", "value": 9.8, "missing": False},
+                            {"key": "symbol.ma.ma25", "value": 9.4, "missing": False},
+                            {"key": "symbol.ma.ma60", "value": 9.0, "missing": False},
+                            {"key": "symbol.macd.dif", "value": 0.08, "missing": False},
+                            {"key": "symbol.macd.dea", "value": 0.05, "missing": False},
+                            {"key": "symbol.macd.macd_bar", "value": 0.06, "missing": False},
+                            {"key": "symbol.macd.dea_waterline_age_trading_days", "value": 2, "missing": False},
                         ],
                     },
                     "exit": {
@@ -827,6 +902,22 @@ def _reference_snapshot(root: Path) -> Path:
                         "default_in_environment_fit": True,
                     },
                     {
+                        "field_key": "entry.price_position.ma60_atr_multiple_bucket",
+                        "label_zh": "入场价距MA60的ATR倍数桶",
+                        "value_type": "bucket",
+                        "scope": "price_position",
+                        "bucket_rule": "fixed_explain_bucket",
+                        "default_in_environment_fit": True,
+                    },
+                    {
+                        "field_key": "entry.price_position.signal_close_ma60_atr_multiple_bucket",
+                        "label_zh": "信号日close距MA60的ATR倍数桶",
+                        "value_type": "bucket",
+                        "scope": "price_position",
+                        "bucket_rule": "fixed_explain_bucket",
+                        "default_in_environment_fit": False,
+                    },
+                    {
                         "field_key": "entry.stop_fit.fixed_atr_multiple_bucket",
                         "label_zh": "5%止盈对应ATR倍数桶",
                         "value_type": "bucket",
@@ -838,6 +929,7 @@ def _reference_snapshot(root: Path) -> Path:
                     "industry.sw_l1.code",
                     "entry.price_position.near_high_20d_bucket",
                     "entry.volatility.atr_20d_bucket",
+                    "entry.price_position.ma60_atr_multiple_bucket",
                     "entry.stop_fit.fixed_atr_multiple_bucket",
                 ],
                 "environment_fit_pair_whitelist": [
@@ -848,53 +940,63 @@ def _reference_snapshot(root: Path) -> Path:
             "rows": [
                 {
                     "symbol": "000001.SZ",
-                    "trade_date": "2024-01-05",
+                    "trade_date": "2024-01-04",
                     "field_key": "industry.sw_l1.code",
                     "value": "801780.SI",
                     "bucket": "801780.SI",
-                    "asof_date": "2024-01-05",
+                    "asof_date": "2024-01-04",
                     "staleness_trading_days": 0,
                     "reference_count": 4000,
                 },
                 {
                     "symbol": "000001.SZ",
-                    "trade_date": "2024-01-05",
+                    "trade_date": "2024-01-04",
                     "field_key": "entry.price_position.near_high_20d_bucket",
                     "value": -0.02,
                     "bucket": "near_high",
-                    "asof_date": "2024-01-05",
+                    "asof_date": "2024-01-04",
                     "staleness_trading_days": 0,
                     "reference_count": 4000,
                 },
                 {
                     "symbol": "000001.SZ",
-                    "trade_date": "2024-01-05",
+                    "trade_date": "2024-01-04",
                     "field_key": "entry.valuation.pe_bucket",
                     "value": -12.3,
                     "bucket": "negative",
-                    "asof_date": "2024-01-05",
+                    "asof_date": "2024-01-04",
                     "staleness_trading_days": 0,
                     "exception_codes": ["negative_pe"],
                     "reference_count": 4000,
                 },
                 {
                     "symbol": "000001.SZ",
-                    "trade_date": "2024-01-05",
+                    "trade_date": "2024-01-04",
                     "field_key": "entry.volatility.atr_20d_bucket",
-                    "value": 0.035,
+                    "value": 0.1,
                     "bucket": "p60_p80",
                     "percentile": 0.72,
-                    "asof_date": "2024-01-05",
+                    "asof_date": "2024-01-04",
                     "staleness_trading_days": 0,
                     "reference_count": 4000,
                 },
                 {
                     "symbol": "000001.SZ",
-                    "trade_date": "2024-01-05",
+                    "trade_date": "2024-01-04",
+                    "field_key": "entry.price_position.signal_close_ma60_atr_multiple_bucket",
+                    "value": 0.8163265306122458,
+                    "bucket": "above_ma60_0_1atr",
+                    "asof_date": "2024-01-04",
+                    "staleness_trading_days": 0,
+                    "reference_count": 4000,
+                },
+                {
+                    "symbol": "000001.SZ",
+                    "trade_date": "2024-01-04",
                     "field_key": "entry.stop_fit.fixed_atr_multiple_bucket",
                     "value": 1.42,
                     "bucket": "one_to_two_atr",
-                    "asof_date": "2024-01-05",
+                    "asof_date": "2024-01-04",
                     "staleness_trading_days": 0,
                     "reference_count": 4000,
                 },
@@ -902,6 +1004,36 @@ def _reference_snapshot(root: Path) -> Path:
         },
     )
     return path
+
+
+def _daily_price_cache(root: Path) -> Path:
+    daily_dir = root / "daily-cache" / "daily"
+    daily_dir.mkdir(parents=True)
+    rows = []
+    for index, trade_date in enumerate(pd.bdate_range("2023-09-01", "2024-01-12")):
+        close = 8.0 + index * 0.025
+        rows.append(
+            {
+                "ts_code": "000001.SZ",
+                "trade_date": trade_date.strftime("%Y%m%d"),
+                "open": close + 0.05,
+                "high": close + 0.10,
+                "low": close - 0.10,
+                "close": close,
+            }
+        )
+    overrides = {
+        "20240104": {"open": 10.0, "high": 10.3, "low": 9.7, "close": 9.8},
+        "20240105": {"open": 10.0, "high": 10.6, "low": 9.9, "close": 10.4},
+        "20240108": {"open": 10.4, "high": 10.8, "low": 10.1, "close": 10.7},
+        "20240109": {"open": 10.6, "high": 10.7, "low": 9.5, "close": 9.6},
+        "20240110": {"open": 9.6, "high": 9.8, "low": 9.2, "close": 9.4},
+    }
+    for row in rows:
+        if row["trade_date"] in overrides:
+            row.update(overrides[row["trade_date"]])
+    pd.DataFrame(rows).to_parquet(daily_dir / "daily.parquet", index=False)
+    return daily_dir.parent
 
 
 def _write_json(path: Path, payload) -> None:
