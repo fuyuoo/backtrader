@@ -1,7 +1,11 @@
 from datetime import date
 
+import pandas as pd
+
 from attbacktrader.data import IndexBar, ShenwanIndustryClassification, StockIndustryMembership
 from attbacktrader.data.snapshots import (
+    attribution_reference_snapshot_dir,
+    build_attribution_reference_snapshot_from_frame,
     discover_index_bars_snapshot_paths,
     discover_industry_index_bars_snapshot_paths,
     index_bars_snapshot_path,
@@ -14,7 +18,9 @@ from attbacktrader.data.snapshots import (
     write_index_bars_parquet,
     write_shenwan_classifications_parquet,
     write_stock_industry_memberships_parquet,
+    write_attribution_reference_snapshot,
 )
+from attbacktrader.cli import prepare_attribution_reference as prepare_attribution_reference_cli
 
 
 def test_index_bars_parquet_round_trip(tmp_path) -> None:
@@ -150,3 +156,100 @@ def test_stock_industry_memberships_parquet_round_trip(tmp_path) -> None:
     assert path.parent.name == "memberships"
     assert path.name == "000001_SZ.parquet"
     assert read_stock_industry_memberships_parquet(path) == memberships
+
+
+def test_attribution_reference_snapshot_builds_buckets_and_exceptions(tmp_path, capsys) -> None:
+    frame = _all_a_feature_frame()
+    snapshot = build_attribution_reference_snapshot_from_frame(
+        frame,
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 29),
+        min_reference_count=2,
+    )
+    output_dir = attribution_reference_snapshot_dir(
+        tmp_path,
+        reference_universe="full_a_main_chinext_star",
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 29),
+    )
+    metadata_path, reference_path, values_path = write_attribution_reference_snapshot(snapshot, output_dir)
+    cli_input = tmp_path / "all_a.csv"
+    frame.to_csv(cli_input, index=False)
+    exit_code = prepare_attribution_reference_cli.main(
+        [
+            "--input",
+            str(cli_input),
+            "--start-date",
+            "2024-01-01",
+            "--end-date",
+            "2024-03-29",
+            "--min-reference-count",
+            "2",
+            "--output-dir",
+            str(tmp_path / "cli-reference"),
+        ]
+    )
+
+    rows = snapshot["rows"]
+    target_rows = [
+        row for row in rows
+        if row["symbol"] == "000001.SZ" and row["trade_date"] == "2024-03-29"
+    ]
+    pe_row = next(row for row in target_rows if row["field_key"] == "entry.valuation.pe_bucket")
+    high_row = next(row for row in target_rows if row["field_key"] == "entry.price_position.near_high_20d_bucket")
+    mv_row = next(row for row in target_rows if row["field_key"] == "entry.market_cap.total_mv_bucket")
+    st_row = next(
+        row for row in rows
+        if row["symbol"] == "600000.SH"
+        and row["trade_date"] == "2024-03-29"
+        and row["field_key"] == "entry.market_cap.total_mv_bucket"
+    )
+
+    assert snapshot["metadata"]["schema"] == "attribution_reference_fields.v1"
+    assert pe_row["bucket"] == "negative"
+    assert "negative_pe" in pe_row["exception_codes"]
+    assert high_row["bucket"] in {"at_high", "near_high", "moderate_pullback", "deep_pullback", "far_from_high"}
+    assert mv_row["bucket"] in {"p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100"}
+    assert st_row["bucket"] is None
+    assert "reference_excluded_st" in st_row["exception_codes"]
+    assert metadata_path.exists()
+    assert reference_path.exists()
+    assert values_path.exists()
+    assert exit_code == 0
+    assert "reference_values_parquet_path" in capsys.readouterr().out
+
+
+def _all_a_feature_frame() -> pd.DataFrame:
+    rows = []
+    symbols = [
+        ("000001.SZ", False, False, "SZSE", 200, True, "801780.SI", -12.0),
+        ("000002.SZ", False, False, "SZSE", 200, True, "801180.SI", 18.0),
+        ("600000.SH", True, False, "SSE", 200, True, "801780.SI", 20.0),
+    ]
+    days = pd.bdate_range("2024-01-01", "2024-03-29")
+    for day_index, trade_date in enumerate(days):
+        for symbol_index, (symbol, is_st, is_suspended, exchange, listing_days, is_tradable, industry, pe) in enumerate(symbols):
+            base = 10 + symbol_index * 5 + day_index * (0.05 + symbol_index * 0.01)
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "trade_date": trade_date.date().isoformat(),
+                    "open": base,
+                    "high": base * 1.02,
+                    "low": base * 0.98,
+                    "close": base * 1.01,
+                    "amount": 100000 + symbol_index * 50000 + day_index * 1000,
+                    "total_mv": 100 + symbol_index * 200 + day_index,
+                    "circ_mv": 80 + symbol_index * 150 + day_index,
+                    "pe": pe,
+                    "pe_ttm": pe + 1,
+                    "pb": 1.2 + symbol_index,
+                    "sw_l1_code": industry,
+                    "is_st": is_st,
+                    "is_suspended": is_suspended,
+                    "exchange": exchange,
+                    "listing_trading_days": listing_days + day_index,
+                    "is_tradable": is_tradable,
+                }
+            )
+    return pd.DataFrame(rows)

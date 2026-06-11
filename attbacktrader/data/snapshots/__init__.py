@@ -34,11 +34,22 @@ from .tradability_store import (
     tradability_status_snapshot_path,
     write_tradability_statuses_parquet,
 )
+from .attribution_reference import (
+    ATTRIBUTION_REFERENCE_FIELDS_VERSION,
+    DEFAULT_REFERENCE_UNIVERSE,
+    build_attribution_reference_snapshot_from_frame,
+    attribution_reference_snapshot_dir,
+    write_attribution_reference_snapshot,
+)
 
 __all__ = [
     "DailyBarsSnapshotCandidate",
     "IndexBarsSnapshotCandidate",
     "SnapshotProvenance",
+    "ATTRIBUTION_REFERENCE_FIELDS_VERSION",
+    "DEFAULT_REFERENCE_UNIVERSE",
+    "attribution_reference_snapshot_dir",
+    "build_attribution_reference_snapshot_from_frame",
     "daily_bars_snapshot_path",
     "discover_index_bars_snapshot_paths",
     "discover_industry_index_bars_snapshot_paths",
@@ -62,4 +73,5 @@ __all__ = [
     "write_shenwan_classifications_parquet",
     "write_stock_industry_memberships_parquet",
     "write_tradability_statuses_parquet",
+    "write_attribution_reference_snapshot",
 ]

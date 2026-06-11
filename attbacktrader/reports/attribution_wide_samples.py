@@ -77,8 +77,8 @@ def build_attribution_wide_samples(
             field_exceptions = _exception_codes(row.get("exception_codes"))
             exception_codes.update(field_exceptions)
             field_values[field_key] = {
-                "raw": _jsonable(row.get("value")),
-                "bucket": _jsonable(row.get("bucket")),
+                "raw": _jsonable(_decode_reference_cell(row.get("value"))),
+                "bucket": _jsonable(_decode_reference_cell(row.get("bucket"))),
                 "percentile": _optional_float(row.get("percentile")),
                 "asof_date": _as_str(row.get("asof_date")) or _as_str(row.get("trade_date")),
                 "staleness_trading_days": _optional_int(row.get("staleness_trading_days")),
@@ -640,6 +640,18 @@ def _exception_codes(value: Any) -> list[str]:
     if isinstance(value, str):
         return [item for item in value.split(";") if item]
     return [str(item) for item in _as_sequence(value)]
+
+
+def _decode_reference_cell(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
 
 
 def _stable_value_key(value: Any) -> str:
