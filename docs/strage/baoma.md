@@ -78,6 +78,7 @@
 | `G-03` | 期末强制清仓视图和剔除未完成视图仍需独立报告化 | 当前能看到 104 个期末未平仓，但双视图口径还不够清晰 | 进入稳定性分析前补；当前不要把未平仓混入完整交易胜率结论。 |
 | `G-04` | 环境因子还不够有区分度 | 当前环境报告能跑，但分组主要集中在少数字段，不能充分回答牛市/震荡/熊市适配 | 下一阶段只补环境因子，不重建归因框架。 |
 | `G-05` | 归因 reference 准备入口 | 已新增 `att-prepare-attribution-reference` 第一版，从已准备好的全 A 日频基础表生成 `reference.json`、`reference_values.parquet` 和 `metadata.json`；Tushare 大规模拉取后续接入该入口前置数据源 | 当前第一版先固化计算口径、分位桶、固定解释桶和异常记录，不在命令内强行联网拉取。 |
+| `G-06` | Tushare reference 前置数据源 | 已新增 `att-prepare-attribution-reference --provider tushare`，可拉取 daily、daily_basic、stock_basic、suspend_d、namechange 并合成 reference 输入表；历史 ST 优先基于 namechange 有效区间判断 | 申万一级行业有效区间仍可通过离线输入列 `sw_l1_code` 注入，后续再做行业 membership 批量缓存，避免第一版逐股调用过慢。 |
 | `G-05` | 原始入场价与分批减仓后的剩余成本口径拆分 | 已修复；`ClosedTrade.entry_price` / `original_entry_price` 保留首笔入场价，`remaining_cost_basis_at_exit` 单独记录最终清仓前剩余成本 | `300803.SZ` 这类减仓后剩余成本为负的交易不再显示为负入场价；负值只出现在剩余成本字段，用于解释成本已被分批卖出覆盖。 |
 | `G-06` | 分批减仓事件作为可核验交易事件完整落盘 | 已修复；`BAOMA_SCALE_OUT_*` 已进入 `execution_audit.json`、`trade_lifecycle.json` 和人工核验样本 | full run 中 `execution_audit` 已包含分批减仓事件，并记录成交日、成交价、成交数量、事件后持仓数量和事件后剩余成本。 |
 

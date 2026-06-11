@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from attbacktrader.cli.tushare_options import add_tushare_rate_limit_args, tushare_rate_limit_config_from_args
+from attbacktrader.data.providers import TushareProvider, read_tushare_token
 from attbacktrader.data.snapshots import (
     DEFAULT_REFERENCE_UNIVERSE,
     attribution_reference_snapshot_dir,
@@ -21,10 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     start_date = date.fromisoformat(args.start_date)
     end_date = date.fromisoformat(args.end_date)
-    if args.input is None:
-        raise ValueError("--input is required in this offline preparation version")
-
-    frame = _load_input_frame(Path(args.input))
+    frame = _load_input_frame(Path(args.input)) if args.input is not None else _fetch_provider_frame(args, start_date, end_date)
     snapshot = build_attribution_reference_snapshot_from_frame(
         frame,
         start_date=start_date,
@@ -68,13 +67,21 @@ def main(argv: list[str] | None = None) -> int:
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepare attribution reference snapshots")
     parser.add_argument("--input", default=None, help="All-A daily feature CSV/Parquet input")
+    parser.add_argument("--provider", choices=["tushare"], default=None, help="Fetch all-A reference input from a provider")
+    parser.add_argument("--token-file", default=".secrets/tushare_token.txt")
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--snapshot-root", default="data/snapshots")
     parser.add_argument("--reference-universe", default=DEFAULT_REFERENCE_UNIVERSE)
     parser.add_argument("--min-reference-count", type=int, default=100)
     parser.add_argument("--output-dir", default=None)
-    return parser.parse_args(argv)
+    add_tushare_rate_limit_args(parser)
+    args = parser.parse_args(argv)
+    if args.input is None and args.provider is None:
+        parser.error("--input or --provider is required")
+    if args.input is not None and args.provider is not None:
+        parser.error("--input and --provider are mutually exclusive")
+    return args
 
 
 def _load_input_frame(path: Path) -> pd.DataFrame:
@@ -86,6 +93,16 @@ def _load_input_frame(path: Path) -> pd.DataFrame:
     if suffix == ".csv":
         return pd.read_csv(path)
     raise ValueError(f"unsupported input extension: {suffix}")
+
+
+def _fetch_provider_frame(args: argparse.Namespace, start_date: date, end_date: date) -> pd.DataFrame:
+    if args.provider != "tushare":
+        raise ValueError(f"unsupported provider: {args.provider}")
+    provider = TushareProvider(
+        read_tushare_token(args.token_file),
+        rate_limit=tushare_rate_limit_config_from_args(args),
+    )
+    return provider.fetch_attribution_reference_frame(start_date=start_date, end_date=end_date)
 
 
 if __name__ == "__main__":

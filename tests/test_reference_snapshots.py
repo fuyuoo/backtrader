@@ -219,6 +219,41 @@ def test_attribution_reference_snapshot_builds_buckets_and_exceptions(tmp_path, 
     assert "reference_values_parquet_path" in capsys.readouterr().out
 
 
+def test_prepare_attribution_reference_cli_fetches_tushare_provider(tmp_path, monkeypatch, capsys) -> None:
+    class FakeProvider:
+        def __init__(self, token, *, rate_limit=None):
+            self.token = token
+            self.rate_limit = rate_limit
+
+        def fetch_attribution_reference_frame(self, *, start_date, end_date):
+            assert start_date == date(2024, 1, 1)
+            assert end_date == date(2024, 3, 29)
+            return _all_a_feature_frame()
+
+    monkeypatch.setattr(prepare_attribution_reference_cli, "read_tushare_token", lambda path: "test-token")
+    monkeypatch.setattr(prepare_attribution_reference_cli, "TushareProvider", FakeProvider)
+
+    exit_code = prepare_attribution_reference_cli.main(
+        [
+            "--provider",
+            "tushare",
+            "--start-date",
+            "2024-01-01",
+            "--end-date",
+            "2024-03-29",
+            "--min-reference-count",
+            "2",
+            "--output-dir",
+            str(tmp_path / "provider-reference"),
+        ]
+    )
+    stdout = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "reference_values_parquet_path" in stdout
+    assert (tmp_path / "provider-reference" / "reference.json").exists()
+
+
 def _all_a_feature_frame() -> pd.DataFrame:
     rows = []
     symbols = [

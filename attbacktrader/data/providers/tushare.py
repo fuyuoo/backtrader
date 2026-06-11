@@ -29,6 +29,12 @@ RAW_CLOSE_FIELDS = "ts_code,trade_date,close"
 SUSPEND_FIELDS = "ts_code,trade_date,suspend_timing,suspend_type"
 INDEX_WEIGHT_FIELDS = "index_code,con_code,trade_date,weight"
 STOCK_BASIC_FIELDS = "ts_code,name"
+REFERENCE_STOCK_BASIC_FIELDS = "ts_code,name,exchange,market,list_date"
+REFERENCE_DAILY_FIELDS = "ts_code,trade_date,open,high,low,close,vol,amount"
+REFERENCE_DAILY_BASIC_FIELDS = (
+    "ts_code,trade_date,turnover_rate,volume_ratio,pe,pe_ttm,pb,total_mv,circ_mv"
+)
+NAMECHANGE_FIELDS = "ts_code,name,start_date,end_date,change_reason"
 DEFAULT_TUSHARE_REQUESTS_PER_MINUTE = 180.0
 DEFAULT_TUSHARE_RETRY_ATTEMPTS = 5
 DEFAULT_TUSHARE_RETRY_BASE_SECONDS = 2.0
@@ -236,6 +242,51 @@ class TushareProvider:
             return {}
         return _stock_names_from_frame(frame)
 
+    def fetch_attribution_reference_frame(self, *, start_date: date, end_date: date) -> Any:
+        """Fetch all-A daily rows needed by attribution reference preparation."""
+
+        if end_date < start_date:
+            raise ValueError("end_date must be on or after start_date")
+
+        daily_frame = self._fetch_date_windowed(
+            self._pro.daily,
+            api_name="daily",
+            start_date=start_date,
+            end_date=end_date,
+            fields=REFERENCE_DAILY_FIELDS,
+        )
+        daily_basic_frame = self._fetch_trade_date_windowed(
+            self._pro.daily_basic,
+            api_name="daily_basic",
+            start_date=start_date,
+            end_date=end_date,
+            fields=REFERENCE_DAILY_BASIC_FIELDS,
+        )
+        stock_basic_frame = self._call_tushare(
+            self._pro.stock_basic,
+            api_name="stock_basic",
+            fields=REFERENCE_STOCK_BASIC_FIELDS,
+        )
+        suspend_frame = self._fetch_date_windowed(
+            self._pro.suspend_d,
+            api_name="suspend_d",
+            start_date=start_date,
+            end_date=end_date,
+            fields=SUSPEND_FIELDS,
+        )
+        namechange_frame = self._call_tushare(
+            self._pro.namechange,
+            api_name="namechange",
+            fields=NAMECHANGE_FIELDS,
+        )
+        return _attribution_reference_frame_from_frames(
+            daily_frame=daily_frame,
+            daily_basic_frame=daily_basic_frame,
+            stock_basic_frame=stock_basic_frame,
+            suspend_frame=suspend_frame,
+            namechange_frame=namechange_frame,
+        )
+
     def fetch_shenwan_industry_classifications(
         self,
         *,
@@ -344,6 +395,31 @@ class TushareProvider:
                 **kwargs,
             )
             for window_start, window_end in _month_windows(start_date, end_date)
+        ]
+        return _concat_frames(frames)
+
+    def _fetch_trade_date_windowed(
+        self,
+        call: Callable[..., Any],
+        *,
+        api_name: str,
+        start_date: date,
+        end_date: date,
+        **kwargs: Any,
+    ) -> Any:
+        frames = [
+            self._call_tushare(
+                call,
+                api_name=api_name,
+                start_date=_format_tushare_date(window_start),
+                end_date=_format_tushare_date(window_end),
+                **kwargs,
+            )
+            for window_start, window_end in _date_windows(
+                start_date,
+                end_date,
+                window_days=self._rate_limit.date_window_days,
+            )
         ]
         return _concat_frames(frames)
 
@@ -500,6 +576,76 @@ def _tradability_statuses_from_frames(
         )
 
     return tuple(statuses)
+
+
+def _attribution_reference_frame_from_frames(
+    *,
+    daily_frame: Any,
+    daily_basic_frame: Any,
+    stock_basic_frame: Any,
+    suspend_frame: Any,
+    namechange_frame: Any,
+) -> Any:
+    import pandas as pd
+
+    if daily_frame is None or daily_frame.empty:
+        return pd.DataFrame()
+
+    daily = daily_frame.copy()
+    daily = daily.rename(columns={"ts_code": "symbol", "vol": "volume"})
+    daily["trade_date"] = pd.to_datetime(daily["trade_date"], format="%Y%m%d").dt.date
+    if daily_basic_frame is not None and not daily_basic_frame.empty:
+        daily_basic = daily_basic_frame.copy().rename(columns={"ts_code": "symbol"})
+        daily_basic["trade_date"] = pd.to_datetime(daily_basic["trade_date"], format="%Y%m%d").dt.date
+        daily = daily.merge(daily_basic, on=["symbol", "trade_date"], how="left")
+
+    if stock_basic_frame is not None and not stock_basic_frame.empty:
+        stock_basic = stock_basic_frame.copy().rename(columns={"ts_code": "symbol"})
+        if "list_date" in stock_basic:
+            stock_basic["list_date"] = pd.to_datetime(stock_basic["list_date"], format="%Y%m%d", errors="coerce").dt.date
+        daily = daily.merge(stock_basic, on="symbol", how="left")
+
+    suspended = set()
+    if suspend_frame is not None and not suspend_frame.empty:
+        for row in suspend_frame.itertuples(index=False):
+            suspended.add((str(row.ts_code), _parse_tushare_date(str(row.trade_date))))
+    daily["is_suspended"] = [
+        (str(row.symbol), row.trade_date) in suspended
+        for row in daily.itertuples(index=False)
+    ]
+    daily["is_st"] = _historical_st_flags(daily, namechange_frame)
+    daily["listing_trading_days"] = daily.groupby("symbol").cumcount() + 1
+    daily["is_tradable"] = True
+    return daily.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
+
+
+def _historical_st_flags(daily: Any, namechange_frame: Any) -> list[bool]:
+    if namechange_frame is None or namechange_frame.empty:
+        return [False] * len(daily)
+
+    intervals: dict[str, list[tuple[date, date | None, str]]] = {}
+    for row in namechange_frame.itertuples(index=False):
+        name = str(getattr(row, "name", "") or "")
+        reason = str(getattr(row, "change_reason", "") or "")
+        if "ST" not in name.upper() and "ST" not in reason.upper():
+            continue
+        symbol = str(row.ts_code)
+        start = _parse_optional_tushare_date(getattr(row, "start_date", None))
+        if start is None:
+            continue
+        end = _parse_optional_tushare_date(getattr(row, "end_date", None))
+        intervals.setdefault(symbol, []).append((start, end, name))
+
+    flags = []
+    for row in daily.itertuples(index=False):
+        trade_date = row.trade_date
+        active = False
+        for start, end, _name in intervals.get(str(row.symbol), ()):
+            if start <= trade_date and (end is None or trade_date <= end):
+                active = True
+                break
+        flags.append(active)
+    return flags
 
 
 def _date_windows(start_date: date, end_date: date, *, window_days: int) -> Iterable[tuple[date, date]]:

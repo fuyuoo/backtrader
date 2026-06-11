@@ -328,6 +328,69 @@ def test_tushare_provider_fetches_stock_names(monkeypatch: pytest.MonkeyPatch) -
     assert names == {"000001.SZ": "平安银行", "600519.SH": "贵州茅台"}
 
 
+def test_tushare_provider_fetches_attribution_reference_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {}
+    daily_frame = pd.DataFrame(
+        [
+            {"ts_code": "000001.SZ", "trade_date": "20240102", "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2, "vol": 1000, "amount": 2000},
+            {"ts_code": "600000.SH", "trade_date": "20240102", "open": 20.0, "high": 20.5, "low": 19.8, "close": 20.2, "vol": 2000, "amount": 3000},
+        ]
+    )
+    daily_basic_frame = pd.DataFrame(
+        [
+            {"ts_code": "000001.SZ", "trade_date": "20240102", "turnover_rate": 1.2, "volume_ratio": 1.1, "pe": 10.0, "pe_ttm": 11.0, "pb": 1.3, "total_mv": 100.0, "circ_mv": 90.0},
+            {"ts_code": "600000.SH", "trade_date": "20240102", "turnover_rate": 2.2, "volume_ratio": 1.5, "pe": 20.0, "pe_ttm": 21.0, "pb": 2.3, "total_mv": 200.0, "circ_mv": 180.0},
+        ]
+    )
+    stock_basic_frame = pd.DataFrame(
+        [
+            {"ts_code": "000001.SZ", "name": "平安银行", "exchange": "SZSE", "market": "主板", "list_date": "19910403"},
+            {"ts_code": "600000.SH", "name": "浦发银行", "exchange": "SSE", "market": "主板", "list_date": "19991110"},
+        ]
+    )
+    suspend_frame = pd.DataFrame(
+        [{"ts_code": "600000.SH", "trade_date": "20240102", "suspend_timing": "全天停牌", "suspend_type": "停牌"}]
+    )
+    namechange_frame = pd.DataFrame(
+        [{"ts_code": "000001.SZ", "name": "ST平安", "start_date": "20240101", "end_date": "20240131", "change_reason": "ST"}]
+    )
+
+    class FakeApi:
+        def daily(self, **kwargs):
+            calls["daily"] = kwargs
+            return daily_frame
+
+        def daily_basic(self, **kwargs):
+            calls["daily_basic"] = kwargs
+            return daily_basic_frame
+
+        def stock_basic(self, **kwargs):
+            calls["stock_basic"] = kwargs
+            return stock_basic_frame
+
+        def suspend_d(self, **kwargs):
+            calls["suspend_d"] = kwargs
+            return suspend_frame
+
+        def namechange(self, **kwargs):
+            calls["namechange"] = kwargs
+            return namechange_frame
+
+    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: FakeApi()))
+
+    provider = TushareProvider("test-token", rate_limit=TushareRateLimitConfig(requests_per_minute=600))
+    frame = provider.fetch_attribution_reference_frame(start_date=date(2024, 1, 2), end_date=date(2024, 1, 2))
+
+    assert calls["daily"]["fields"] == "ts_code,trade_date,open,high,low,close,vol,amount"
+    assert calls["daily_basic"]["fields"] == "ts_code,trade_date,turnover_rate,volume_ratio,pe,pe_ttm,pb,total_mv,circ_mv"
+    assert calls["stock_basic"]["fields"] == "ts_code,name,exchange,market,list_date"
+    assert calls["namechange"]["fields"] == "ts_code,name,start_date,end_date,change_reason"
+    assert set(frame["symbol"]) == {"000001.SZ", "600000.SH"}
+    assert bool(frame.loc[frame["symbol"] == "000001.SZ", "is_st"].iloc[0]) is True
+    assert bool(frame.loc[frame["symbol"] == "600000.SH", "is_suspended"].iloc[0]) is True
+    assert "total_mv" in frame.columns
+
+
 def test_tushare_provider_fetches_tradability_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {}
     limit_frame = pd.DataFrame(
