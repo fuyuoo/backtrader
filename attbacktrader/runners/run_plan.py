@@ -238,7 +238,11 @@ def execute_run_plan(
             starting_equity=execution_run_plan.broker.initial_cash,
         )
     else:
-        base_report = build_report_from_closed_trades(portfolio_result.closed_trades, report_id=execution_run_plan.run.id)
+        base_report = build_report_from_closed_trades(
+            portfolio_result.closed_trades,
+            report_id=execution_run_plan.run.id,
+            starting_equity=execution_run_plan.broker.initial_cash,
+        )
     report = enrich_backtest_report(
         execution_run_plan,
         base_report=base_report,

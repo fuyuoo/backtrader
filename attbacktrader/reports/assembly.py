@@ -119,6 +119,12 @@ def _equity_points(closed_trades: Sequence[ClosedTrade], *, starting_equity: flo
     equity = starting_equity
     points = [equity]
 
+    if any(trade.net_pnl is not None for trade in closed_trades):
+        for trade in closed_trades:
+            equity += float(trade.net_pnl or 0.0)
+            points.append(equity)
+        return tuple(points)
+
     for trade in closed_trades:
         equity *= 1.0 + trade.return_pct
         points.append(equity)

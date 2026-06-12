@@ -5,8 +5,12 @@ import pytest
 
 from attbacktrader.data.snapshots import read_daily_bars_csv
 from attbacktrader.engines import EquityCurvePoint
-from attbacktrader.reports import build_report_from_equity_curve, build_report_from_trend_result
-from attbacktrader.strategies.templates import TrendTemplateV1
+from attbacktrader.reports import (
+    build_report_from_closed_trades,
+    build_report_from_equity_curve,
+    build_report_from_trend_result,
+)
+from attbacktrader.strategies.templates import ClosedTrade, TrendTemplateV1
 
 
 def test_build_report_from_single_stock_golden_backtest() -> None:
@@ -37,6 +41,39 @@ def test_report_rejects_non_positive_starting_equity() -> None:
 
     with pytest.raises(ValueError, match="starting_equity"):
         build_report_from_trend_result(result, report_id="bad-equity", starting_equity=0.0)
+
+
+def test_build_report_from_closed_trades_uses_net_pnl_when_available() -> None:
+    trades = (
+        ClosedTrade(
+            symbol="000001.SZ",
+            entry_date=date(2024, 1, 2),
+            exit_date=date(2024, 1, 3),
+            entry_price=10.0,
+            exit_price=20.0,
+            exit_reason="TAKE_PROFIT",
+            net_pnl=100.0,
+            realized_return_pct=1.0,
+        ),
+        ClosedTrade(
+            symbol="000002.SZ",
+            entry_date=date(2024, 1, 3),
+            exit_date=date(2024, 1, 4),
+            entry_price=10.0,
+            exit_price=5.0,
+            exit_reason="STOP_LOSS",
+            net_pnl=-50.0,
+            realized_return_pct=-0.5,
+        ),
+    )
+
+    report = build_report_from_closed_trades(trades, report_id="net-pnl", starting_equity=1000.0)
+
+    assert report.returns.final_equity == pytest.approx(1050.0)
+    assert report.returns.cumulative_return == pytest.approx(0.05)
+    assert report.risk.max_drawdown == pytest.approx(50.0 / 1100.0)
+    assert report.trade_quality.average_win == pytest.approx(1.0)
+    assert report.trade_quality.average_loss == pytest.approx(-0.5)
 
 
 def test_build_report_from_equity_curve_uses_account_value_for_returns_and_risk() -> None:
