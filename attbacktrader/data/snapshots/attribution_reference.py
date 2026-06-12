@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -20,6 +21,7 @@ from attbacktrader.data.snapshots.industry_store import (
 ATTRIBUTION_REFERENCE_FIELDS_VERSION = "attribution_reference_fields.v1"
 DEFAULT_REFERENCE_UNIVERSE = "full_a_main_chinext_star"
 PERCENTILE_BUCKETS = ("p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100")
+_LOGGER = logging.getLogger(__name__)
 
 FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"field_key": "entry.market_cap.total_mv_bucket", "label_zh": "总市值分位桶", "scope": "market_cap", "value_type": "bucket"},
@@ -108,6 +110,13 @@ def build_attribution_reference_snapshot_from_frame(
 ) -> dict[str, Any]:
     """Build long-form attribution reference rows from daily all-A data."""
 
+    _LOGGER.info(
+        "reference snapshot build started: input_rows=%s start=%s end=%s reference_universe=%s",
+        len(frame),
+        start_date.isoformat(),
+        end_date.isoformat(),
+        reference_universe,
+    )
     if end_date < start_date:
         raise ValueError("end_date must be on or after start_date")
     required = {"symbol", "trade_date", "close", "high", "low"}
@@ -119,7 +128,9 @@ def build_attribution_reference_snapshot_from_frame(
     data["trade_date"] = pd.to_datetime(data["trade_date"]).dt.date
     data = data[(data["trade_date"] >= start_date) & (data["trade_date"] <= end_date)].copy()
     data = data.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
+    _LOGGER.info("reference snapshot frame filtered/sorted: rows=%s", len(data))
     data = _derive_symbol_features(data)
+    _LOGGER.info("symbol-level derived features ready: rows=%s columns=%s", len(data), len(data.columns))
     industry_membership_backfilled_count = (
         int(data["industry_membership_backfilled"].fillna(False).astype(bool).sum())
         if "industry_membership_backfilled" in data.columns
@@ -137,7 +148,8 @@ def build_attribution_reference_snapshot_from_frame(
         pair_date = _coerce_date(value)
         if pair_date is not None:
             emit_pair_dates.setdefault(pair_date, set()).add(str(symbol))
-    for trade_date, day in data.groupby("trade_date", sort=True):
+    day_count = int(data["trade_date"].nunique())
+    for day_index, (trade_date, day) in enumerate(data.groupby("trade_date", sort=True), start=1):
         if emit_pair_dates and trade_date not in emit_pair_dates:
             continue
         if emit_date_set and trade_date not in emit_date_set:
@@ -171,6 +183,15 @@ def build_attribution_reference_snapshot_from_frame(
             ))
             for code in symbol_exclusions:
                 exceptions.append({"symbol": symbol, "trade_date": trade_date.isoformat(), "code": code})
+        if day_index == 1 or day_index == day_count or day_index % 100 == 0:
+            _LOGGER.info(
+                "reference snapshot day progress: %s/%s trade_date=%s rows=%s exceptions=%s",
+                day_index,
+                day_count,
+                trade_date.isoformat(),
+                len(rows),
+                len(exceptions),
+            )
 
     metadata = {
         "schema": ATTRIBUTION_REFERENCE_FIELDS_VERSION,
@@ -204,6 +225,7 @@ def build_attribution_reference_snapshot_from_frame(
         "exception_count": len(exceptions),
         "exceptions": exceptions[:1000],
     }
+    _LOGGER.info("reference snapshot build completed: rows=%s exceptions=%s", len(rows), len(exceptions))
     return {
         "metadata": metadata,
         "rows": rows,
@@ -275,13 +297,20 @@ def apply_industry_memberships_to_frame(
 
     if frame.empty:
         return frame.copy()
+    _LOGGER.info(
+        "applying industry memberships: frame_rows=%s membership_symbols=%s backfill_missing=%s",
+        len(frame),
+        len(memberships_by_symbol),
+        backfill_missing,
+    )
     data = frame.copy()
     data["trade_date"] = pd.to_datetime(data["trade_date"]).dt.date
     l1_codes: list[str | None] = []
     l1_names: list[str | None] = []
     missing_flags: list[bool] = []
     backfilled_flags: list[bool] = []
-    for row in data.itertuples(index=False):
+    total_rows = len(data)
+    for index, row in enumerate(data.itertuples(index=False), start=1):
         membership, backfilled = _industry_membership_for(
             str(row.symbol),
             row.trade_date,
@@ -298,6 +327,8 @@ def apply_industry_memberships_to_frame(
             l1_names.append(membership.level1_name)
             missing_flags.append(False)
             backfilled_flags.append(backfilled)
+        if index == 1 or index == total_rows or index % 500000 == 0:
+            _LOGGER.info("industry membership progress: %s/%s", index, total_rows)
     data["sw_l1_code"] = l1_codes
     data["sw_l1_name"] = l1_names
     data["industry_membership_missing"] = missing_flags
@@ -314,11 +345,14 @@ def write_attribution_reference_snapshot(snapshot: Mapping[str, Any], output_dir
 
     metadata = dict(_as_mapping(snapshot.get("metadata")))
     rows = list(_as_sequence(snapshot.get("rows")))
+    _LOGGER.info("writing metadata json: path=%s", metadata_path)
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    _LOGGER.info("writing reference json: path=%s rows=%s", reference_json_path, len(rows))
     reference_json_path.write_text(
         json.dumps({"metadata": metadata, "rows": rows}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    _LOGGER.info("writing reference parquet: path=%s rows=%s", values_path, len(rows))
     frame = pd.DataFrame(rows)
     if not frame.empty:
         for column in ("value", "bucket"):
@@ -327,6 +361,7 @@ def write_attribution_reference_snapshot(snapshot: Mapping[str, Any], output_dir
         if "exception_codes" in frame.columns:
             frame["exception_codes"] = frame["exception_codes"].map(lambda value: ";".join(str(item) for item in _as_sequence(value)))
     frame.to_parquet(values_path, index=False)
+    _LOGGER.info("reference snapshot files written")
     return metadata_path, reference_json_path, values_path
 
 

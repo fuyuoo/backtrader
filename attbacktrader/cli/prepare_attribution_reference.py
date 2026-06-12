@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from datetime import date
 from pathlib import Path
 
@@ -21,14 +22,34 @@ from attbacktrader.data.snapshots import (
     write_attribution_reference_snapshot,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_logging()
     args = _parse_args(argv)
     run_defaults = _run_defaults_from_args(args)
     start_date = date.fromisoformat(args.start_date or run_defaults["start_date"])
     end_date = date.fromisoformat(args.end_date or run_defaults["end_date"])
+    _LOGGER.info(
+        "prepare attribution reference started: provider=%s input=%s start=%s end=%s run_dir=%s fetch_scope=%s",
+        args.provider,
+        args.input,
+        start_date.isoformat(),
+        end_date.isoformat(),
+        args.run_dir,
+        args.reference_fetch_scope,
+    )
     frame = _load_input_frame(Path(args.input)) if args.input is not None else _fetch_provider_frame(args, start_date, end_date)
+    _LOGGER.info("input frame ready: rows=%s columns=%s", len(frame), len(frame.columns))
     emit_scope = _run_entry_scope(args.run_dir) if args.emit_run_entry_scope else {"symbols": [], "dates": [], "pairs": []}
+    _LOGGER.info(
+        "emit scope ready: symbols=%s dates=%s pairs=%s",
+        len(emit_scope["symbols"]),
+        len(emit_scope["dates"]),
+        len(emit_scope["pairs"]),
+    )
+    _LOGGER.info("building attribution reference snapshot")
     snapshot = build_attribution_reference_snapshot_from_frame(
         frame,
         start_date=start_date,
@@ -38,6 +59,11 @@ def main(argv: list[str] | None = None) -> int:
         emit_symbols=emit_scope["symbols"],
         emit_dates=emit_scope["dates"],
         emit_symbol_date_pairs=emit_scope["pairs"],
+    )
+    _LOGGER.info(
+        "snapshot built: rows=%s exceptions=%s",
+        snapshot["row_count"],
+        snapshot["metadata"]["exception_count"],
     )
     output_dir = (
         Path(args.output_dir)
@@ -49,7 +75,14 @@ def main(argv: list[str] | None = None) -> int:
             end_date=end_date,
         )
     )
+    _LOGGER.info("writing attribution reference snapshot: output_dir=%s", output_dir)
     metadata_path, reference_json_path, values_path = write_attribution_reference_snapshot(snapshot, output_dir)
+    _LOGGER.info(
+        "prepare attribution reference completed: metadata=%s reference_json=%s values=%s",
+        metadata_path,
+        reference_json_path,
+        values_path,
+    )
     print(
         json.dumps(
             {
@@ -81,6 +114,13 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     return 0
+
+
+def _configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    )
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -154,6 +194,7 @@ def _load_input_frame(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"input does not exist: {path}")
     suffix = path.suffix.lower()
+    _LOGGER.info("loading input frame: path=%s", path)
     if suffix in {".parquet", ".pq"}:
         return pd.read_parquet(path)
     if suffix == ".csv":
@@ -164,12 +205,18 @@ def _load_input_frame(path: Path) -> pd.DataFrame:
 def _fetch_provider_frame(args: argparse.Namespace, start_date: date, end_date: date) -> pd.DataFrame:
     if args.provider != "tushare":
         raise ValueError(f"unsupported provider: {args.provider}")
+    _LOGGER.info("initializing tushare provider")
     provider = TushareProvider(
         read_tushare_token(args.token_file),
         rate_limit=tushare_rate_limit_config_from_args(args),
     )
     symbols = _symbols_from_args(args, run_defaults=_run_defaults_from_args(args))
     fetch_symbols = None if args.reference_fetch_scope == "all" else symbols or None
+    _LOGGER.info(
+        "fetching provider frame: fetch_symbols=%s raw_cache_dir=%s",
+        "all" if fetch_symbols is None else len(fetch_symbols),
+        args.raw_cache_dir,
+    )
     fetch_kwargs = {
         "start_date": start_date,
         "end_date": end_date,
@@ -181,6 +228,7 @@ def _fetch_provider_frame(args: argparse.Namespace, start_date: date, end_date: 
     if not args.fetch_industry_memberships:
         return frame
     symbols = sorted(str(symbol) for symbol in frame["symbol"].dropna().unique())
+    _LOGGER.info("fetching/applying industry memberships: symbol_count=%s source=%s", len(symbols), args.industry_source)
     if args.reference_fetch_scope == "all":
         memberships = load_or_fetch_all_industry_memberships(
             snapshot_root=args.snapshot_root,
@@ -204,6 +252,7 @@ def _fetch_provider_frame(args: argparse.Namespace, start_date: date, end_date: 
             source=args.industry_source,
             refresh=args.refresh_industry_memberships,
         )
+    _LOGGER.info("industry memberships ready: symbol_count=%s", len(memberships))
     return apply_industry_memberships_to_frame(
         frame,
         memberships,

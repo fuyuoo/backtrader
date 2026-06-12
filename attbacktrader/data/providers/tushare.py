@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import hashlib
 import json
+import logging
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -21,6 +22,8 @@ from attbacktrader.data import (
     StockIndustryMembership,
     TradabilityStatus,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 DEFAULT_TUSHARE_TOKEN_FILE = Path(".secrets/tushare_token.txt")
@@ -279,6 +282,13 @@ class TushareProvider:
         if end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
 
+        _LOGGER.info(
+            "fetching attribution reference daily frames: start=%s end=%s symbols=%s raw_cache_dir=%s",
+            start_date.isoformat(),
+            end_date.isoformat(),
+            "all" if symbols is None else len(symbols),
+            raw_cache_dir,
+        )
         daily_frame = _concat_frames(
             self._fetch_reference_daily_frames(
                 start_date=start_date,
@@ -287,6 +297,8 @@ class TushareProvider:
                 raw_cache_dir=raw_cache_dir,
             )
         )
+        _LOGGER.info("daily frame ready: rows=%s", 0 if daily_frame is None else len(daily_frame))
+        _LOGGER.info("fetching attribution reference daily_basic frames")
         daily_basic_frame = _concat_frames(
             self._fetch_reference_daily_basic_frames(
                 start_date=start_date,
@@ -295,11 +307,15 @@ class TushareProvider:
                 raw_cache_dir=raw_cache_dir,
             )
         )
+        _LOGGER.info("daily_basic frame ready: rows=%s", 0 if daily_basic_frame is None else len(daily_basic_frame))
+        _LOGGER.info("fetching stock_basic frame")
         stock_basic_frame = self._call_tushare(
             self._pro.stock_basic,
             api_name="stock_basic",
             fields=REFERENCE_STOCK_BASIC_FIELDS,
         )
+        _LOGGER.info("stock_basic frame ready: rows=%s", 0 if stock_basic_frame is None else len(stock_basic_frame))
+        _LOGGER.info("fetching suspend frames")
         suspend_frame = _concat_frames(
             self._fetch_reference_suspend_frames(
                 start_date=start_date,
@@ -308,11 +324,15 @@ class TushareProvider:
                 raw_cache_dir=raw_cache_dir,
             )
         )
+        _LOGGER.info("suspend frame ready: rows=%s", 0 if suspend_frame is None else len(suspend_frame))
+        _LOGGER.info("fetching namechange frame")
         namechange_frame = self._call_tushare(
             self._pro.namechange,
             api_name="namechange",
             fields=NAMECHANGE_FIELDS,
         )
+        _LOGGER.info("namechange frame ready: rows=%s", 0 if namechange_frame is None else len(namechange_frame))
+        _LOGGER.info("merging attribution reference frames")
         return _attribution_reference_frame_from_frames(
             daily_frame=daily_frame,
             daily_basic_frame=daily_basic_frame,
@@ -569,16 +589,32 @@ class TushareProvider:
         raw_cache_dir: str | Path | None = None,
         **kwargs: Any,
     ) -> Any:
-        frames = [
-            self._call_tushare_cached(
+        trade_dates = tuple(_business_dates(start_date, end_date))
+        _LOGGER.info(
+            "fetching %s by trade_date: dates=%s raw_cache=%s",
+            api_name,
+            len(trade_dates),
+            raw_cache_dir is not None,
+        )
+        frames = []
+        for index, trade_date in enumerate(trade_dates, start=1):
+            frames.append(
+                self._call_tushare_cached(
                 call,
                 api_name=api_name,
                 raw_cache_dir=Path(raw_cache_dir) if raw_cache_dir is not None else None,
                 trade_date=_format_tushare_date(trade_date),
                 **kwargs,
             )
-            for trade_date in _business_dates(start_date, end_date)
-        ]
+            )
+            if index == 1 or index == len(trade_dates) or index % 250 == 0:
+                _LOGGER.info(
+                    "%s trade_date progress: %s/%s latest=%s",
+                    api_name,
+                    index,
+                    len(trade_dates),
+                    trade_date.isoformat(),
+                )
         return _concat_frames(frames)
 
     def _call_tushare_cached(
