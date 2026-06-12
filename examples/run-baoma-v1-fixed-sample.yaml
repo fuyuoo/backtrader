@@ -1,5 +1,5 @@
 run:
-  id: baoma-v1-fixed-sample-2023-2024
+  id: baoma-v1-fixed-sample-2023-2024-maxhold800
   from_date: "2023-01-01"
   to_date: "2024-12-31"
 
@@ -61,7 +61,7 @@ strategy:
     max_add_on_count: 2
   sizing_rule: equal_weight
   sizing_params:
-    max_holding_count: 200
+    max_holding_count: 800
     min_order_quantity: 100
 
 constraints:

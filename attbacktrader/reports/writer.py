@@ -116,9 +116,11 @@ def write_run_artifacts(
 
     artifact_detail = getattr(run_plan.output, "artifact_detail", "compact")
     signal_audit_sample_limit = int(getattr(run_plan.output, "signal_audit_sample_limit", 200))
+    run_config = _run_config_trace(run_plan)
+    trade_lifecycle = _trade_lifecycle(result)
 
     _write_json(artifact_paths.run_plan_path, run_plan)
-    _write_json(artifact_paths.result_path, _result_payload(result, artifact_detail=artifact_detail))
+    _write_json(artifact_paths.result_path, _result_payload(result, artifact_detail=artifact_detail, run_config=run_config))
     _write_json(artifact_paths.report_path, result.report)
     artifact_paths.report_markdown_path.write_text(
         render_backtest_report_markdown(run_plan, result),
@@ -131,7 +133,10 @@ def write_run_artifacts(
     _write_json(
         artifact_paths.trades_path,
         {
-            "closed_trades": result.closed_trades,
+            "schema": "attbacktrader.trades.v2",
+            "run_id": result.run_id,
+            "run_config": run_config,
+            "closed_trades": _closed_trades_with_lifecycle_indexes(result.closed_trades, trade_lifecycle),
             "open_positions": result.open_positions,
         },
     )
@@ -145,7 +150,6 @@ def write_run_artifacts(
     )
     _write_json(artifact_paths.sizing_audit_path, _sizing_audit(result))
     _write_json(artifact_paths.result_diagnostics_path, _result_diagnostics(result))
-    trade_lifecycle = _trade_lifecycle(result)
     _write_json(artifact_paths.trade_lifecycle_path, trade_lifecycle)
     artifact_paths.trade_lifecycle_chinese_markdown_path.write_text(
         render_trade_lifecycle_markdown_zh(trade_lifecycle),
@@ -229,9 +233,73 @@ def _snapshot_index(result: RunPlanExecutionResult) -> dict[str, Any]:
     }
 
 
-def _result_payload(result: RunPlanExecutionResult, *, artifact_detail: str) -> Any:
+def _run_config_trace(run_plan: RunPlan) -> dict[str, Any]:
+    sizing_params = dict(run_plan.strategy.sizing_params or {})
+    max_holding_count = sizing_params.get("max_holding_count")
+    per_symbol_max_value = None
+    target_buy_value = None
+    if max_holding_count:
+        per_symbol_max_value = run_plan.broker.initial_cash / int(max_holding_count)
+        target_buy_value = per_symbol_max_value * run_plan.execution.baoma.buy_slice_fraction
+
+    return {
+        "schema": "attbacktrader.run_config_trace.v1",
+        "run": {
+            "id": run_plan.run.id,
+            "from_date": run_plan.run.from_date,
+            "to_date": run_plan.run.to_date,
+        },
+        "data": {
+            "provider": run_plan.data.provider,
+            "price_adjustment": run_plan.data.price_adjustment,
+            "stock_pool_file": run_plan.data.stock_pool_file,
+            "symbol_count": len(run_plan.data.resolved_tradable_series),
+        },
+        "strategy": {
+            "template": run_plan.strategy.template,
+            "entry_method": run_plan.strategy.entry_method,
+            "entry_params": run_plan.strategy.entry_params,
+            "profit_taking_method": run_plan.strategy.profit_taking_method,
+            "profit_taking_params": run_plan.strategy.profit_taking_params,
+            "stop_loss_method": run_plan.strategy.stop_loss_method,
+            "stop_loss_params": run_plan.strategy.stop_loss_params,
+            "add_on_method": run_plan.strategy.add_on_method,
+            "add_on_params": run_plan.strategy.add_on_params,
+            "sizing_rule": run_plan.strategy.sizing_rule,
+            "sizing_params": run_plan.strategy.sizing_params,
+        },
+        "sizing": {
+            "max_holding_count": max_holding_count,
+            "per_symbol_max_value": per_symbol_max_value,
+            "buy_slice_fraction": run_plan.execution.baoma.buy_slice_fraction,
+            "target_buy_value": target_buy_value,
+            "min_order_quantity": sizing_params.get("min_order_quantity"),
+        },
+        "execution": {
+            "engine": run_plan.execution.engine,
+            "stake": run_plan.execution.stake,
+            "baoma": run_plan.execution.baoma,
+        },
+        "constraints": {
+            "ashare": run_plan.constraints.ashare,
+        },
+        "broker": {
+            "initial_cash": run_plan.broker.initial_cash,
+            "commission_rate": run_plan.broker.commission_rate,
+            "stamp_tax_rate": run_plan.broker.stamp_tax_rate,
+            "transfer_fee_rate": run_plan.broker.transfer_fee_rate,
+            "slippage": run_plan.broker.slippage,
+        },
+    }
+
+
+def _result_payload(result: RunPlanExecutionResult, *, artifact_detail: str, run_config: Mapping[str, Any]) -> Any:
     if artifact_detail == "full":
-        return result
+        return {
+            "schema": "attbacktrader.full_result.v2",
+            "run_config": run_config,
+            "result": result,
+        }
     return {
         "schema": "attbacktrader.compact_result.v1",
         "artifact_detail": "compact",
@@ -239,6 +307,7 @@ def _result_payload(result: RunPlanExecutionResult, *, artifact_detail: str) -> 
         "run_id": result.run_id,
         "engine": result.engine,
         "adjustment": result.adjustment,
+        "run_config": run_config,
         "symbols": result.symbols,
         "counts": {
             "symbol_count": len(result.symbols),
@@ -411,6 +480,54 @@ def _result_diagnostics(result: RunPlanExecutionResult):
         execution_audit=result.execution_audit,
         open_positions=result.open_positions,
     )
+
+
+def _closed_trades_with_lifecycle_indexes(closed_trades, trade_lifecycle) -> list[dict[str, Any]]:
+    indexes_by_identity: dict[tuple[Any, ...], list[int]] = {}
+    for lifecycle in getattr(trade_lifecycle, "lifecycles", ()):
+        indexes_by_identity.setdefault(_trade_identity(lifecycle), []).append(lifecycle.trade_index)
+
+    records: list[dict[str, Any]] = []
+    for fallback_index, trade in enumerate(closed_trades, start=1):
+        payload = to_jsonable(trade)
+        identity = _trade_identity(trade)
+        trade_indexes = indexes_by_identity.get(identity)
+        trade_index = trade_indexes.pop(0) if trade_indexes else fallback_index
+        records.append({"trade_index": trade_index, **payload})
+    return records
+
+
+def _trade_identity(trade: Any) -> tuple[Any, ...]:
+    return (
+        _trade_field(trade, "symbol"),
+        _date_key(_trade_field(trade, "entry_date")),
+        _date_key(_trade_field(trade, "exit_date")),
+        _trade_field(trade, "exit_reason"),
+        _number_key(_trade_field(trade, "entry_price")),
+        _number_key(_trade_field(trade, "exit_price")),
+        _trade_field(trade, "quantity"),
+        _number_key(_trade_field(trade, "net_pnl")),
+    )
+
+
+def _trade_field(trade: Any, field_name: str) -> Any:
+    if isinstance(trade, Mapping):
+        return trade.get(field_name)
+    return getattr(trade, field_name, None)
+
+
+def _date_key(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return str(value)
+
+
+def _number_key(value: Any) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), 8)
 
 
 def _trade_lifecycle(result: RunPlanExecutionResult):

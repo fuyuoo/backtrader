@@ -55,6 +55,7 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert artifacts.attribution_factor_selection_path.exists()
 
     run_plan_payload = _read_json(artifacts.run_plan_path)
+    result_payload = _read_json(artifacts.result_path)
     report_payload = _read_json(artifacts.report_path)
     trades_payload = _read_json(artifacts.trades_path)
     signal_audit_payload = _read_json(artifacts.signal_audit_path)
@@ -96,7 +97,14 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert "## 收益与风险" in report_chinese_markdown
     assert "## 交易质量" in report_chinese_markdown
     assert "## 执行成本" in report_chinese_markdown
+    assert trades_payload["schema"] == "attbacktrader.trades.v2"
+    assert trades_payload["run_id"] == "writer-test"
+    assert trades_payload["run_config"]["sizing"]["max_holding_count"] == 5
+    assert trades_payload["run_config"]["sizing"]["per_symbol_max_value"] == 200000
+    assert trades_payload["run_config"]["sizing"]["target_buy_value"] == 66000
     assert len(trades_payload["closed_trades"]) == 2
+    assert {trade["trade_index"] for trade in trades_payload["closed_trades"]} == {1, 2}
+    assert result_payload["run_config"]["sizing"]["max_holding_count"] == 5
     assert run_plan_payload["output"]["artifact_detail"] == "compact"
     assert signal_audit_payload["schema"] == "attbacktrader.compact_signal_audit.v1"
     assert signal_audit_payload["raw_signal_audit_persisted"] is False
@@ -126,6 +134,15 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert "losing_trade_add_on_attributions" in result_diagnostics_payload["symbols"][0]
     assert "add_on_signal_count" in result_diagnostics_payload["symbols"][0]
     assert trade_lifecycle_payload["trade_count"] == 2
+    closed_trades_by_index = {
+        trade["trade_index"]: trade
+        for trade in trades_payload["closed_trades"]
+    }
+    for lifecycle in trade_lifecycle_payload["lifecycles"]:
+        closed_trade = closed_trades_by_index[lifecycle["trade_index"]]
+        assert closed_trade["symbol"] == lifecycle["symbol"]
+        assert closed_trade["entry_date"] == lifecycle["entry_date"]
+        assert closed_trade["exit_date"] == lifecycle["exit_date"]
     assert trade_lifecycle_payload["indexes"]["by_outcome"]
     assert trade_lifecycle_payload["indexes"]["by_symbol"][0]["key"] == "000001.SZ"
     assert trade_lifecycle_payload["lifecycles"][0]["events"][0]["event_type"] == "entry"
@@ -216,8 +233,10 @@ def test_write_run_artifacts_can_persist_full_raw_audit_for_debugging(tmp_path: 
     result_payload = _read_json(artifacts.result_path)
     signal_audit_payload = _read_json(artifacts.signal_audit_path)
 
-    assert result_payload["run_id"] == "writer-test"
-    assert "signal_audit" in result_payload
+    assert result_payload["schema"] == "attbacktrader.full_result.v2"
+    assert result_payload["run_config"]["run"]["id"] == "writer-test"
+    assert result_payload["result"]["run_id"] == "writer-test"
+    assert "signal_audit" in result_payload["result"]
     assert isinstance(signal_audit_payload, list)
     assert signal_audit_payload[0]["method_name"] == "kdj_oversold_entry"
 
@@ -245,6 +264,10 @@ def _run_plan(snapshot_root: Path) -> RunPlan:
                 "profit_taking_method": "kdj_overheated_exit",
                 "stop_loss_method": "fixed_percent_stop",
                 "sizing_rule": "equal_weight",
+                "sizing_params": {
+                    "max_holding_count": 5,
+                    "min_order_quantity": 100,
+                },
             },
             "broker": {
                 "initial_cash": 1000000,
