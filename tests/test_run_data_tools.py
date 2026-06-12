@@ -280,6 +280,11 @@ def test_attribution_wide_samples_builds_field_index_and_enriched_environment_fi
     assert enriched["variant"] == "enriched"
     assert enriched["trade_count"] == 1
     assert any(
+        field["field"] == "entry.price_position.ma60_atr_multiple_bucket"
+        and field["label_zh"] == "入场价距MA60的ATR倍数桶"
+        for field in enriched["environment_fields"]
+    )
+    assert any(
         summary["field"] == "entry.price_position.near_high_20d_bucket"
         for summary in enriched["single_factor_summaries"]
     )
@@ -396,6 +401,12 @@ def test_attribution_wide_samples_derives_path_and_signal_strength_from_daily_ca
     assert fields["entry.market.source_index"]["bucket"] == "HS300"
     assert fields["market.hs300.trend_state"]["bucket"] in {"bullish", "bearish", "mixed"}
     assert fields["market.csi500.trend_state"]["bucket"] in {"bullish", "bearish", "mixed"}
+    assert fields["market.hs300.entry_stage"]["bucket"] in {"bullish", "bearish", "mixed"}
+    assert fields["market.hs300.exit_stage"]["bucket"] in {"bullish", "bearish", "mixed"}
+    assert "_to_" in fields["market.hs300.entry_to_exit_stage"]["bucket"]
+    assert fields["market.csi500.entry_stage"]["bucket"] in {"bullish", "bearish", "mixed"}
+    assert fields["market.csi500.exit_stage"]["bucket"] in {"bullish", "bearish", "mixed"}
+    assert "_to_" in fields["market.csi500.entry_to_exit_stage"]["bucket"]
     assert fields["market.hs300.weekly.kdj_state"]["bucket"] in {"oversold", "recovering", "strong", "overheated"}
     assert fields["entry.momentum.symbol_vs_hs300_return_20d_bucket"]["bucket"] is not None
     assert fields["entry.momentum.symbol_vs_industry_return_20d_bucket"]["bucket"] is not None
@@ -410,6 +421,9 @@ def test_attribution_wide_samples_derives_path_and_signal_strength_from_daily_ca
     assert "entry.market.source_index" in wide_samples["environment_fit_default_fields"]
     assert "market.hs300.trend_state" in wide_samples["environment_fit_default_fields"]
     assert "entry.momentum.symbol_vs_hs300_return_20d_bucket" in wide_samples["environment_fit_default_fields"]
+    assert "market.hs300.entry_stage" not in wide_samples["environment_fit_default_fields"]
+    assert "market.hs300.exit_stage" not in wide_samples["environment_fit_default_fields"]
+    assert "market.hs300.entry_to_exit_stage" not in wide_samples["environment_fit_default_fields"]
     assert "trade.path.holding_days_bucket" not in wide_samples["environment_fit_default_fields"]
     assert "trade.path.max_favorable_atr_multiple_bucket" not in wide_samples["environment_fit_default_fields"]
     assert "trade.exit.reason" not in wide_samples["environment_fit_default_fields"]
@@ -418,6 +432,9 @@ def test_attribution_wide_samples_derives_path_and_signal_strength_from_daily_ca
         "environment_fit_pair_whitelist"
     ]
     assert ["trade.exit.reason", "entry.signal_strength.dea_waterline_age_trading_days_bucket"] in wide_samples[
+        "outcome_diagnostic_pair_whitelist"
+    ]
+    assert ["trade.exit.reason", "market.hs300.entry_to_exit_stage"] in wide_samples[
         "outcome_diagnostic_pair_whitelist"
     ]
 

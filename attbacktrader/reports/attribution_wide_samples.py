@@ -99,6 +99,15 @@ MARKET_INDEX_FIELDS: tuple[str, ...] = tuple(
         "weekly.ma_trend_bucket",
     )
 )
+MARKET_STAGE_FIELDS: tuple[str, ...] = tuple(
+    f"market.{key}.{suffix}"
+    for key, _symbol, _label in MARKET_INDEX_SPECS
+    for suffix in (
+        "entry_stage",
+        "exit_stage",
+        "entry_to_exit_stage",
+    )
+)
 MOMENTUM_RELATIVE_FIELDS = (
     SYMBOL_HS300_RS_20D_FIELD,
     SYMBOL_CSI500_RS_20D_FIELD,
@@ -147,6 +156,7 @@ DERIVED_ONLY_FIELDS = {
     INDUSTRY_WEEKLY_RELATIVE_STRENGTH_FIELD,
     SOURCE_INDEX_FIELD,
     *MARKET_INDEX_FIELDS,
+    *MARKET_STAGE_FIELDS,
     *MOMENTUM_RELATIVE_FIELDS,
     *POST_TRADE_DIAGNOSTIC_FIELDS,
 }
@@ -164,6 +174,15 @@ EXIT_REASON_ENTRY_FACTOR_PAIRS: tuple[tuple[str, str], ...] = (
     (EXIT_REASON_FIELD, MA60_SLOPE_20D_FIELD),
     (EXIT_REASON_FIELD, SIGNAL_CANDLE_BODY_FIELD),
     (EXIT_REASON_FIELD, SIGNAL_SHADOW_FIELD),
+)
+MARKET_STAGE_DIAGNOSTIC_PAIRS: tuple[tuple[str, str], ...] = tuple(
+    (EXIT_REASON_FIELD, f"market.{key}.{suffix}")
+    for key, _symbol, _label in MARKET_INDEX_SPECS
+    for suffix in (
+        "entry_stage",
+        "exit_stage",
+        "entry_to_exit_stage",
+    )
 )
 
 DERIVED_FIELD_CATALOG: dict[str, dict[str, Any]] = {
@@ -595,6 +614,39 @@ for market_key, _symbol, label in MARKET_INDEX_SPECS:
                 "source": "index_snapshot",
                 "missing_policy": "missing",
             },
+            f"market.{market_key}.entry_stage": {
+                "field_key": f"market.{market_key}.entry_stage",
+                "label_zh": f"{label}入场信号日市场阶段",
+                "value_type": "category",
+                "timing": "entry",
+                "scope": "market_stage",
+                "bucket_rule": "close_ma20_ma60_trend_state",
+                "default_in_environment_fit": False,
+                "source": "index_snapshot",
+                "missing_policy": "missing",
+            },
+            f"market.{market_key}.exit_stage": {
+                "field_key": f"market.{market_key}.exit_stage",
+                "label_zh": f"{label}出场日市场阶段",
+                "value_type": "category",
+                "timing": "exit",
+                "scope": "market_stage",
+                "bucket_rule": "close_ma20_ma60_trend_state",
+                "default_in_environment_fit": False,
+                "source": "index_snapshot+closed_trade",
+                "missing_policy": "missing",
+            },
+            f"market.{market_key}.entry_to_exit_stage": {
+                "field_key": f"market.{market_key}.entry_to_exit_stage",
+                "label_zh": f"{label}入场到出场市场阶段迁移",
+                "value_type": "category",
+                "timing": "post_trade",
+                "scope": "market_stage",
+                "bucket_rule": "entry_exit_stage_transition",
+                "default_in_environment_fit": False,
+                "source": "index_snapshot+closed_trade",
+                "missing_policy": "missing",
+            },
         }
     )
 
@@ -798,6 +850,12 @@ def build_attribution_wide_samples(
             source_index_by_symbol=source_index_by_symbol,
         )
         _add_market_index_fields(field_values, signal_date=signal_date, market_context=market_context)
+        _add_market_stage_fields(
+            field_values,
+            signal_date=signal_date,
+            exit_date=_as_str(trade.get("exit_date")),
+            market_context=market_context,
+        )
         _add_relative_momentum_fields(
             field_values,
             trade=trade,
@@ -2071,6 +2129,62 @@ def _add_market_index_fields(
         )
 
 
+def _add_market_stage_fields(
+    field_values: dict[str, dict[str, Any]],
+    *,
+    signal_date: str,
+    exit_date: str,
+    market_context: Mapping[str, Any],
+) -> None:
+    by_symbol = _as_mapping(market_context.get("by_symbol"))
+    for market_key, symbol, _label in MARKET_INDEX_SPECS:
+        entry_row = _latest_context_row(
+            by_symbol,
+            symbol=symbol,
+            trade_date=signal_date,
+            strict_before=False,
+        )
+        exit_row = _latest_context_row(
+            by_symbol,
+            symbol=symbol,
+            trade_date=exit_date,
+            strict_before=False,
+        )
+        entry_asof = _as_str(_as_mapping(entry_row).get("trade_date")) or signal_date
+        exit_asof = _as_str(_as_mapping(exit_row).get("trade_date")) or exit_date
+        entry_stage = _as_str(_as_mapping(entry_row).get("trend_state")) or None
+        exit_stage = _as_str(_as_mapping(exit_row).get("trend_state")) or None
+
+        field_values[f"market.{market_key}.entry_stage"] = _derived_payload(
+            raw=entry_stage,
+            bucket=entry_stage,
+            asof_date=entry_asof,
+            reference_count=None,
+            exception_codes=[] if entry_stage else ["market_entry_stage_missing"],
+        )
+        field_values[f"market.{market_key}.exit_stage"] = _derived_payload(
+            raw=exit_stage,
+            bucket=exit_stage,
+            asof_date=exit_asof,
+            reference_count=None,
+            exception_codes=[] if exit_stage else ["market_exit_stage_missing"],
+        )
+
+        transition = f"{entry_stage}_to_{exit_stage}" if entry_stage and exit_stage else None
+        transition_exceptions: list[str] = []
+        if not entry_stage:
+            transition_exceptions.append("market_entry_stage_missing")
+        if not exit_stage:
+            transition_exceptions.append("market_exit_stage_missing")
+        field_values[f"market.{market_key}.entry_to_exit_stage"] = _derived_payload(
+            raw={"entry_stage": entry_stage, "exit_stage": exit_stage} if transition else None,
+            bucket=transition,
+            asof_date=exit_asof,
+            reference_count=None,
+            exception_codes=transition_exceptions,
+        )
+
+
 def _add_relative_momentum_fields(
     field_values: dict[str, dict[str, Any]],
     *,
@@ -2304,7 +2418,7 @@ def _environment_pair_whitelist(metadata: Mapping[str, Any]) -> list[list[str]]:
 
 
 def _outcome_diagnostic_pair_whitelist() -> list[list[str]]:
-    return [[left, right] for left, right in EXIT_REASON_ENTRY_FACTOR_PAIRS]
+    return [[left, right] for left, right in (*EXIT_REASON_ENTRY_FACTOR_PAIRS, *MARKET_STAGE_DIAGNOSTIC_PAIRS)]
 
 
 def _reference_rows_by_symbol_field(rows: Sequence[Mapping[str, Any]]) -> dict[tuple[str, str], list[Mapping[str, Any]]]:

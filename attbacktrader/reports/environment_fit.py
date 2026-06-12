@@ -159,9 +159,10 @@ def build_environment_fit_report_from_wide_samples(
         if len(_as_sequence(pair)) == 2
     )
 
+    field_labels = _field_label_map(index)
     trades = _trade_rows_from_wide_samples(wide, environment_fields=fields, field_index=index)
-    single_factor_summaries = _single_factor_summaries(trades, fields)
-    combination_summaries = _pair_combination_summaries(trades, pairs)
+    single_factor_summaries = _single_factor_summaries(trades, fields, field_labels=field_labels)
+    combination_summaries = _pair_combination_summaries(trades, pairs, field_labels=field_labels)
     trade_contributions = _trade_contributions(trades)
     return {
         "schema": ENVIRONMENT_FIT_SCHEMA,
@@ -175,7 +176,7 @@ def build_environment_fit_report_from_wide_samples(
         "environment_fields": [
             {
                 "field": field,
-                "label_zh": _factor_label(field),
+                "label_zh": _factor_label(field, field_labels),
             }
             for field in fields
         ],
@@ -497,6 +498,17 @@ def _bucket_field_keys(field_index: Mapping[str, Any]) -> set[str]:
     return result
 
 
+def _field_label_map(field_index: Mapping[str, Any]) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for field in _as_sequence(field_index.get("fields")):
+        field_map = _as_mapping(field)
+        key = str(field_map.get("field_key") or "")
+        label = str(field_map.get("label_zh") or "")
+        if key and label:
+            labels[key] = label
+    return labels
+
+
 def _profit_contribution(lifecycle: Mapping[str, Any]) -> dict[str, Any]:
     buy_gross = 0.0
     sell_gross = 0.0
@@ -566,6 +578,8 @@ def _execution_gross_value(execution: Mapping[str, Any]) -> float | None:
 def _single_factor_summaries(
     trades: Sequence[Mapping[str, Any]],
     fields: Sequence[str],
+    *,
+    field_labels: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     summaries: list[dict[str, Any]] = []
     for field in fields:
@@ -585,10 +599,10 @@ def _single_factor_summaries(
                 {
                     "summary_kind": "single_factor",
                     "field": field,
-                    "field_label_zh": _factor_label(field),
+                    "field_label_zh": _factor_label(field, field_labels),
                     "value": _jsonable_value(values[value_key]),
                     "value_label_zh": _value_label(values[value_key]),
-                    "label_zh": f"{_factor_label(field)}={_value_label(values[value_key])}",
+                    "label_zh": f"{_factor_label(field, field_labels)}={_value_label(values[value_key])}",
                 }
             )
             summaries.append(summary)
@@ -604,6 +618,8 @@ def _single_factor_summaries(
 def _combination_summaries(
     trades: Sequence[Mapping[str, Any]],
     fields: Sequence[str],
+    *,
+    field_labels: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     buckets: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     values_by_key: dict[str, dict[str, Any]] = {}
@@ -625,7 +641,7 @@ def _combination_summaries(
                 "summary_kind": "combination",
                 "fields": _jsonable_value(values),
                 "profile_key": "|".join(f"{field}={_stable_value_key(values[field])}" for field in fields),
-                "label_zh": _format_environment(values),
+                "label_zh": _format_environment(values, field_labels),
             }
         )
         summaries.append(summary)
@@ -642,6 +658,8 @@ def _combination_summaries(
 def _pair_combination_summaries(
     trades: Sequence[Mapping[str, Any]],
     pair_whitelist: Sequence[Sequence[str]],
+    *,
+    field_labels: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     summaries = []
     seen: set[tuple[str, str]] = set()
@@ -671,7 +689,7 @@ def _pair_combination_summaries(
                     "summary_kind": "combination",
                     "fields": _jsonable_value(values),
                     "profile_key": "|".join(f"{field}={_stable_value_key(values[field])}" for field in sorted(values)),
-                    "label_zh": _format_environment(values),
+                    "label_zh": _format_environment(values, field_labels),
                 }
             )
             summaries.append(summary)
@@ -916,17 +934,19 @@ def _summary_row(summary: Mapping[str, Any], *, include_field: bool) -> str:
     return "| " + " | ".join(cells) + " |"
 
 
-def _format_environment(environment: Any) -> str:
+def _format_environment(environment: Any, field_labels: Mapping[str, str] | None = None) -> str:
     environment_map = _as_mapping(environment)
     if not environment_map:
         return "-"
     return "；".join(
-        f"{_factor_label(field)}={_value_label(value)}"
+        f"{_factor_label(field, field_labels)}={_value_label(value)}"
         for field, value in sorted(environment_map.items())
     )
 
 
-def _factor_label(key: str) -> str:
+def _factor_label(key: str, field_labels: Mapping[str, str] | None = None) -> str:
+    if field_labels and key in field_labels:
+        return field_labels[key]
     declaration = _ATTRIBUTION_DECLARATIONS.get(key)
     if declaration is not None:
         return declaration.label_zh

@@ -58,6 +58,17 @@ Evidence status: `ok`; errors: `0`; warnings: `0`.
 | environment_fit comparison | `reports/environment-fit-comparison-baoma-v1-fixed-sample-2023-2024-maxhold800__vs__baoma-v1-fixed-sample-2015-2024-maxhold800/environment_fit_comparison.json` |
 | factor stability review | `reports/environment-fit-comparison-baoma-v1-fixed-sample-2023-2024-maxhold800__vs__baoma-v1-fixed-sample-2015-2024-maxhold800/baoma_2y_vs_10y_factor_stability.json` |
 
+### Market Stage Addendum
+
+市场阶段归因已作为专用报告接入，不混入默认 environment_fit 主线。
+
+| artifact | path |
+|---|---|
+| market stage doc | `docs/baoma-v1-market-stage-attribution.md` |
+| 2015-2024 market stage fit | `reports/baoma-v1-fixed-sample-2015-2024-maxhold800/market_stage_environment_fit_review/environment_fit.enriched.json` |
+| 2023-2024 market stage fit | `reports/baoma-v1-fixed-sample-2023-2024-maxhold800/market_stage_environment_fit_review/environment_fit.enriched.json` |
+| market stage comparison | `reports/environment-fit-comparison-baoma-v1-market-stage-2023-2024-maxhold800__vs__2015-2024-maxhold800/environment_fit_comparison.json` |
+
 ## Read Order
 
 1. 先读 `reports/run-catalog/run_catalog.json`，确认目标 run 存在。
@@ -66,26 +77,23 @@ Evidence status: `ok`; errors: `0`; warnings: `0`.
 4. 复盘环境归因时，优先读 `review_brief.environment_fit.json`。
 5. 需要证据展开时，再读 `review_findings.environment_fit.json` 和 `review_packet.environment_fit.json`。
 6. 比较两年 vs 十年时，先读 `baoma_2y_vs_10y_factor_stability.json`，再读 `environment_fit_comparison.json`。
+7. 查看市场阶段归因时，读 `docs/baoma-v1-market-stage-attribution.md`，再进入对应的 `market_stage_environment_fit_review`。
 
 ## Boundaries
 
 - 标准入口不改变策略参数。
 - 标准入口不重新回测。
-- 标准入口不新增市场阶段归因。
+- 市场阶段归因是专用 addendum，不进入默认 environment_fit 主线。
 - 当前 `review_packet/review_findings/review_brief` 使用 `focus=environment_fit`，
   只服务当前环境适配主线。
 - `reports/` 是本地输出目录，通常被 Git ignore；版本化记录只保存路径、schema 和状态。
 
 ## Next Allowed Actions
 
-1. **最推荐：市场阶段归因接入。**
-   方向：行情阶段验证。
-   目的：在标准入口已补齐后，把入场和出场所在市场阶段加入归因，验证稳定偏强因子是否跨行情阶段成立。
-
-2. **候选规则草案。**
+1. **最推荐：候选规则草案。**
    方向：实验设计。
-   目的：把 `MA60 > 2ATR`、`near_high_60d`、非银金融弱项整理成待人工确认的实验草案，而不是直接改策略。
+   目的：把 2 年、10 年、市场阶段归因里稳定或有争议的线索整理成待人工确认的实验草案，而不是直接改策略。
 
-3. **性能优化。**
+2. **性能优化。**
    方向：运行效率。
    目的：优化 attribution wide samples 的 per-trade 计算路径，减少后续十年或全 A 归因的等待时间。
