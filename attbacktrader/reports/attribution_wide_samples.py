@@ -38,8 +38,11 @@ DEFAULT_ENVIRONMENT_FIT_PAIR_WHITELIST: tuple[tuple[str, str], ...] = (
     ("entry.market.source_index", "market.hs300.trend_state"),
     ("entry.market.source_index", "market.csi500.trend_state"),
     ("market.hs300.trend_state", "market.csi500.trend_state"),
+    ("market.objective.entry_stage", "entry.market.source_index"),
+    ("market.objective.entry_stage", "market.objective.entry_breadth_ma60_ratio_bucket"),
     ("entry.momentum.return_20d_bucket", "entry.liquidity.amount_5d_vs_20d_bucket"),
     ("entry.momentum.return_20d_bucket", "market.hs300.trend_state"),
+    ("entry.momentum.return_20d_bucket", "market.objective.entry_stage"),
 )
 
 MA60_ATR_MULTIPLE_FIELD = "entry.price_position.ma60_atr_multiple_bucket"
@@ -87,6 +90,34 @@ STOP_LOSS_REBOUND_5D_FIELD = "trade.path.stop_loss_rebound_5d_bucket"
 MARKET_INDEX_SPECS: tuple[tuple[str, str, str], ...] = (
     ("hs300", "000300.SH", "沪深300"),
     ("csi500", "000905.SH", "中证500"),
+)
+OBJECTIVE_PRIMARY_INDEX_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("all_share", "000985.CSI", "中证全指"),
+    *MARKET_INDEX_SPECS,
+)
+OBJECTIVE_ENTRY_STAGE_FIELD = "market.objective.entry_stage"
+OBJECTIVE_EXIT_STAGE_FIELD = "market.objective.exit_stage"
+OBJECTIVE_ENTRY_TO_EXIT_STAGE_FIELD = "market.objective.entry_to_exit_stage"
+OBJECTIVE_ENTRY_BREADTH_FIELD = "market.objective.entry_breadth_ma60_ratio_bucket"
+OBJECTIVE_EXIT_BREADTH_FIELD = "market.objective.exit_breadth_ma60_ratio_bucket"
+OBJECTIVE_ENTRY_DRAWDOWN_FIELD = "market.objective.entry_index_drawdown_250d_bucket"
+OBJECTIVE_EXIT_DRAWDOWN_FIELD = "market.objective.exit_index_drawdown_250d_bucket"
+OBJECTIVE_ENTRY_MA60_SLOPE_FIELD = "market.objective.entry_index_ma60_slope_20d_bucket"
+OBJECTIVE_EXIT_MA60_SLOPE_FIELD = "market.objective.exit_index_ma60_slope_20d_bucket"
+OBJECTIVE_ENTRY_MA250_POSITION_FIELD = "market.objective.entry_index_ma250_position"
+OBJECTIVE_EXIT_MA250_POSITION_FIELD = "market.objective.exit_index_ma250_position"
+OBJECTIVE_MARKET_STAGE_FIELDS: tuple[str, ...] = (
+    OBJECTIVE_ENTRY_STAGE_FIELD,
+    OBJECTIVE_EXIT_STAGE_FIELD,
+    OBJECTIVE_ENTRY_TO_EXIT_STAGE_FIELD,
+    OBJECTIVE_ENTRY_BREADTH_FIELD,
+    OBJECTIVE_EXIT_BREADTH_FIELD,
+    OBJECTIVE_ENTRY_DRAWDOWN_FIELD,
+    OBJECTIVE_EXIT_DRAWDOWN_FIELD,
+    OBJECTIVE_ENTRY_MA60_SLOPE_FIELD,
+    OBJECTIVE_EXIT_MA60_SLOPE_FIELD,
+    OBJECTIVE_ENTRY_MA250_POSITION_FIELD,
+    OBJECTIVE_EXIT_MA250_POSITION_FIELD,
 )
 MARKET_INDEX_FIELDS: tuple[str, ...] = tuple(
     f"market.{key}.{suffix}"
@@ -157,6 +188,7 @@ DERIVED_ONLY_FIELDS = {
     SOURCE_INDEX_FIELD,
     *MARKET_INDEX_FIELDS,
     *MARKET_STAGE_FIELDS,
+    *OBJECTIVE_MARKET_STAGE_FIELDS,
     *MOMENTUM_RELATIVE_FIELDS,
     *POST_TRADE_DIAGNOSTIC_FIELDS,
 }
@@ -182,6 +214,13 @@ MARKET_STAGE_DIAGNOSTIC_PAIRS: tuple[tuple[str, str], ...] = tuple(
         "entry_stage",
         "exit_stage",
         "entry_to_exit_stage",
+    )
+) + tuple(
+    (EXIT_REASON_FIELD, field_key)
+    for field_key in (
+        OBJECTIVE_ENTRY_STAGE_FIELD,
+        OBJECTIVE_EXIT_STAGE_FIELD,
+        OBJECTIVE_ENTRY_TO_EXIT_STAGE_FIELD,
     )
 )
 
@@ -652,6 +691,132 @@ for market_key, _symbol, label in MARKET_INDEX_SPECS:
 
 DERIVED_FIELD_CATALOG.update(
     {
+        OBJECTIVE_ENTRY_STAGE_FIELD: {
+            "field_key": OBJECTIVE_ENTRY_STAGE_FIELD,
+            "label_zh": "客观市场阶段-入场信号日",
+            "value_type": "category",
+            "timing": "entry",
+            "scope": "market_stage",
+            "bucket_rule": "index_ma250_ma60_drawdown_breadth",
+            "default_in_environment_fit": True,
+            "source": "index_snapshot+daily_price_cache",
+            "missing_policy": "missing",
+        },
+        OBJECTIVE_EXIT_STAGE_FIELD: {
+            "field_key": OBJECTIVE_EXIT_STAGE_FIELD,
+            "label_zh": "客观市场阶段-出场日",
+            "value_type": "category",
+            "timing": "exit",
+            "scope": "market_stage",
+            "bucket_rule": "index_ma250_ma60_drawdown_breadth",
+            "default_in_environment_fit": False,
+            "source": "index_snapshot+daily_price_cache+closed_trade",
+            "missing_policy": "missing",
+        },
+        OBJECTIVE_ENTRY_TO_EXIT_STAGE_FIELD: {
+            "field_key": OBJECTIVE_ENTRY_TO_EXIT_STAGE_FIELD,
+            "label_zh": "客观市场阶段-入场到出场迁移",
+            "value_type": "category",
+            "timing": "post_trade",
+            "scope": "market_stage",
+            "bucket_rule": "objective_entry_exit_stage_transition",
+            "default_in_environment_fit": True,
+            "source": "index_snapshot+daily_price_cache+closed_trade",
+            "missing_policy": "missing",
+        },
+        OBJECTIVE_ENTRY_BREADTH_FIELD: {
+            "field_key": OBJECTIVE_ENTRY_BREADTH_FIELD,
+            "label_zh": "入场日全A站上MA60股票占比桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "market_breadth",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache",
+            "missing_policy": "missing",
+        },
+        OBJECTIVE_EXIT_BREADTH_FIELD: {
+            "field_key": OBJECTIVE_EXIT_BREADTH_FIELD,
+            "label_zh": "出场日全A站上MA60股票占比桶",
+            "value_type": "bucket",
+            "timing": "exit",
+            "scope": "market_breadth",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "daily_price_cache+closed_trade",
+            "missing_policy": "missing",
+        },
+        OBJECTIVE_ENTRY_DRAWDOWN_FIELD: {
+            "field_key": OBJECTIVE_ENTRY_DRAWDOWN_FIELD,
+            "label_zh": "入场日基准指数距250日高点回撤桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "market_stage",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "index_snapshot",
+            "missing_policy": "missing",
+        },
+        OBJECTIVE_EXIT_DRAWDOWN_FIELD: {
+            "field_key": OBJECTIVE_EXIT_DRAWDOWN_FIELD,
+            "label_zh": "出场日基准指数距250日高点回撤桶",
+            "value_type": "bucket",
+            "timing": "exit",
+            "scope": "market_stage",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "index_snapshot+closed_trade",
+            "missing_policy": "missing",
+        },
+        OBJECTIVE_ENTRY_MA60_SLOPE_FIELD: {
+            "field_key": OBJECTIVE_ENTRY_MA60_SLOPE_FIELD,
+            "label_zh": "入场日基准指数MA60斜率桶",
+            "value_type": "bucket",
+            "timing": "entry",
+            "scope": "market_stage",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "index_snapshot",
+            "missing_policy": "missing",
+        },
+        OBJECTIVE_EXIT_MA60_SLOPE_FIELD: {
+            "field_key": OBJECTIVE_EXIT_MA60_SLOPE_FIELD,
+            "label_zh": "出场日基准指数MA60斜率桶",
+            "value_type": "bucket",
+            "timing": "exit",
+            "scope": "market_stage",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "index_snapshot+closed_trade",
+            "missing_policy": "missing",
+        },
+        OBJECTIVE_ENTRY_MA250_POSITION_FIELD: {
+            "field_key": OBJECTIVE_ENTRY_MA250_POSITION_FIELD,
+            "label_zh": "入场日基准指数相对MA250位置",
+            "value_type": "category",
+            "timing": "entry",
+            "scope": "market_stage",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "index_snapshot",
+            "missing_policy": "missing",
+        },
+        OBJECTIVE_EXIT_MA250_POSITION_FIELD: {
+            "field_key": OBJECTIVE_EXIT_MA250_POSITION_FIELD,
+            "label_zh": "出场日基准指数相对MA250位置",
+            "value_type": "category",
+            "timing": "exit",
+            "scope": "market_stage",
+            "bucket_rule": "fixed_explain_bucket",
+            "default_in_environment_fit": False,
+            "source": "index_snapshot+closed_trade",
+            "missing_policy": "missing",
+        },
+    }
+)
+
+DERIVED_FIELD_CATALOG.update(
+    {
         MAX_FAVORABLE_ATR_MULTIPLE_FIELD: {
             "field_key": MAX_FAVORABLE_ATR_MULTIPLE_FIELD,
             "label_zh": "退出前最大浮盈ATR倍数桶",
@@ -782,6 +947,7 @@ def build_attribution_wide_samples(
     field_catalog.update(DERIVED_FIELD_CATALOG)
     completed_trades = _completed_trade_rows(trade_attribution, trade_lifecycle=trade_lifecycle)
     price_context = _load_daily_price_context(daily_price_cache_dir, completed_trades)
+    market_breadth_context = _load_market_breadth_context(daily_price_cache_dir)
     industry_context = _load_industry_index_context(snapshot_root, industry_source=industry_source)
     market_context = _load_market_index_context(snapshot_root)
     source_index_by_symbol = _source_index_by_symbol_from_run_plan(run_path, run_plan)
@@ -855,6 +1021,13 @@ def build_attribution_wide_samples(
             signal_date=signal_date,
             exit_date=_as_str(trade.get("exit_date")),
             market_context=market_context,
+        )
+        _add_objective_market_stage_fields(
+            field_values,
+            signal_date=signal_date,
+            exit_date=_as_str(trade.get("exit_date")),
+            market_context=market_context,
+            market_breadth_context=market_breadth_context,
         )
         _add_relative_momentum_fields(
             field_values,
@@ -1030,7 +1203,7 @@ def build_attribution_field_index(
             "字段缺失必须按 missing 处理，不能补成 false、0 或中性桶。",
             "default_in_environment_fit 表示第一版默认进入 environment_fit.enriched 的单因子统计。",
             "environment_fit_pair_whitelist 只声明入场前或入场时可见因子的默认二因子组合，三因子以上不在第一版默认输出。",
-            "timing=post_trade 或 exit 的字段只能用于事后诊断，不能进入 environment_fit 排名。",
+            "timing=post_trade 或 exit 的字段用于事后诊断归因；只有显式 default_in_environment_fit=true 的字段才进入默认 environment_fit 排名。",
         ],
     }
 
@@ -1364,6 +1537,63 @@ def _load_daily_price_context(
     }
 
 
+def _load_market_breadth_context(daily_price_cache_dir: str | Path | None) -> dict[str, Any]:
+    if daily_price_cache_dir is None:
+        return {}
+    root = Path(daily_price_cache_dir)
+    daily_dir = root / "daily" if (root / "daily").exists() else root
+    if not daily_dir.exists():
+        return {}
+
+    frames = []
+    for path in sorted(daily_dir.glob("*.parquet")):
+        frame = pd.read_parquet(path)
+        if "symbol" not in frame.columns and "ts_code" in frame.columns:
+            frame = frame.rename(columns={"ts_code": "symbol"})
+        required = {"symbol", "trade_date", "close"}
+        if not required.issubset(frame.columns):
+            continue
+        frame = frame[["symbol", "trade_date", "close"]]
+        if not frame.empty:
+            frames.append(frame)
+    if not frames:
+        return {"source_path": str(daily_dir)}
+
+    data = pd.concat(frames, ignore_index=True)
+    data["symbol"] = data["symbol"].astype(str)
+    data["trade_date"] = pd.to_datetime(data["trade_date"]).dt.strftime("%Y-%m-%d")
+    data["close"] = pd.to_numeric(data["close"], errors="coerce")
+    data = data.dropna(subset=["symbol", "trade_date", "close"])
+    data = data.drop_duplicates(subset=["symbol", "trade_date"], keep="last")
+    data = data.sort_values(["symbol", "trade_date"]).reset_index(drop=True)
+    grouped = data.groupby("symbol", sort=False)
+    data["ma60"] = grouped["close"].transform(lambda value: value.rolling(60, min_periods=60).mean())
+    valid = data.dropna(subset=["ma60"]).copy()
+    if valid.empty:
+        return {"source_path": str(daily_dir), "by_date": {}}
+
+    valid["above_ma60"] = valid["close"] > valid["ma60"]
+    breadth = (
+        valid.groupby("trade_date", sort=True)
+        .agg(
+            ma60_above_ratio=("above_ma60", "mean"),
+            symbol_count=("symbol", "nunique"),
+            ma60_above_count=("above_ma60", "sum"),
+        )
+        .reset_index()
+    )
+    by_date = {
+        str(row.trade_date): {
+            "trade_date": str(row.trade_date),
+            "ma60_above_ratio": float(row.ma60_above_ratio),
+            "symbol_count": int(row.symbol_count),
+            "ma60_above_count": int(row.ma60_above_count),
+        }
+        for row in breadth.itertuples(index=False)
+    }
+    return {"source_path": str(daily_dir), "by_date": by_date}
+
+
 def _load_industry_index_context(
     snapshot_root: str | Path | None,
     *,
@@ -1445,9 +1675,9 @@ def _load_market_index_context(snapshot_root: str | Path | None) -> dict[str, An
     if not index_dir.exists():
         return {}
 
-    wanted = {symbol for _key, symbol, _label in MARKET_INDEX_SPECS}
+    wanted = {symbol for _key, symbol, _label in OBJECTIVE_PRIMARY_INDEX_SPECS}
     frames = []
-    for _key, symbol, _label in MARKET_INDEX_SPECS:
+    for _key, symbol, _label in OBJECTIVE_PRIMARY_INDEX_SPECS:
         safe_symbol = symbol.replace(".", "_")
         for path in sorted(index_dir.glob(f"{safe_symbol}_*.parquet")):
             frame = pd.read_parquet(path)
@@ -1479,6 +1709,11 @@ def _load_market_index_context(snapshot_root: str | Path | None) -> dict[str, An
     data["return_vol_60d"] = grouped["return_1d"].transform(lambda value: value.rolling(60, min_periods=60).std())
     data["ma20"] = grouped["close"].transform(lambda value: value.rolling(20, min_periods=20).mean())
     data["ma60"] = grouped["close"].transform(lambda value: value.rolling(60, min_periods=60).mean())
+    data["ma250"] = grouped["close"].transform(lambda value: value.rolling(250, min_periods=250).mean())
+    data["ma60_20d_ago"] = grouped["ma60"].shift(20)
+    data["ma60_slope_20d"] = data["ma60"] / data["ma60_20d_ago"] - 1.0
+    data["rolling_high_250d"] = grouped["high"].transform(lambda value: value.rolling(250, min_periods=250).max())
+    data["drawdown_250d"] = data["close"] / data["rolling_high_250d"] - 1.0
     data["trend_state"] = [_daily_trend_state(row) for row in data[["close", "ma20", "ma60"]].to_dict("records")]
 
     weekly = _weekly_feature_frame(data)
@@ -2185,6 +2420,265 @@ def _add_market_stage_fields(
         )
 
 
+def _add_objective_market_stage_fields(
+    field_values: dict[str, dict[str, Any]],
+    *,
+    signal_date: str,
+    exit_date: str,
+    market_context: Mapping[str, Any],
+    market_breadth_context: Mapping[str, Any],
+) -> None:
+    entry = _objective_market_stage_snapshot(
+        market_context=market_context,
+        market_breadth_context=market_breadth_context,
+        trade_date=signal_date,
+    )
+    exit_ = _objective_market_stage_snapshot(
+        market_context=market_context,
+        market_breadth_context=market_breadth_context,
+        trade_date=exit_date,
+    )
+
+    field_values[OBJECTIVE_ENTRY_STAGE_FIELD] = _derived_payload(
+        raw=entry["raw"],
+        bucket=entry["stage"],
+        asof_date=entry["asof_date"] or signal_date,
+        reference_count=entry["reference_count"],
+        exception_codes=entry["exception_codes"],
+    )
+    field_values[OBJECTIVE_EXIT_STAGE_FIELD] = _derived_payload(
+        raw=exit_["raw"],
+        bucket=exit_["stage"],
+        asof_date=exit_["asof_date"] or exit_date,
+        reference_count=exit_["reference_count"],
+        exception_codes=exit_["exception_codes"],
+    )
+
+    entry_stage = _as_str(entry["stage"])
+    exit_stage = _as_str(exit_["stage"])
+    transition = f"{entry_stage}_to_{exit_stage}" if entry_stage and exit_stage else None
+    transition_exceptions = []
+    if not entry_stage:
+        transition_exceptions.extend(entry["exception_codes"] or ["objective_market_entry_stage_missing"])
+    if not exit_stage:
+        transition_exceptions.extend(exit_["exception_codes"] or ["objective_market_exit_stage_missing"])
+    field_values[OBJECTIVE_ENTRY_TO_EXIT_STAGE_FIELD] = _derived_payload(
+        raw={"entry_stage": entry_stage, "exit_stage": exit_stage} if transition else None,
+        bucket=transition,
+        asof_date=exit_["asof_date"] or exit_date,
+        reference_count=None,
+        exception_codes=sorted(set(transition_exceptions)),
+    )
+
+    _add_objective_component_fields(field_values, prefix="entry", snapshot=entry, asof_date=signal_date)
+    _add_objective_component_fields(field_values, prefix="exit", snapshot=exit_, asof_date=exit_date)
+
+
+def _add_objective_component_fields(
+    field_values: dict[str, dict[str, Any]],
+    *,
+    prefix: str,
+    snapshot: Mapping[str, Any],
+    asof_date: str,
+) -> None:
+    if prefix == "entry":
+        breadth_field = OBJECTIVE_ENTRY_BREADTH_FIELD
+        drawdown_field = OBJECTIVE_ENTRY_DRAWDOWN_FIELD
+        slope_field = OBJECTIVE_ENTRY_MA60_SLOPE_FIELD
+        ma250_field = OBJECTIVE_ENTRY_MA250_POSITION_FIELD
+    else:
+        breadth_field = OBJECTIVE_EXIT_BREADTH_FIELD
+        drawdown_field = OBJECTIVE_EXIT_DRAWDOWN_FIELD
+        slope_field = OBJECTIVE_EXIT_MA60_SLOPE_FIELD
+        ma250_field = OBJECTIVE_EXIT_MA250_POSITION_FIELD
+
+    exceptions = _exception_codes(snapshot.get("exception_codes"))
+    component_asof = _as_str(snapshot.get("asof_date")) or asof_date
+    breadth_ratio = _optional_float(snapshot.get("breadth_ratio"))
+    drawdown = _optional_float(snapshot.get("index_drawdown_250d"))
+    slope = _optional_float(snapshot.get("index_ma60_slope_20d"))
+    ma250_position = _as_str(snapshot.get("index_ma250_position")) or None
+
+    field_values[breadth_field] = _derived_payload(
+        raw=breadth_ratio,
+        bucket=_breadth_ratio_bucket(breadth_ratio),
+        asof_date=component_asof,
+        reference_count=_optional_int(snapshot.get("breadth_reference_count")),
+        exception_codes=[] if breadth_ratio is not None else ["market_breadth_missing"],
+    )
+    field_values[drawdown_field] = _derived_payload(
+        raw=drawdown,
+        bucket=_index_drawdown_bucket(drawdown),
+        asof_date=component_asof,
+        reference_count=None,
+        exception_codes=[] if drawdown is not None else exceptions or ["objective_market_index_missing"],
+    )
+    field_values[slope_field] = _derived_payload(
+        raw=slope,
+        bucket=_ma60_slope_bucket(slope),
+        asof_date=component_asof,
+        reference_count=None,
+        exception_codes=[] if slope is not None else exceptions or ["objective_market_index_missing"],
+    )
+    field_values[ma250_field] = _derived_payload(
+        raw=ma250_position,
+        bucket=ma250_position,
+        asof_date=component_asof,
+        reference_count=None,
+        exception_codes=[] if ma250_position else exceptions or ["objective_market_index_missing"],
+    )
+
+
+def _objective_market_stage_snapshot(
+    *,
+    market_context: Mapping[str, Any],
+    market_breadth_context: Mapping[str, Any],
+    trade_date: str,
+) -> dict[str, Any]:
+    by_symbol = _as_mapping(market_context.get("by_symbol"))
+    breadth_row = _latest_breadth_row(market_breadth_context, trade_date=trade_date)
+    breadth_ratio = _optional_float(_as_mapping(breadth_row).get("ma60_above_ratio"))
+    breadth_reference_count = _optional_int(_as_mapping(breadth_row).get("symbol_count"))
+    breadth_asof = _as_str(_as_mapping(breadth_row).get("trade_date"))
+
+    index_source = None
+    index_components: list[dict[str, Any]] = []
+    all_share_row = _latest_context_row(by_symbol, symbol="000985.CSI", trade_date=trade_date, strict_before=False)
+    all_share_component = _objective_index_component("all_share", "000985.CSI", "中证全指", all_share_row)
+    if all_share_component.get("complete"):
+        index_source = "all_share"
+        index_components = [all_share_component]
+    else:
+        fallback_components = [
+            _objective_index_component(key, symbol, label, _latest_context_row(
+                by_symbol,
+                symbol=symbol,
+                trade_date=trade_date,
+                strict_before=False,
+            ))
+            for key, symbol, label in MARKET_INDEX_SPECS
+        ]
+        if all(component.get("complete") for component in fallback_components):
+            index_source = "hs300_csi500"
+            index_components = fallback_components
+
+    exceptions: list[str] = []
+    if not index_components:
+        exceptions.append("objective_market_index_missing")
+    if breadth_ratio is None:
+        exceptions.append("market_breadth_missing")
+
+    stage = None
+    if index_components and breadth_ratio is not None:
+        states = {_as_str(component.get("state")) for component in index_components}
+        if states == {"bullish"} and breadth_ratio > 0.55:
+            stage = "bullish"
+        elif states == {"bearish"} and breadth_ratio < 0.45:
+            stage = "bearish"
+        else:
+            stage = "mixed"
+
+    drawdowns = [_optional_float(component.get("drawdown_250d")) for component in index_components]
+    slopes = [_optional_float(component.get("ma60_slope_20d")) for component in index_components]
+    positions = [_as_str(component.get("ma250_position")) for component in index_components]
+    drawdown = _mean_float([value for value in drawdowns if value is not None])
+    slope = _mean_float([value for value in slopes if value is not None])
+    ma250_position = _combine_ma250_positions([value for value in positions if value])
+    asof_dates = [_as_str(component.get("asof_date")) for component in index_components if _as_str(component.get("asof_date"))]
+    asof_date = max([*asof_dates, breadth_asof] if breadth_asof else asof_dates, default=trade_date)
+
+    return {
+        "stage": stage,
+        "asof_date": asof_date,
+        "reference_count": breadth_reference_count,
+        "breadth_ratio": breadth_ratio,
+        "breadth_reference_count": breadth_reference_count,
+        "index_drawdown_250d": drawdown,
+        "index_ma60_slope_20d": slope,
+        "index_ma250_position": ma250_position,
+        "exception_codes": exceptions,
+        "raw": {
+            "stage": stage,
+            "index_source": index_source,
+            "index_components": index_components,
+            "breadth_ma60_above_ratio": breadth_ratio,
+            "breadth_symbol_count": breadth_reference_count,
+            "rules": {
+                "bullish": "all selected indexes close>MA250, MA60 slope>0, drawdown>-15%, breadth>55%",
+                "bearish": "all selected indexes close<MA250, MA60 slope<0, drawdown<-20%, breadth<45%",
+                "mixed": "otherwise",
+            },
+        } if stage else None,
+    }
+
+
+def _objective_index_component(
+    key: str,
+    symbol: str,
+    label: str,
+    row: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    row_map = _as_mapping(row)
+    close = _optional_float(row_map.get("close"))
+    ma250 = _optional_float(row_map.get("ma250"))
+    ma60_slope = _optional_float(row_map.get("ma60_slope_20d"))
+    drawdown = _optional_float(row_map.get("drawdown_250d"))
+    asof_date = _as_str(row_map.get("trade_date"))
+    complete = close is not None and ma250 is not None and ma60_slope is not None and drawdown is not None
+    ma250_position = None
+    state = None
+    if close is not None and ma250 is not None:
+        ma250_position = "above_ma250" if close > ma250 else "below_ma250"
+    if complete:
+        if close > ma250 and ma60_slope > 0 and drawdown > -0.15:
+            state = "bullish"
+        elif close < ma250 and ma60_slope < 0 and drawdown < -0.20:
+            state = "bearish"
+        else:
+            state = "mixed"
+    return {
+        "key": key,
+        "symbol": symbol,
+        "label_zh": label,
+        "asof_date": asof_date,
+        "close": close,
+        "ma250": ma250,
+        "ma60_slope_20d": ma60_slope,
+        "drawdown_250d": drawdown,
+        "ma250_position": ma250_position,
+        "state": state,
+        "complete": complete,
+    }
+
+
+def _latest_breadth_row(market_breadth_context: Mapping[str, Any], *, trade_date: str) -> Mapping[str, Any] | None:
+    by_date = _as_mapping(market_breadth_context.get("by_date"))
+    if not by_date or not trade_date:
+        return None
+    candidates = [str(date_key) for date_key in by_date if str(date_key) <= trade_date]
+    if not candidates:
+        return None
+    return _as_mapping(by_date[max(candidates)])
+
+
+def _mean_float(values: Sequence[float]) -> float | None:
+    present = [value for value in values if value is not None and math.isfinite(value)]
+    if not present:
+        return None
+    return sum(present) / len(present)
+
+
+def _combine_ma250_positions(values: Sequence[str]) -> str | None:
+    if not values:
+        return None
+    unique = set(values)
+    if unique == {"above_ma250"}:
+        return "above_ma250"
+    if unique == {"below_ma250"}:
+        return "below_ma250"
+    return "mixed_ma250"
+
+
 def _add_relative_momentum_fields(
     field_values: dict[str, dict[str, Any]],
     *,
@@ -2654,6 +3148,34 @@ def _drawdown_bucket(value: Any) -> str | None:
     if number < 0.40:
         return "20_40pct"
     return "gte_40pct"
+
+
+def _index_drawdown_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    if number > -0.05:
+        return "drawdown_0_5pct"
+    if number > -0.15:
+        return "drawdown_5_15pct"
+    if number > -0.20:
+        return "drawdown_15_20pct"
+    return "drawdown_gt_20pct"
+
+
+def _breadth_ratio_bucket(value: Any) -> str | None:
+    number = _optional_float(value)
+    if number is None:
+        return None
+    if number < 0.35:
+        return "lt_35pct"
+    if number < 0.45:
+        return "35_45pct"
+    if number < 0.55:
+        return "45_55pct"
+    if number < 0.65:
+        return "55_65pct"
+    return "gte_65pct"
 
 
 def _first_profit_days_bucket(value: Any) -> str | None:

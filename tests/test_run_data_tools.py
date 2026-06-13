@@ -439,6 +439,38 @@ def test_attribution_wide_samples_derives_path_and_signal_strength_from_daily_ca
     ]
 
 
+def test_attribution_wide_samples_adds_objective_market_stage_fields(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    reference_path = _reference_snapshot(tmp_path)
+    daily_cache, snapshot_root = _objective_bull_market_context(tmp_path)
+
+    wide_samples = build_attribution_wide_samples(
+        run_dir,
+        reference_snapshot=reference_path,
+        daily_price_cache_dir=daily_cache,
+        snapshot_root=snapshot_root,
+    )
+
+    fields = wide_samples["samples"][0]["field_values"]
+    assert fields["market.objective.entry_stage"]["bucket"] == "bullish"
+    assert fields["market.objective.exit_stage"]["bucket"] == "bullish"
+    assert fields["market.objective.entry_to_exit_stage"]["bucket"] == "bullish_to_bullish"
+    assert fields["market.objective.entry_breadth_ma60_ratio_bucket"]["bucket"] == "gte_65pct"
+    assert fields["market.objective.entry_index_drawdown_250d_bucket"]["bucket"] == "drawdown_0_5pct"
+    assert fields["market.objective.entry_index_ma60_slope_20d_bucket"]["bucket"] is not None
+    assert fields["market.objective.entry_index_ma250_position"]["bucket"] == "above_ma250"
+    assert fields["market.objective.entry_stage"]["raw"]["index_source"] == "hs300_csi500"
+    assert fields["market.objective.entry_stage"]["raw"]["breadth_symbol_count"] == 3
+    assert "market.objective.entry_stage" in wide_samples["environment_fit_default_fields"]
+    assert "market.objective.entry_to_exit_stage" in wide_samples["environment_fit_default_fields"]
+    assert ["entry.momentum.return_20d_bucket", "market.objective.entry_stage"] in wide_samples[
+        "environment_fit_pair_whitelist"
+    ]
+    assert ["trade.exit.reason", "market.objective.entry_to_exit_stage"] in wide_samples[
+        "outcome_diagnostic_pair_whitelist"
+    ]
+
+
 def test_run_data_clis_write_outputs(tmp_path: Path, capsys) -> None:
     run_dir = _run_dir(tmp_path)
     output_dir = tmp_path / "cli-out"
@@ -1205,6 +1237,58 @@ def _industry_index_cache(root: Path) -> Path:
             ),
         )
     return snapshot_root
+
+
+def _objective_bull_market_context(root: Path) -> tuple[Path, Path]:
+    daily_dir = root / "objective-daily-cache" / "daily"
+    daily_dir.mkdir(parents=True)
+    start_date = pd.Timestamp("2022-10-03").date()
+    end_date = pd.Timestamp("2024-01-12").date()
+    trade_dates = list(pd.bdate_range(start_date, end_date))
+
+    rows = []
+    for symbol_index, symbol in enumerate(("000001.SZ", "000002.SZ", "000003.SZ")):
+        for index, trade_date in enumerate(trade_dates):
+            close = 8.0 + symbol_index + index * (0.035 + symbol_index * 0.002)
+            rows.append(
+                {
+                    "ts_code": symbol,
+                    "trade_date": trade_date.strftime("%Y%m%d"),
+                    "open": close * 0.998,
+                    "high": close * 1.002,
+                    "low": close * 0.996,
+                    "close": close,
+                }
+            )
+    pd.DataFrame(rows).to_parquet(daily_dir / "daily.parquet", index=False)
+
+    snapshot_root = root / "objective-snapshots"
+    for symbol_index, symbol in enumerate(("000300.SH", "000905.SH")):
+        bars = []
+        for index, trade_date in enumerate(trade_dates):
+            close = 3000.0 + symbol_index * 400.0 + index * (5.0 + symbol_index)
+            bars.append(
+                IndexBar(
+                    symbol=symbol,
+                    trade_date=trade_date.date(),
+                    open=close * 0.999,
+                    high=close * 1.002,
+                    low=close * 0.997,
+                    close=close,
+                    volume=2000000.0 + index,
+                    amount=3000000.0 + index,
+                )
+            )
+        write_index_bars_parquet(
+            bars,
+            index_bars_snapshot_path(
+                snapshot_root,
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+            ),
+        )
+    return daily_dir.parent, snapshot_root
 
 
 def _write_json(path: Path, payload) -> None:
