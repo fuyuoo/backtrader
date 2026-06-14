@@ -196,16 +196,69 @@ class BrokerConfig(FrozenModel):
     slippage: SlippageConfig
 
 
+class SecondScaleOutConfirmationConfig(FrozenModel):
+    enabled: bool = False
+    mode: Literal["boll_up_distance", "kdj_cci", "kdj_cci_boll_up_distance"] = "boll_up_distance"
+    min_boll_up_distance: float | None = None
+    min_kdj_j: float | None = None
+    min_cci14: float | None = None
+
+    @model_validator(mode="after")
+    def validate_required_thresholds(self) -> "SecondScaleOutConfirmationConfig":
+        if not self.enabled:
+            return self
+
+        if self.mode in {"boll_up_distance", "kdj_cci_boll_up_distance"} and self.min_boll_up_distance is None:
+            raise ValueError(
+                "execution.baoma.second_scale_out_confirmation.min_boll_up_distance is required "
+                f"when mode={self.mode!r}"
+            )
+        if self.mode in {"kdj_cci", "kdj_cci_boll_up_distance"} and self.min_kdj_j is None:
+            raise ValueError(
+                "execution.baoma.second_scale_out_confirmation.min_kdj_j is required "
+                f"when mode={self.mode!r}"
+            )
+        if self.mode in {"kdj_cci", "kdj_cci_boll_up_distance"} and self.min_cci14 is None:
+            raise ValueError(
+                "execution.baoma.second_scale_out_confirmation.min_cci14 is required "
+                f"when mode={self.mode!r}"
+            )
+        return self
+
+
 class BaomaExecutionConfig(FrozenModel):
     buy_slice_fraction: float = Field(default=0.33, gt=0, le=1)
+    scale_out_mode: Literal["fixed_percent", "atr_multiple"] = "fixed_percent"
     first_scale_out_return: float = Field(default=0.05, gt=0)
     second_scale_out_return: float = Field(default=0.15, gt=0)
+    first_scale_out_atr_multiple: float | None = Field(default=None, gt=0)
+    second_scale_out_atr_multiple: float | None = Field(default=None, gt=0)
+    second_scale_out_confirmation: SecondScaleOutConfirmationConfig = Field(
+        default_factory=SecondScaleOutConfirmationConfig
+    )
     force_exit_at_end: bool = False
 
     @model_validator(mode="after")
     def validate_scale_out_thresholds(self) -> "BaomaExecutionConfig":
-        if self.second_scale_out_return <= self.first_scale_out_return:
-            raise ValueError("execution.baoma.second_scale_out_return must be greater than first_scale_out_return")
+        if self.scale_out_mode == "fixed_percent":
+            if self.second_scale_out_confirmation.enabled:
+                raise ValueError(
+                    "execution.baoma.second_scale_out_confirmation is only supported "
+                    "when scale_out_mode='atr_multiple'"
+                )
+            if self.second_scale_out_return <= self.first_scale_out_return:
+                raise ValueError("execution.baoma.second_scale_out_return must be greater than first_scale_out_return")
+            return self
+
+        if self.first_scale_out_atr_multiple is None or self.second_scale_out_atr_multiple is None:
+            raise ValueError(
+                "execution.baoma first_scale_out_atr_multiple and second_scale_out_atr_multiple are required "
+                "when scale_out_mode='atr_multiple'"
+            )
+        if self.second_scale_out_atr_multiple <= self.first_scale_out_atr_multiple:
+            raise ValueError(
+                "execution.baoma.second_scale_out_atr_multiple must be greater than first_scale_out_atr_multiple"
+            )
         return self
 
 

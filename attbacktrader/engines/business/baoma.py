@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date
 
 from attbacktrader.data import DailyBar
@@ -31,13 +31,48 @@ from attbacktrader.strategies.methods import BaomaAddOn, BaomaEntry, BaomaMa25Pr
 
 
 @dataclass(frozen=True)
+class SecondScaleOutConfirmationRule:
+    enabled: bool = False
+    mode: str = "boll_up_distance"
+    min_boll_up_distance: float | None = None
+    min_kdj_j: float | None = None
+    min_cci14: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"boll_up_distance", "kdj_cci", "kdj_cci_boll_up_distance"}:
+            raise ValueError("second_scale_out_confirmation.mode is unsupported")
+        if not self.enabled:
+            return
+        if self.requires_boll_up_distance and self.min_boll_up_distance is None:
+            raise ValueError("min_boll_up_distance is required for second scale-out confirmation")
+        if self.requires_kdj_cci and self.min_kdj_j is None:
+            raise ValueError("min_kdj_j is required for second scale-out confirmation")
+        if self.requires_kdj_cci and self.min_cci14 is None:
+            raise ValueError("min_cci14 is required for second scale-out confirmation")
+
+    @property
+    def requires_boll_up_distance(self) -> bool:
+        return self.mode in {"boll_up_distance", "kdj_cci_boll_up_distance"}
+
+    @property
+    def requires_kdj_cci(self) -> bool:
+        return self.mode in {"kdj_cci", "kdj_cci_boll_up_distance"}
+
+
+@dataclass(frozen=True)
 class BaomaBusinessRunConfig:
     total_asset_value: float = 10_000_000_000.0
     max_holding_count: int = 200
     buy_slice_fraction: float = 0.33
     board_lot_size: int = 100
+    scale_out_mode: str = "fixed_percent"
     first_scale_out_return: float = 0.05
     second_scale_out_return: float = 0.15
+    first_scale_out_atr_multiple: float | None = None
+    second_scale_out_atr_multiple: float | None = None
+    second_scale_out_confirmation: SecondScaleOutConfirmationRule = field(
+        default_factory=SecondScaleOutConfirmationRule
+    )
     force_exit_at_end: bool = False
 
     def __post_init__(self) -> None:
@@ -49,10 +84,22 @@ class BaomaBusinessRunConfig:
             raise ValueError("buy_slice_fraction must be in (0, 1]")
         if self.board_lot_size <= 0:
             raise ValueError("board_lot_size must be positive")
-        if self.first_scale_out_return <= 0:
-            raise ValueError("first_scale_out_return must be positive")
-        if self.second_scale_out_return <= self.first_scale_out_return:
-            raise ValueError("second_scale_out_return must be greater than first_scale_out_return")
+        if self.scale_out_mode not in {"fixed_percent", "atr_multiple"}:
+            raise ValueError("scale_out_mode must be fixed_percent or atr_multiple")
+        if self.scale_out_mode == "fixed_percent":
+            if self.second_scale_out_confirmation.enabled:
+                raise ValueError("second scale-out confirmation requires atr_multiple scale_out_mode")
+            if self.first_scale_out_return <= 0:
+                raise ValueError("first_scale_out_return must be positive")
+            if self.second_scale_out_return <= self.first_scale_out_return:
+                raise ValueError("second_scale_out_return must be greater than first_scale_out_return")
+        else:
+            if self.first_scale_out_atr_multiple is None or self.second_scale_out_atr_multiple is None:
+                raise ValueError("ATR scale-out requires first and second ATR multiples")
+            if self.first_scale_out_atr_multiple <= 0:
+                raise ValueError("first_scale_out_atr_multiple must be positive")
+            if self.second_scale_out_atr_multiple <= self.first_scale_out_atr_multiple:
+                raise ValueError("second_scale_out_atr_multiple must be greater than first_scale_out_atr_multiple")
 
     @property
     def per_symbol_max_value(self) -> float:
@@ -77,6 +124,30 @@ class BaomaBusinessRunResult:
     closed_trades: tuple[LifecycleClosedTrade, ...]
     open_positions: tuple[LifecyclePositionSnapshot, ...]
     end_run_results: tuple[LifecycleEndRunResult, ...] = ()
+
+
+@dataclass(frozen=True)
+class _ScaleOutEntryContext:
+    entry_signal_date: date
+    entry_signal_day_atr14: float | None
+    missing_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class _ScaleOutCheck:
+    stage: ScaleOutStage | None = None
+    atr_multiple: float | None = None
+    trigger_price: float | None = None
+    missing_reason: str | None = None
+    confirmation_required: bool = False
+    confirmation_passed: bool | None = None
+    confirmation_mode: str | None = None
+    confirmation_block_reason: str | None = None
+    kdj_j: float | None = None
+    cci14: float | None = None
+    boll_up20_2: float | None = None
+    boll_up_distance_pct: float | None = None
+    confirmation_checks: Mapping[str, bool | None] = field(default_factory=dict)
 
 
 def run_baoma_v1_business(
@@ -105,6 +176,7 @@ def run_baoma_v1_business(
         add_on_method,
         stop_loss_method,
         profit_exit_method,
+        config=config,
     )
     symbols = tuple(bars_by_symbol.keys())
     rows_by_key = _rows_by_key(
@@ -124,6 +196,8 @@ def run_baoma_v1_business(
     lifecycle_snapshots: list[LifecyclePositionSnapshot] = []
     closed_trades: list[LifecycleClosedTrade] = []
     end_run_results: list[LifecycleEndRunResult] = []
+    scale_out_context_by_symbol: dict[str, _ScaleOutEntryContext] = {}
+    scale_out_missing_recorded_by_symbol: dict[str, bool] = {}
 
     for trade_date in dates:
         for symbol in symbols:
@@ -199,6 +273,9 @@ def run_baoma_v1_business(
                     reason_code=entry_intent.reason_code,
                 )
                 lifecycle_events.append(event)
+                if event.accepted:
+                    scale_out_context_by_symbol[symbol] = _scale_out_entry_context(row)
+                    scale_out_missing_recorded_by_symbol[symbol] = False
                 intents.append(
                     _intent_with_sizing(
                         entry_intent,
@@ -283,13 +360,54 @@ def run_baoma_v1_business(
                 lifecycle_snapshots.append(lifecycle.snapshot(trade_date=trade_date))
                 continue
 
-            scale_out_stage = _scale_out_stage(lifecycle, row=row, config=config)
-            if scale_out_stage is not None:
+            scale_out_check = _scale_out_check(
+                lifecycle,
+                row=row,
+                config=config,
+                entry_context=scale_out_context_by_symbol.get(symbol),
+            )
+            if scale_out_check.missing_reason and not scale_out_missing_recorded_by_symbol.get(symbol, False):
+                intents.append(
+                    _scale_out_missing_intent(
+                        symbol=symbol,
+                        trade_date=trade_date,
+                        reason_code=scale_out_check.missing_reason,
+                        entry_context=scale_out_context_by_symbol.get(symbol),
+                    )
+                )
+                scale_out_missing_recorded_by_symbol[symbol] = True
+            if scale_out_check.confirmation_required and scale_out_check.confirmation_passed is False:
+                intents.append(
+                    _scale_out_confirmation_blocked_intent(
+                        symbol=symbol,
+                        trade_date=trade_date,
+                        check=scale_out_check,
+                        entry_context=scale_out_context_by_symbol.get(symbol),
+                    )
+                )
+            if scale_out_check.stage is not None:
                 event = lifecycle.scale_out(
                     trade_date=trade_date,
                     price=float(row.bar.close),
-                    stage=scale_out_stage,
-                    reason_code=_scale_out_reason_code(scale_out_stage),
+                    stage=scale_out_check.stage,
+                    reason_code=_scale_out_reason_code(scale_out_check.stage, config=config),
+                    scale_out_mode=config.scale_out_mode,
+                    entry_signal_date=scale_out_context_by_symbol.get(symbol).entry_signal_date
+                    if scale_out_context_by_symbol.get(symbol) is not None
+                    else None,
+                    entry_signal_day_atr14=scale_out_context_by_symbol.get(symbol).entry_signal_day_atr14
+                    if scale_out_context_by_symbol.get(symbol) is not None
+                    else None,
+                    atr_multiple=scale_out_check.atr_multiple,
+                    scale_out_trigger_price=scale_out_check.trigger_price,
+                    confirmation_required=scale_out_check.confirmation_required,
+                    confirmation_passed=scale_out_check.confirmation_passed,
+                    confirmation_mode=scale_out_check.confirmation_mode,
+                    confirmation_block_reason=scale_out_check.confirmation_block_reason,
+                    kdj_j=scale_out_check.kdj_j,
+                    cci14=scale_out_check.cci14,
+                    boll_up20_2=scale_out_check.boll_up20_2,
+                    boll_up_distance_pct=scale_out_check.boll_up_distance_pct,
                 )
                 lifecycle_events.append(event)
                 lifecycle.advance_day(trade_date=trade_date, close_price=float(row.bar.close))
@@ -388,10 +506,18 @@ def run_baoma_v1_business(
     )
 
 
-def _required_indicators(*methods: object) -> tuple[IndicatorRequirement, ...]:
+def _required_indicators(*methods: object, config: BaomaBusinessRunConfig) -> tuple[IndicatorRequirement, ...]:
     requirements: set[IndicatorRequirement] = set()
     for method in methods:
         requirements.update(getattr(method, "required_indicators"))
+    if config.scale_out_mode == "atr_multiple":
+        requirements.add(IndicatorRequirement("atr14", "D"))
+        confirmation = config.second_scale_out_confirmation
+        if confirmation.enabled and confirmation.requires_kdj_cci:
+            requirements.add(IndicatorRequirement("kdj", "D"))
+            requirements.add(IndicatorRequirement("cci14", "D"))
+        if confirmation.enabled and confirmation.requires_boll_up_distance:
+            requirements.add(IndicatorRequirement("boll_up20_2", "D"))
     return tuple(sorted(requirements, key=lambda item: (item.timeframe, item.name)))
 
 
@@ -482,33 +608,209 @@ def _previous_ma_break(intent: TradeIntent) -> bool:
     return bool(checks.get("previous_price_below_ma"))
 
 
-def _scale_out_stage(
+def _scale_out_check(
     lifecycle: ExecutionLifecycleComponent,
     *,
     row: MarketFeatureRow,
     config: BaomaBusinessRunConfig,
-) -> ScaleOutStage | None:
+    entry_context: _ScaleOutEntryContext | None,
+) -> _ScaleOutCheck:
     if lifecycle.total_quantity <= 0 or lifecycle.sellable_quantity(row.trade_date) <= 0:
-        return None
+        return _ScaleOutCheck()
+    if config.scale_out_mode == "atr_multiple":
+        return _atr_scale_out_check(
+            lifecycle,
+            row=row,
+            config=config,
+            entry_context=entry_context,
+        )
+    return _fixed_percent_scale_out_check(lifecycle, row=row, config=config)
+
+
+def _fixed_percent_scale_out_check(
+    lifecycle: ExecutionLifecycleComponent,
+    *,
+    row: MarketFeatureRow,
+    config: BaomaBusinessRunConfig,
+) -> _ScaleOutCheck:
     if lifecycle.cost_recovered:
-        return _next_incomplete_scale_out_stage(lifecycle)
+        return _ScaleOutCheck(stage=_next_incomplete_scale_out_stage(lifecycle))
 
     cost_basis = lifecycle.adjusted_remaining_cost_basis
     if cost_basis is None or cost_basis <= 0:
-        return None
+        return _ScaleOutCheck()
 
     unrealized_return = float(row.bar.close) / cost_basis - 1.0
     if (
         not lifecycle.is_scale_out_stage_completed(ScaleOutStage.FIVE_PERCENT)
         and unrealized_return > config.first_scale_out_return
     ):
-        return ScaleOutStage.FIVE_PERCENT
+        return _ScaleOutCheck(stage=ScaleOutStage.FIVE_PERCENT)
     if (
         not lifecycle.is_scale_out_stage_completed(ScaleOutStage.FIFTEEN_PERCENT)
         and unrealized_return > config.second_scale_out_return
     ):
-        return ScaleOutStage.FIFTEEN_PERCENT
-    return None
+        return _ScaleOutCheck(stage=ScaleOutStage.FIFTEEN_PERCENT)
+    return _ScaleOutCheck()
+
+
+def _atr_scale_out_check(
+    lifecycle: ExecutionLifecycleComponent,
+    *,
+    row: MarketFeatureRow,
+    config: BaomaBusinessRunConfig,
+    entry_context: _ScaleOutEntryContext | None,
+) -> _ScaleOutCheck:
+    if entry_context is None:
+        return _ScaleOutCheck(missing_reason="ATR_SCALE_OUT_ENTRY_CONTEXT_MISSING")
+    if entry_context.entry_signal_day_atr14 is None:
+        return _ScaleOutCheck(missing_reason=entry_context.missing_reason or "ATR_SCALE_OUT_ATR14_UNAVAILABLE")
+
+    cost_basis = lifecycle.adjusted_remaining_cost_basis
+    if cost_basis is None:
+        return _ScaleOutCheck()
+
+    current_close = float(row.bar.close)
+    if not lifecycle.is_scale_out_stage_completed(ScaleOutStage.FIVE_PERCENT):
+        atr_multiple = _scale_out_atr_multiple_for_stage(ScaleOutStage.FIVE_PERCENT, config)
+        trigger_price = cost_basis + entry_context.entry_signal_day_atr14 * atr_multiple
+        if current_close > trigger_price:
+            return _ScaleOutCheck(
+                stage=ScaleOutStage.FIVE_PERCENT,
+                atr_multiple=atr_multiple,
+                trigger_price=trigger_price,
+            )
+
+    if not lifecycle.is_scale_out_stage_completed(ScaleOutStage.FIFTEEN_PERCENT):
+        atr_multiple = _scale_out_atr_multiple_for_stage(ScaleOutStage.FIFTEEN_PERCENT, config)
+        trigger_price = cost_basis + entry_context.entry_signal_day_atr14 * atr_multiple
+        if current_close > trigger_price:
+            confirmation = _second_scale_out_confirmation(row=row, config=config)
+            if confirmation.confirmation_required and confirmation.confirmation_passed is False:
+                return _ScaleOutCheck(
+                    atr_multiple=atr_multiple,
+                    trigger_price=trigger_price,
+                    confirmation_required=confirmation.confirmation_required,
+                    confirmation_passed=confirmation.confirmation_passed,
+                    confirmation_mode=confirmation.confirmation_mode,
+                    confirmation_block_reason=confirmation.confirmation_block_reason,
+                    kdj_j=confirmation.kdj_j,
+                    cci14=confirmation.cci14,
+                    boll_up20_2=confirmation.boll_up20_2,
+                    boll_up_distance_pct=confirmation.boll_up_distance_pct,
+                    confirmation_checks=confirmation.confirmation_checks,
+                )
+            return _ScaleOutCheck(
+                stage=ScaleOutStage.FIFTEEN_PERCENT,
+                atr_multiple=atr_multiple,
+                trigger_price=trigger_price,
+                confirmation_required=confirmation.confirmation_required,
+                confirmation_passed=confirmation.confirmation_passed,
+                confirmation_mode=confirmation.confirmation_mode,
+                confirmation_block_reason=confirmation.confirmation_block_reason,
+                kdj_j=confirmation.kdj_j,
+                cci14=confirmation.cci14,
+                boll_up20_2=confirmation.boll_up20_2,
+                boll_up_distance_pct=confirmation.boll_up_distance_pct,
+                confirmation_checks=confirmation.confirmation_checks,
+            )
+
+    return _ScaleOutCheck()
+
+
+def _second_scale_out_confirmation(
+    *,
+    row: MarketFeatureRow,
+    config: BaomaBusinessRunConfig,
+) -> _ScaleOutCheck:
+    rule = config.second_scale_out_confirmation
+    if not rule.enabled:
+        return _ScaleOutCheck(confirmation_required=False)
+
+    kdj_j: float | None = None
+    cci14: float | None = None
+    boll_up20_2: float | None = None
+    boll_up_distance_pct: float | None = None
+    checks: dict[str, bool | None] = {
+        "confirmation_required": True,
+    }
+    block_reasons: list[str] = []
+
+    if rule.requires_kdj_cci:
+        try:
+            kdj_j = float(row.indicators.kdj_at("D").j)
+        except KeyError:
+            block_reasons.append("KDJ_J_UNAVAILABLE")
+            checks["kdj_j_at_or_above_min"] = None
+        else:
+            assert rule.min_kdj_j is not None
+            kdj_passed = kdj_j >= rule.min_kdj_j
+            checks["kdj_j_at_or_above_min"] = kdj_passed
+            if not kdj_passed:
+                block_reasons.append("KDJ_J_BELOW_MIN")
+
+        try:
+            cci14 = float(row.indicators.cci_at(14, "D").value)
+        except KeyError:
+            block_reasons.append("CCI14_UNAVAILABLE")
+            checks["cci14_at_or_above_min"] = None
+        else:
+            assert rule.min_cci14 is not None
+            cci_passed = cci14 >= rule.min_cci14
+            checks["cci14_at_or_above_min"] = cci_passed
+            if not cci_passed:
+                block_reasons.append("CCI14_BELOW_MIN")
+
+    if rule.requires_boll_up_distance:
+        try:
+            boll_up20_2 = float(row.indicators.boll_up_at(20, 2.0, "D"))
+        except KeyError:
+            block_reasons.append("BOLL_UP20_2_UNAVAILABLE")
+            checks["boll_up_distance_at_or_above_min"] = None
+        else:
+            if boll_up20_2 <= 0:
+                block_reasons.append("BOLL_UP20_2_UNAVAILABLE")
+                checks["boll_up_distance_at_or_above_min"] = None
+            else:
+                assert rule.min_boll_up_distance is not None
+                boll_up_distance_pct = float(row.bar.close) / boll_up20_2 - 1.0
+                boll_passed = boll_up_distance_pct >= rule.min_boll_up_distance
+                checks["boll_up_distance_at_or_above_min"] = boll_passed
+                if not boll_passed:
+                    block_reasons.append("BOLL_UP_DISTANCE_BELOW_MIN")
+
+    checks["required_values_available"] = not any(reason.endswith("_UNAVAILABLE") for reason in block_reasons)
+    confirmation_passed = not block_reasons
+    return _ScaleOutCheck(
+        confirmation_required=True,
+        confirmation_passed=confirmation_passed,
+        confirmation_mode=rule.mode,
+        confirmation_block_reason=";".join(block_reasons) if block_reasons else None,
+        kdj_j=kdj_j,
+        cci14=cci14,
+        boll_up20_2=boll_up20_2,
+        boll_up_distance_pct=boll_up_distance_pct,
+        confirmation_checks=checks,
+    )
+
+
+def _atr_scale_out_trigger_price(
+    lifecycle: ExecutionLifecycleComponent,
+    entry_context: _ScaleOutEntryContext,
+    atr_multiple: float,
+) -> float | None:
+    cost_basis = lifecycle.adjusted_remaining_cost_basis
+    if cost_basis is None or entry_context.entry_signal_day_atr14 is None:
+        return None
+    return cost_basis + entry_context.entry_signal_day_atr14 * atr_multiple
+
+
+def _scale_out_atr_multiple_for_stage(stage: ScaleOutStage, config: BaomaBusinessRunConfig) -> float:
+    if stage == ScaleOutStage.FIVE_PERCENT:
+        assert config.first_scale_out_atr_multiple is not None
+        return float(config.first_scale_out_atr_multiple)
+    assert config.second_scale_out_atr_multiple is not None
+    return float(config.second_scale_out_atr_multiple)
 
 
 def _next_incomplete_scale_out_stage(lifecycle: ExecutionLifecycleComponent) -> ScaleOutStage | None:
@@ -519,10 +821,86 @@ def _next_incomplete_scale_out_stage(lifecycle: ExecutionLifecycleComponent) -> 
     return None
 
 
-def _scale_out_reason_code(stage: ScaleOutStage) -> str:
+def _scale_out_reason_code(stage: ScaleOutStage, *, config: BaomaBusinessRunConfig) -> str:
+    if config.scale_out_mode == "atr_multiple":
+        if stage == ScaleOutStage.FIVE_PERCENT:
+            return "BAOMA_SCALE_OUT_ATR_FIRST_TRIGGERED"
+        return "BAOMA_SCALE_OUT_ATR_SECOND_TRIGGERED"
     if stage == ScaleOutStage.FIVE_PERCENT:
         return "BAOMA_SCALE_OUT_5_PERCENT_TRIGGERED"
     return "BAOMA_SCALE_OUT_15_PERCENT_TRIGGERED"
+
+
+def _scale_out_entry_context(row: MarketFeatureRow) -> _ScaleOutEntryContext:
+    try:
+        atr14 = row.indicators.atr_at(14).value
+    except KeyError:
+        return _ScaleOutEntryContext(
+            entry_signal_date=row.trade_date,
+            entry_signal_day_atr14=None,
+            missing_reason="ATR_SCALE_OUT_ATR14_UNAVAILABLE",
+        )
+    return _ScaleOutEntryContext(
+        entry_signal_date=row.trade_date,
+        entry_signal_day_atr14=atr14,
+    )
+
+
+def _scale_out_missing_intent(
+    *,
+    symbol: str,
+    trade_date: date,
+    reason_code: str,
+    entry_context: _ScaleOutEntryContext | None,
+) -> TradeIntent:
+    return TradeIntent(
+        intent_type=TradeIntentType.HOLD,
+        symbol=symbol,
+        trade_date=trade_date,
+        method_name="atr_based_scale_out",
+        reason_code=reason_code,
+        signal_values={
+            "entry_signal_date": entry_context.entry_signal_date.isoformat() if entry_context is not None else None,
+            "entry_signal_day_atr14": entry_context.entry_signal_day_atr14 if entry_context is not None else None,
+            "checks": {
+                "entry_signal_day_atr14_available": bool(
+                    entry_context is not None and entry_context.entry_signal_day_atr14 is not None
+                )
+            },
+        },
+    )
+
+
+def _scale_out_confirmation_blocked_intent(
+    *,
+    symbol: str,
+    trade_date: date,
+    check: _ScaleOutCheck,
+    entry_context: _ScaleOutEntryContext | None,
+) -> TradeIntent:
+    return TradeIntent(
+        intent_type=TradeIntentType.HOLD,
+        symbol=symbol,
+        trade_date=trade_date,
+        method_name="atr_based_scale_out",
+        reason_code="ATR_SCALE_OUT_SECOND_CONFIRMATION_BLOCKED",
+        blocked_by="SECOND_SCALE_OUT_CONFIRMATION",
+        signal_values={
+            "entry_signal_date": entry_context.entry_signal_date.isoformat() if entry_context is not None else None,
+            "entry_signal_day_atr14": entry_context.entry_signal_day_atr14 if entry_context is not None else None,
+            "atr_multiple": check.atr_multiple,
+            "scale_out_trigger_price": check.trigger_price,
+            "confirmation_required": check.confirmation_required,
+            "confirmation_passed": check.confirmation_passed,
+            "confirmation_mode": check.confirmation_mode,
+            "confirmation_block_reason": check.confirmation_block_reason,
+            "kdj_j": check.kdj_j,
+            "cci14": check.cci14,
+            "boll_up20_2": check.boll_up20_2,
+            "boll_up_distance_pct": check.boll_up_distance_pct,
+            "checks": dict(check.confirmation_checks),
+        },
+    )
 
 
 def _evaluate_add_on(

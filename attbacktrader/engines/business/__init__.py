@@ -1,6 +1,11 @@
 """Business-level deterministic backtest adapter."""
 
-from .baoma import BaomaBusinessRunConfig, BaomaBusinessRunResult, run_baoma_v1_business
+from .baoma import (
+    BaomaBusinessRunConfig,
+    BaomaBusinessRunResult,
+    SecondScaleOutConfirmationRule,
+    run_baoma_v1_business,
+)
 from .lifecycle import (
     ExecutionLifecycleComponent,
     LifecycleClosedTrade,
@@ -25,6 +30,7 @@ __all__ = [
     "LifecyclePositionSnapshot",
     "LifecycleState",
     "ScaleOutStage",
+    "SecondScaleOutConfirmationRule",
     "run_baoma_v1_business",
     "run_trend_template_v1_portfolio_business",
 ]

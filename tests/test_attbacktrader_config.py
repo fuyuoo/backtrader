@@ -139,6 +139,7 @@ def test_baoma_example_loads_dedicated_business_runner_config() -> None:
     assert {series.price_adjustment for series in run_plan.data.resolved_tradable_series} == {"qfq"}
     assert run_plan.execution.engine == "baoma_v1_business"
     assert run_plan.execution.baoma.buy_slice_fraction == pytest.approx(0.33)
+    assert run_plan.execution.baoma.scale_out_mode == "fixed_percent"
     assert run_plan.execution.baoma.first_scale_out_return == pytest.approx(0.05)
     assert run_plan.execution.baoma.second_scale_out_return == pytest.approx(0.15)
     assert run_plan.execution.baoma.force_exit_at_end is False
@@ -146,6 +147,103 @@ def test_baoma_example_loads_dedicated_business_runner_config() -> None:
     assert run_plan.analysis.industry_attribution.source == "SW2021"
     assert len(run_plan.data.industry_series.indexes) == 31
     assert "801780.SI" in run_plan.data.industry_series.indexes
+
+
+def test_baoma_execution_config_accepts_atr_scale_out() -> None:
+    raw_config = minimal_config()
+    raw_config["execution"] = {
+        "engine": "baoma_v1_business",
+        "baoma": {
+            "scale_out_mode": "atr_multiple",
+            "first_scale_out_atr_multiple": 1.0,
+            "second_scale_out_atr_multiple": 2.0,
+        },
+    }
+
+    run_plan = RunPlan.from_mapping(raw_config)
+
+    assert run_plan.execution.baoma.scale_out_mode == "atr_multiple"
+    assert run_plan.execution.baoma.first_scale_out_atr_multiple == pytest.approx(1.0)
+    assert run_plan.execution.baoma.second_scale_out_atr_multiple == pytest.approx(2.0)
+
+
+def test_baoma_execution_config_accepts_second_scale_out_confirmation() -> None:
+    raw_config = minimal_config()
+    raw_config["execution"] = {
+        "engine": "baoma_v1_business",
+        "baoma": {
+            "scale_out_mode": "atr_multiple",
+            "first_scale_out_atr_multiple": 2.0,
+            "second_scale_out_atr_multiple": 4.0,
+            "second_scale_out_confirmation": {
+                "enabled": True,
+                "mode": "kdj_cci_boll_up_distance",
+                "min_kdj_j": 100.0,
+                "min_cci14": 150.0,
+                "min_boll_up_distance": 0.03,
+            },
+        },
+    }
+
+    run_plan = RunPlan.from_mapping(raw_config)
+
+    confirmation = run_plan.execution.baoma.second_scale_out_confirmation
+    assert confirmation.enabled is True
+    assert confirmation.mode == "kdj_cci_boll_up_distance"
+    assert confirmation.min_kdj_j == pytest.approx(100.0)
+    assert confirmation.min_cci14 == pytest.approx(150.0)
+    assert confirmation.min_boll_up_distance == pytest.approx(0.03)
+
+
+def test_baoma_execution_config_requires_confirmation_thresholds_by_mode() -> None:
+    raw_config = minimal_config()
+    raw_config["execution"] = {
+        "engine": "baoma_v1_business",
+        "baoma": {
+            "scale_out_mode": "atr_multiple",
+            "first_scale_out_atr_multiple": 2.0,
+            "second_scale_out_atr_multiple": 4.0,
+            "second_scale_out_confirmation": {
+                "enabled": True,
+                "mode": "kdj_cci",
+                "min_kdj_j": 100.0,
+            },
+        },
+    }
+
+    with pytest.raises(ValidationError, match="min_cci14"):
+        RunPlan.from_mapping(raw_config)
+
+
+def test_baoma_execution_config_rejects_confirmation_for_fixed_scale_out() -> None:
+    raw_config = minimal_config()
+    raw_config["execution"] = {
+        "engine": "baoma_v1_business",
+        "baoma": {
+            "scale_out_mode": "fixed_percent",
+            "second_scale_out_confirmation": {
+                "enabled": True,
+                "mode": "boll_up_distance",
+                "min_boll_up_distance": 0.03,
+            },
+        },
+    }
+
+    with pytest.raises(ValidationError, match="second_scale_out_confirmation"):
+        RunPlan.from_mapping(raw_config)
+
+
+def test_baoma_execution_config_requires_atr_scale_out_multiples() -> None:
+    raw_config = minimal_config()
+    raw_config["execution"] = {
+        "engine": "baoma_v1_business",
+        "baoma": {
+            "scale_out_mode": "atr_multiple",
+        },
+    }
+
+    with pytest.raises(ValidationError, match="first_scale_out_atr_multiple"):
+        RunPlan.from_mapping(raw_config)
 
 
 def test_attribution_filter_example_loads_configured_entry_filter() -> None:

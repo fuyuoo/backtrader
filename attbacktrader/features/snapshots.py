@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from attbacktrader.data.adjustments import DEFAULT_PRICE_ADJUSTMENT
-from attbacktrader.features.indicators import ATRValue, KDJValue, MACDValue, MAValue, RSIValue
+from attbacktrader.features.indicators import ATRValue, CCIValue, KDJValue, MACDValue, MAValue, RSIValue
 from attbacktrader.features.registry import DEFAULT_INDICATOR_NAMES, SUPPORTED_INDICATOR_TIMEFRAMES, indicator_set_name
 
 
@@ -29,6 +29,8 @@ class IndicatorSnapshot:
     ma60: float | None = None
     rsi14: float | None = None
     atr14: float | None = None
+    cci14: float | None = None
+    boll_up20_2: float | None = None
 
     @property
     def kdj(self) -> KDJValue:
@@ -64,6 +66,12 @@ class IndicatorSnapshot:
             raise KeyError(f"ATR{period} is missing for {self.symbol} on {self.trade_date.isoformat()}")
         return ATRValue(period=period, value=value)
 
+    def cci(self, period: int) -> CCIValue:
+        value = getattr(self, f"cci{period}", None)
+        if value is None:
+            raise KeyError(f"CCI{period} is missing for {self.symbol} on {self.trade_date.isoformat()}")
+        return CCIValue(period=period, value=value)
+
     def has_indicator(self, name: str) -> bool:
         if name == "kdj":
             return self.kdj_k is not None and self.kdj_d is not None and self.kdj_j is not None
@@ -79,6 +87,10 @@ class IndicatorSnapshot:
             return self.rsi14 is not None
         if name == "atr14":
             return self.atr14 is not None
+        if name == "cci14":
+            return self.cci14 is not None
+        if name == "boll_up20_2":
+            return self.boll_up20_2 is not None
         raise ValueError(f"unsupported indicator: {name}")
 
 
@@ -246,6 +258,8 @@ def write_indicator_snapshots_parquet(snapshots: Sequence[IndicatorSnapshot], pa
                 "ma60": snapshot.ma60,
                 "rsi14": snapshot.rsi14,
                 "atr14": snapshot.atr14,
+                "cci14": snapshot.cci14,
+                "boll_up20_2": snapshot.boll_up20_2,
             }
             for snapshot in snapshots
         ]
@@ -330,6 +344,8 @@ def read_indicator_snapshots_parquet(path: str | Path) -> tuple[IndicatorSnapsho
             ma60=_optional_float(row, "ma60", pd),
             rsi14=_optional_float(row, "rsi14", pd),
             atr14=_optional_float(row, "atr14", pd),
+            cci14=_optional_float(row, "cci14", pd),
+            boll_up20_2=_optional_float(row, "boll_up20_2", pd),
         )
         for row in frame.itertuples(index=False)
     ]

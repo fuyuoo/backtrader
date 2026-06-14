@@ -8,8 +8,13 @@ from typing import Sequence
 
 from attbacktrader.data import DailyBar
 from attbacktrader.features.frame import IndicatorFrame, indicator_frame_from_snapshots
-from attbacktrader.features.indicators import ATRValue, KDJValue, MACDValue, MAValue, RSIValue
-from attbacktrader.features.registry import IndicatorRequirement, indicator_period, normalize_indicator_requirements
+from attbacktrader.features.indicators import ATRValue, CCIValue, KDJValue, MACDValue, MAValue, RSIValue
+from attbacktrader.features.registry import (
+    IndicatorRequirement,
+    boll_up_indicator_params,
+    indicator_period,
+    normalize_indicator_requirements,
+)
 from attbacktrader.features.snapshots import IndicatorSnapshot
 
 
@@ -65,6 +70,26 @@ class MarketIndicators:
             return self.frame.atr_at(self.trade_date, period=period, timeframe=timeframe)
         return self.frame.atr_at_or_before(self.trade_date, period=period, timeframe=timeframe)
 
+    def cci_at(self, period: int, timeframe: str = "D") -> CCIValue:
+        if timeframe == "D":
+            return self.frame.cci_at(self.trade_date, period=period, timeframe=timeframe)
+        return self.frame.cci_at_or_before(self.trade_date, period=period, timeframe=timeframe)
+
+    def boll_up_at(self, period: int, devfactor: float, timeframe: str = "D") -> float:
+        if timeframe == "D":
+            return self.frame.boll_up_at(
+                self.trade_date,
+                period=period,
+                devfactor=devfactor,
+                timeframe=timeframe,
+            )
+        return self.frame.boll_up_at_or_before(
+            self.trade_date,
+            period=period,
+            devfactor=devfactor,
+            timeframe=timeframe,
+        )
+
     def indicator_date(self, name: str, timeframe: str = "D") -> date:
         return self.frame.indicator_date(name, self.trade_date, timeframe=timeframe)
 
@@ -81,6 +106,11 @@ class MarketIndicators:
                     self.rsi_at(_required_period(requirement.name), requirement.timeframe)
                 elif requirement.name.startswith("atr"):
                     self.atr_at(_required_period(requirement.name), requirement.timeframe)
+                elif requirement.name.startswith("cci"):
+                    self.cci_at(_required_period(requirement.name), requirement.timeframe)
+                elif requirement.name.startswith("boll_up"):
+                    period, devfactor = boll_up_indicator_params(requirement.name)
+                    self.boll_up_at(period, devfactor, requirement.timeframe)
                 else:
                     raise ValueError(f"unsupported indicator: {requirement.name}")
         except KeyError:

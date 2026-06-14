@@ -21,6 +21,7 @@ from attbacktrader.engines.business import (
     BaomaBusinessRunResult,
     LifecycleExecutionEvent,
     LifecyclePositionSnapshot,
+    SecondScaleOutConfirmationRule,
     run_baoma_v1_business,
     run_trend_template_v1_portfolio_business,
 )
@@ -426,8 +427,18 @@ def _baoma_business_config(run_plan: RunPlan) -> BaomaBusinessRunConfig:
         max_holding_count=int(max_holding_count),
         buy_slice_fraction=run_plan.execution.baoma.buy_slice_fraction,
         board_lot_size=run_plan.constraints.ashare.board_lot_size,
+        scale_out_mode=run_plan.execution.baoma.scale_out_mode,
         first_scale_out_return=run_plan.execution.baoma.first_scale_out_return,
         second_scale_out_return=run_plan.execution.baoma.second_scale_out_return,
+        first_scale_out_atr_multiple=run_plan.execution.baoma.first_scale_out_atr_multiple,
+        second_scale_out_atr_multiple=run_plan.execution.baoma.second_scale_out_atr_multiple,
+        second_scale_out_confirmation=SecondScaleOutConfirmationRule(
+            enabled=run_plan.execution.baoma.second_scale_out_confirmation.enabled,
+            mode=run_plan.execution.baoma.second_scale_out_confirmation.mode,
+            min_boll_up_distance=run_plan.execution.baoma.second_scale_out_confirmation.min_boll_up_distance,
+            min_kdj_j=run_plan.execution.baoma.second_scale_out_confirmation.min_kdj_j,
+            min_cci14=run_plan.execution.baoma.second_scale_out_confirmation.min_cci14,
+        ),
         force_exit_at_end=run_plan.execution.baoma.force_exit_at_end,
     )
 

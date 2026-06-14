@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from attbacktrader.data.snapshots import read_daily_bars_parquet
+from attbacktrader.features import read_indicator_snapshots_parquet
 from attbacktrader.reports.diagnostics import build_result_diagnostics
 from attbacktrader.reports.environment_fit import (
     build_environment_fit_report_from_artifacts,
@@ -23,6 +24,7 @@ from attbacktrader.reports.evidence_validation import build_evidence_validation
 from attbacktrader.reports.lifecycle import build_trade_lifecycle_report, render_trade_lifecycle_markdown_zh
 from attbacktrader.reports.post_exit import render_post_exit_analysis_markdown_zh
 from attbacktrader.reports.renderer import render_backtest_report_markdown, render_backtest_report_markdown_zh
+from attbacktrader.reports.scale_out_attribution import build_scale_out_attribution_report
 from attbacktrader.reports.strategy_environment_profile import (
     build_strategy_environment_profile_from_artifacts,
     render_strategy_environment_profile_markdown_zh,
@@ -52,6 +54,7 @@ class RunArtifactPaths:
     result_diagnostics_path: Path
     trade_lifecycle_path: Path
     trade_lifecycle_chinese_markdown_path: Path
+    scale_out_attribution_path: Path
     trade_attribution_path: Path
     trade_attribution_chinese_markdown_path: Path
     trade_review_path: Path
@@ -94,6 +97,7 @@ def write_run_artifacts(
         result_diagnostics_path=output_dir / "result_diagnostics.json",
         trade_lifecycle_path=output_dir / "trade_lifecycle.json",
         trade_lifecycle_chinese_markdown_path=output_dir / "trade_lifecycle.zh.md",
+        scale_out_attribution_path=output_dir / "scale_out_attribution.json",
         trade_attribution_path=output_dir / "trade_attribution.json",
         trade_attribution_chinese_markdown_path=output_dir / "trade_attribution.zh.md",
         trade_review_path=output_dir / "trade_review.json",
@@ -155,6 +159,7 @@ def write_run_artifacts(
         render_trade_lifecycle_markdown_zh(trade_lifecycle),
         encoding="utf-8",
     )
+    _write_json(artifact_paths.scale_out_attribution_path, _scale_out_attribution(result, run_config))
     trade_attribution = _trade_attribution(result, trade_lifecycle)
     _write_json(artifact_paths.trade_attribution_path, trade_attribution)
     artifact_paths.trade_attribution_chinese_markdown_path.write_text(
@@ -549,6 +554,15 @@ def _trade_attribution(result: RunPlanExecutionResult, trade_lifecycle):
     )
 
 
+def _scale_out_attribution(result: RunPlanExecutionResult, run_config: Mapping[str, Any]):
+    return build_scale_out_attribution_report(
+        run_id=result.run_id,
+        lifecycle_events=result.lifecycle_events,
+        indicator_snapshots_by_symbol=_indicator_snapshots_by_symbol(result),
+        run_config=run_config,
+    )
+
+
 def _trade_review(result: RunPlanExecutionResult, trade_lifecycle):
     return build_trade_review_report(
         closed_trades=result.closed_trades,
@@ -588,6 +602,24 @@ def _bars_by_symbol(result: RunPlanExecutionResult):
             continue
         bars_by_symbol[symbol_result.symbol] = read_daily_bars_parquet(symbol_result.snapshot_path)
     return bars_by_symbol
+
+
+def _indicator_snapshots_by_symbol(result: RunPlanExecutionResult):
+    snapshots_by_symbol = {}
+    for symbol_result in result.symbol_results:
+        snapshots = []
+        for path in symbol_result.indicator_snapshot_paths or (symbol_result.indicator_snapshot_path,):
+            if not path.exists():
+                continue
+            snapshots.extend(read_indicator_snapshots_parquet(path))
+        snapshots_by_key = {
+            (snapshot.timeframe, snapshot.trade_date): snapshot
+            for snapshot in snapshots
+        }
+        snapshots_by_symbol[symbol_result.symbol] = tuple(
+            sorted(snapshots_by_key.values(), key=lambda snapshot: (snapshot.timeframe, snapshot.trade_date))
+        )
+    return snapshots_by_symbol
 
 
 def _write_json(path: Path, payload: Any) -> None:

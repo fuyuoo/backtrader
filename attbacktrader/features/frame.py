@@ -9,11 +9,14 @@ from typing import Mapping, Sequence
 from attbacktrader.data import DailyBar, resample_daily_bars
 from attbacktrader.features.indicators import (
     ATRValue,
+    CCIValue,
     KDJValue,
     MACDValue,
     MAValue,
     RSIValue,
     calculate_atr,
+    calculate_bollinger,
+    calculate_cci,
     calculate_kdj,
     calculate_macd,
     calculate_rsi,
@@ -23,6 +26,8 @@ from attbacktrader.features.registry import (
     DEFAULT_INDICATOR_NAMES,
     IndicatorRequirement,
     SUPPORTED_MA_PERIODS,
+    boll_up_indicator_name,
+    boll_up_indicator_params,
     indicator_period,
     indicator_names_for_timeframe,
     normalize_indicator_names,
@@ -39,6 +44,8 @@ class IndicatorFrame:
     ma_by_key: Mapping[tuple[str, int, date], MAValue] | None = None
     rsi_by_key: Mapping[tuple[str, int, date], RSIValue] | None = None
     atr_by_key: Mapping[tuple[str, int, date], ATRValue] | None = None
+    cci_by_key: Mapping[tuple[str, int, date], CCIValue] | None = None
+    boll_up_by_key: Mapping[tuple[str, int, float, date], float] | None = None
 
     def kdj_at(self, trade_date: date, *, timeframe: str = "D") -> KDJValue:
         if self.kdj_by_key is None:
@@ -116,6 +123,50 @@ class IndicatorFrame:
         aligned_date = _latest_available_date(self.atr_by_key, timeframe=timeframe, trade_date=trade_date, period=period)
         return self.atr_by_key[(timeframe, period, aligned_date)]
 
+    def cci_at(self, trade_date: date, *, period: int, timeframe: str = "D") -> CCIValue:
+        if self.cci_by_key is None:
+            raise KeyError(f"CCI is missing for {self.symbol}")
+        try:
+            return self.cci_by_key[(timeframe, period, trade_date)]
+        except KeyError as exc:
+            raise KeyError(
+                f"CCI{period} {timeframe} is missing for {self.symbol} on {trade_date.isoformat()}"
+            ) from exc
+
+    def cci_at_or_before(self, trade_date: date, *, period: int, timeframe: str = "D") -> CCIValue:
+        if self.cci_by_key is None:
+            raise KeyError(f"CCI is missing for {self.symbol}")
+        aligned_date = _latest_available_date(self.cci_by_key, timeframe=timeframe, trade_date=trade_date, period=period)
+        return self.cci_by_key[(timeframe, period, aligned_date)]
+
+    def boll_up_at(self, trade_date: date, *, period: int, devfactor: float, timeframe: str = "D") -> float:
+        if self.boll_up_by_key is None:
+            raise KeyError(f"BOLL_UP is missing for {self.symbol}")
+        try:
+            return self.boll_up_by_key[(timeframe, period, float(devfactor), trade_date)]
+        except KeyError as exc:
+            raise KeyError(
+                f"BOLL_UP{period}_{devfactor:g} {timeframe} is missing for {self.symbol} on {trade_date.isoformat()}"
+            ) from exc
+
+    def boll_up_at_or_before(
+        self,
+        trade_date: date,
+        *,
+        period: int,
+        devfactor: float,
+        timeframe: str = "D",
+    ) -> float:
+        if self.boll_up_by_key is None:
+            raise KeyError(f"BOLL_UP is missing for {self.symbol}")
+        aligned_date = _latest_available_date(
+            self.boll_up_by_key,
+            timeframe=timeframe,
+            trade_date=trade_date,
+            period=period,
+        )
+        return self.boll_up_by_key[(timeframe, period, float(devfactor), aligned_date)]
+
     def indicator_date(self, name: str, trade_date: date, *, timeframe: str = "D") -> date:
         period = indicator_period(name)
         if name == "kdj":
@@ -128,6 +179,10 @@ class IndicatorFrame:
             values_by_key = self.rsi_by_key
         elif name.startswith("atr"):
             values_by_key = self.atr_by_key
+        elif name.startswith("cci"):
+            values_by_key = self.cci_by_key
+        elif name.startswith("boll_up"):
+            values_by_key = self.boll_up_by_key
         else:
             raise ValueError(f"unsupported indicator: {name}")
 
@@ -205,6 +260,37 @@ def build_indicator_frame(
             }
         )
 
+    cci_by_key: dict[tuple[str, int, date], CCIValue] = {}
+    for period in _indicator_periods(indicator_names, prefix="cci"):
+        cci_values = calculate_cci(
+            [bar.high for bar in ordered_bars],
+            [bar.low for bar in ordered_bars],
+            [bar.close for bar in ordered_bars],
+            period=period,
+        )
+        cci_by_key.update(
+            {
+                (timeframe, period, bar.trade_date): value
+                for bar, value in zip(ordered_bars, cci_values)
+                if value is not None
+            }
+        )
+
+    boll_up_by_key: dict[tuple[str, int, float, date], float] = {}
+    for period, devfactor in _boll_up_specs(indicator_names):
+        bollinger_values = calculate_bollinger(
+            [bar.close for bar in ordered_bars],
+            period=period,
+            devfactor=devfactor,
+        )
+        boll_up_by_key.update(
+            {
+                (timeframe, period, float(devfactor), bar.trade_date): value.upper
+                for bar, value in zip(ordered_bars, bollinger_values)
+                if value is not None
+            }
+        )
+
     return IndicatorFrame(
         symbol=symbol,
         kdj_by_key=kdj_by_key,
@@ -212,6 +298,8 @@ def build_indicator_frame(
         ma_by_key=ma_by_key or None,
         rsi_by_key=rsi_by_key or None,
         atr_by_key=atr_by_key or None,
+        cci_by_key=cci_by_key or None,
+        boll_up_by_key=boll_up_by_key or None,
     )
 
 
@@ -315,6 +403,24 @@ def indicator_frame_from_snapshots(snapshots: Sequence[IndicatorSnapshot]) -> In
             if any(snapshot.has_indicator("atr14") for snapshot in ordered_snapshots)
             else None
         ),
+        cci_by_key=(
+            {
+                (snapshot.timeframe, 14, snapshot.trade_date): snapshot.cci(14)
+                for snapshot in ordered_snapshots
+                if snapshot.has_indicator("cci14")
+            }
+            if any(snapshot.has_indicator("cci14") for snapshot in ordered_snapshots)
+            else None
+        ),
+        boll_up_by_key=(
+            {
+                (snapshot.timeframe, 20, 2.0, snapshot.trade_date): float(snapshot.boll_up20_2)
+                for snapshot in ordered_snapshots
+                if snapshot.has_indicator("boll_up20_2")
+            }
+            if any(snapshot.has_indicator("boll_up20_2") for snapshot in ordered_snapshots)
+            else None
+        ),
     )
 
 
@@ -399,6 +505,21 @@ def _indicator_snapshot_values(
             values[f"atr{period}"] = frame.atr_at(trade_date, period=period, timeframe=timeframe).value
         except KeyError:
             pass
+    for period in _indicator_periods(indicator_names, prefix="cci"):
+        try:
+            values[f"cci{period}"] = frame.cci_at(trade_date, period=period, timeframe=timeframe).value
+        except KeyError:
+            pass
+    for period, devfactor in _boll_up_specs(indicator_names):
+        try:
+            values[boll_up_indicator_name(period, devfactor)] = frame.boll_up_at(
+                trade_date,
+                period=period,
+                devfactor=devfactor,
+                timeframe=timeframe,
+            )
+        except KeyError:
+            pass
     return values
 
 
@@ -427,6 +548,16 @@ def _indicator_periods(indicator_names: Sequence[str], *, prefix: str) -> tuple[
             int(name.removeprefix(prefix))
             for name in indicator_names
             if name.startswith(prefix) and name.removeprefix(prefix).isdigit()
+        )
+    )
+
+
+def _boll_up_specs(indicator_names: Sequence[str]) -> tuple[tuple[int, float], ...]:
+    return tuple(
+        sorted(
+            boll_up_indicator_params(name)
+            for name in indicator_names
+            if name.startswith("boll_up")
         )
     )
 

@@ -252,6 +252,12 @@ _Avoid_: Take-profit setting
 A partial profitable sell that reduces an open position while keeping the remaining position alive for later profit-taking or stop-loss decisions.
 _Avoid_: Full exit, closed trade, cost-basis rewrite
 
+**ATR-Based Scale-Out**:
+A scale-out whose profit trigger is expressed as the adjusted remaining cost basis before sale plus a multiple of the entry signal-day ATR14 volatility distance instead of as a fixed percentage return.
+When the entry signal-day ATR14 is missing, the position does not use ATR-based scale-out and the missing evidence is recorded.
+KDJ J, CCI, and Bollinger upper-band values may be recorded as scale-out evidence without blocking the scale-out decision.
+_Avoid_: Fixed-percent scale-out, ART scale-out, full exit
+
 **Full Exit**:
 A sell decision that closes all remaining quantity of an open position and ends that position's trade lifecycle.
 _Avoid_: Scale-out, partial sell, cost reduction
@@ -415,6 +421,10 @@ _Avoid_: Predictive signal proof, statistical causality claim
 **Exit Attribution**:
 A post-run explanation that links a completed trade back to the exit intent that closed it and summarizes the decision evidence visible at exit time.
 _Avoid_: Entry attribution, report-time exit calculation
+
+**Scale-Out Attribution**:
+A post-run explanation that starts from executed scale-out events and uses the actual execution date to look up context such as KDJ J, CCI, Bollinger upper band, and pre-sale profit evidence without treating those fields as scale-out decision inputs.
+_Avoid_: Exit attribution, scale-out signal condition, closed-trade-only attribution
 
 **Add-On Attribution Output**:
 The lifecycle-attribution output that links successful add-on intents to the completed trade that was open after primary entry and before exit. It keeps primary entry attribution separate while summarizing add-on evidence by winning and losing trade outcomes.

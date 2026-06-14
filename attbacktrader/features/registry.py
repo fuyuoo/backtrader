@@ -9,11 +9,15 @@ from typing import Any, Mapping
 
 
 DEFAULT_INDICATOR_NAMES = ("kdj",)
-SUPPORTED_INDICATOR_NAMES = frozenset({"kdj", "macd", "ma20", "ma25", "ma60", "rsi14", "atr14"})
+SUPPORTED_INDICATOR_NAMES = frozenset(
+    {"kdj", "macd", "ma20", "ma25", "ma60", "rsi14", "atr14", "cci14", "boll_up20_2"}
+)
 SUPPORTED_INDICATOR_TIMEFRAMES = frozenset({"D", "W", "M"})
 SUPPORTED_MA_PERIODS = frozenset({20, 25, 60})
 SUPPORTED_RSI_PERIODS = frozenset({14})
 SUPPORTED_ATR_PERIODS = frozenset({14})
+SUPPORTED_CCI_PERIODS = frozenset({14})
+SUPPORTED_BOLL_UP_SPECS = frozenset({(20, 2.0)})
 
 
 @dataclass(frozen=True, order=True)
@@ -143,6 +147,25 @@ def indicator_spec(name: str) -> IndicatorSpec:
             recompute_lookback_bars=period - 1,
             requires_state=True,
         )
+    if name.startswith("cci"):
+        period = _period_from_name(name, prefix="cci")
+        cci_indicator_name(period)
+        return IndicatorSpec(
+            name=name,
+            params=(("period", period), ("constant", 0.015)),
+            warmup_bars=period,
+            recompute_lookback_bars=period - 1,
+            requires_state=False,
+        )
+    if name.startswith("boll_up"):
+        period, devfactor = boll_up_indicator_params(name)
+        return IndicatorSpec(
+            name=name,
+            params=(("period", period), ("devfactor", devfactor), ("line", "upper")),
+            warmup_bars=period,
+            recompute_lookback_bars=period - 1,
+            requires_state=False,
+        )
     raise ValueError(f"unsupported indicator: {name}")
 
 
@@ -167,8 +190,39 @@ def atr_indicator_name(period: int) -> str:
     return f"atr{period}"
 
 
+def cci_indicator_name(period: int) -> str:
+    if period not in SUPPORTED_CCI_PERIODS:
+        supported = ", ".join(str(value) for value in sorted(SUPPORTED_CCI_PERIODS))
+        raise ValueError(f"unsupported CCI period: {period}; supported periods: {supported}")
+    return f"cci{period}"
+
+
+def boll_up_indicator_name(period: int, devfactor: float) -> str:
+    spec = (period, float(devfactor))
+    if spec not in SUPPORTED_BOLL_UP_SPECS:
+        supported = ", ".join(f"{item[0]}:{item[1]:g}" for item in sorted(SUPPORTED_BOLL_UP_SPECS))
+        raise ValueError(f"unsupported Bollinger upper spec: {period}:{devfactor:g}; supported specs: {supported}")
+    return f"boll_up{period}_{devfactor:g}"
+
+
+def boll_up_indicator_params(name: str) -> tuple[int, float]:
+    suffix = name.removeprefix("boll_up")
+    period_text, separator, devfactor_text = suffix.partition("_")
+    if not name.startswith("boll_up") or not separator or not period_text.isdigit():
+        raise ValueError(f"Bollinger upper parameters are missing for {name}")
+    period = int(period_text)
+    try:
+        devfactor = float(devfactor_text)
+    except ValueError as exc:
+        raise ValueError(f"Bollinger upper devfactor is invalid for {name}") from exc
+    boll_up_indicator_name(period, devfactor)
+    return period, devfactor
+
+
 def indicator_period(name: str) -> int | None:
-    for prefix in ("ma", "rsi", "atr"):
+    if name.startswith("boll_up"):
+        return boll_up_indicator_params(name)[0]
+    for prefix in ("ma", "rsi", "atr", "cci"):
         suffix = name.removeprefix(prefix)
         if name.startswith(prefix) and suffix.isdigit():
             return int(suffix)

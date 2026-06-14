@@ -293,6 +293,15 @@ def prepare_run_data(
 
 def _indicator_requirements_for_run_plan(run_plan: RunPlan) -> tuple[IndicatorRequirement, ...]:
     requirements = set(required_indicators_for_strategy_config(run_plan.strategy))
+    if run_plan.execution.engine == "baoma_v1_business":
+        requirements.update(
+            {
+                IndicatorRequirement("atr14", "D"),
+                IndicatorRequirement("kdj", "D"),
+                IndicatorRequirement("cci14", "D"),
+                IndicatorRequirement("boll_up20_2", "D"),
+            }
+        )
     declarations = attribution_declaration_by_key()
     selection = run_plan.analysis.resolved_attribution_factor_selection
 

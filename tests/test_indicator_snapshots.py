@@ -187,6 +187,41 @@ def test_ma25_indicator_snapshot_is_available_after_warmup() -> None:
     assert rows[-1].indicators.ma_at(25).value == pytest.approx(frame.ma_at(bars[-1].trade_date, period=25).value)
 
 
+def test_cci_and_bollinger_upper_snapshots_are_available_after_warmup(tmp_path: Path) -> None:
+    bars = _stateful_bars("000001.SZ", count=25)
+    requirements = (
+        IndicatorRequirement("cci14", "D"),
+        IndicatorRequirement("boll_up20_2", "D"),
+    )
+
+    snapshots = build_indicator_snapshots_for_requirements(
+        bars,
+        indicator_requirements=requirements,
+    )
+    path = indicator_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=bars[0].trade_date,
+        end_date=bars[-1].trade_date,
+        indicator_names=("boll_up20_2", "cci14"),
+    )
+    written_path = write_indicator_snapshots_parquet(snapshots, path)
+    loaded_snapshots = read_indicator_snapshots_parquet(written_path)
+    rows = join_bars_with_indicators(
+        bars,
+        loaded_snapshots,
+        indicator_requirements=requirements,
+    )
+
+    assert path.parts[-3:-1] == ("boll_up20_2_cci14", "qfq")
+    assert all(snapshot.cci14 is None for snapshot in loaded_snapshots[:13])
+    assert loaded_snapshots[13].cci14 is not None
+    assert all(snapshot.boll_up20_2 is None for snapshot in loaded_snapshots[:19])
+    assert loaded_snapshots[19].boll_up20_2 is not None
+    assert rows[-1].indicators.cci_at(14).value == pytest.approx(loaded_snapshots[-1].cci14)
+    assert rows[-1].indicators.boll_up_at(20, 2.0) == pytest.approx(loaded_snapshots[-1].boll_up20_2)
+
+
 def test_indicator_update_plan_uses_longest_required_window() -> None:
     plans = build_indicator_update_plans(
         symbol="000001.SZ",
@@ -194,12 +229,14 @@ def test_indicator_update_plan_uses_longest_required_window() -> None:
             IndicatorRequirement("ma20", "D"),
             IndicatorRequirement("ma60", "D"),
             IndicatorRequirement("rsi14", "D"),
+            IndicatorRequirement("cci14", "D"),
+            IndicatorRequirement("boll_up20_2", "D"),
         ),
     )
 
     assert len(plans) == 1
     plan = plans[0]
-    assert plan.indicator_names == ("ma20", "ma60", "rsi14")
+    assert plan.indicator_names == ("boll_up20_2", "cci14", "ma20", "ma60", "rsi14")
     assert plan.warmup_bars == 60
     assert plan.recompute_lookback_bars == 59
     assert plan.requires_state is True

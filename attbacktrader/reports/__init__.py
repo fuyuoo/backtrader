@@ -207,6 +207,7 @@ from .post_exit import (
     render_post_exit_analysis_markdown_zh,
 )
 from .renderer import render_backtest_report_markdown, render_backtest_report_markdown_zh
+from .scale_out_attribution import build_scale_out_attribution_report
 from .strategy_environment_profile import (
     STRATEGY_ENVIRONMENT_PROFILE_SCHEMA,
     build_strategy_environment_profile_from_artifacts,
@@ -472,6 +473,7 @@ __all__ = [
     "build_review_experiment_confirmed_run_plan",
     "build_review_experiment_drafts",
     "build_review_packet",
+    "build_scale_out_attribution_report",
     "build_result_diagnostics",
     "build_evidence_validation",
     "build_environment_fit_report_from_artifacts",

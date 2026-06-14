@@ -45,6 +45,23 @@ class LifecycleExecutionEvent:
     remaining_cost_value_after: float | None = None
     remaining_cost_basis_after: float | None = None
     cost_recovered_after: bool | None = None
+    scale_out_stage: str | None = None
+    scale_out_mode: str | None = None
+    entry_signal_date: date | None = None
+    entry_signal_day_atr14: float | None = None
+    atr_multiple: float | None = None
+    scale_out_trigger_price: float | None = None
+    confirmation_required: bool | None = None
+    confirmation_passed: bool | None = None
+    confirmation_mode: str | None = None
+    confirmation_block_reason: str | None = None
+    kdj_j: float | None = None
+    cci14: float | None = None
+    boll_up20_2: float | None = None
+    boll_up_distance_pct: float | None = None
+    position_quantity_before: int | None = None
+    remaining_cost_value_before: float | None = None
+    remaining_cost_basis_before: float | None = None
 
     @property
     def accepted(self) -> bool:
@@ -423,6 +440,19 @@ class ExecutionLifecycleComponent:
         price: float,
         stage: ScaleOutStage,
         reason_code: str,
+        scale_out_mode: str | None = None,
+        entry_signal_date: date | None = None,
+        entry_signal_day_atr14: float | None = None,
+        atr_multiple: float | None = None,
+        scale_out_trigger_price: float | None = None,
+        confirmation_required: bool | None = None,
+        confirmation_passed: bool | None = None,
+        confirmation_mode: str | None = None,
+        confirmation_block_reason: str | None = None,
+        kdj_j: float | None = None,
+        cci14: float | None = None,
+        boll_up20_2: float | None = None,
+        boll_up_distance_pct: float | None = None,
     ) -> LifecycleExecutionEvent:
         if stage in self._completed_scale_out_stages:
             return self._rejected_sell_event(
@@ -445,6 +475,9 @@ class ExecutionLifecycleComponent:
                 blocked_by="SCALE_OUT_TOO_SMALL",
             )
 
+        position_quantity_before = self.total_quantity
+        remaining_cost_value_before = self._remaining_cost_value
+        remaining_cost_basis_before = self.adjusted_remaining_cost_basis
         exit_gross_value = executable_quantity * price
         self._remove_quantity_from_lots(executable_quantity, trade_date=trade_date)
         self._remaining_cost_value -= exit_gross_value
@@ -467,6 +500,23 @@ class ExecutionLifecycleComponent:
             requested_quantity=requested_quantity,
             executed_quantity=executable_quantity,
             price=price,
+            scale_out_stage=stage.value,
+            scale_out_mode=scale_out_mode,
+            entry_signal_date=entry_signal_date,
+            entry_signal_day_atr14=entry_signal_day_atr14,
+            atr_multiple=atr_multiple,
+            scale_out_trigger_price=scale_out_trigger_price,
+            confirmation_required=confirmation_required,
+            confirmation_passed=confirmation_passed,
+            confirmation_mode=confirmation_mode,
+            confirmation_block_reason=confirmation_block_reason,
+            kdj_j=kdj_j,
+            cci14=cci14,
+            boll_up20_2=boll_up20_2,
+            boll_up_distance_pct=boll_up_distance_pct,
+            position_quantity_before=position_quantity_before,
+            remaining_cost_value_before=remaining_cost_value_before,
+            remaining_cost_basis_before=remaining_cost_basis_before,
             **self._event_position_state(),
         )
 

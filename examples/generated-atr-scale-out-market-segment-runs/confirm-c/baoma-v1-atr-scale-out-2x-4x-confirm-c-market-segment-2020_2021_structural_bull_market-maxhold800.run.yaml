@@ -1,0 +1,99 @@
+# Generated for ATR scale-out market-segment validation.
+# source_segment_id: 2020_2021_structural_bull_market
+# label_zh: 2020-2021 年结构性牛市推进
+# market_type_id: bull_market
+# variant: atr_2x_4x_confirm_c
+# Industry attribution is disabled for this experiment to avoid unrelated industry-index snapshot requirements.
+# The YAML below is a legal RunPlan; segment metadata is stored in the manifest.
+---
+run:
+  id: baoma-v1-atr-scale-out-2x-4x-confirm-c-market-segment-2020_2021_structural_bull_market-maxhold800
+  from_date: '2020-03-23'
+  to_date: '2021-02-18'
+data:
+  snapshot_root: data/snapshots
+  provider: tushare
+  price_adjustment: qfq
+  refresh_snapshots: false
+  stock_pool_file: examples/stock-pools/baoma-hs300-csi500-20260607.csv
+  benchmark_series:
+    indexes:
+    - 000300.SH
+    - 000905.SH
+  industry_series:
+    source: SW2021
+    indexes: []
+strategy:
+  template: trend_template_v1
+  entry_method: baoma_entry
+  entry_params:
+    dea_max_age_trading_days: 14
+  profit_taking_method: baoma_ma25_profit_exit
+  stop_loss_method: baoma_ma60_stop
+  add_on_method: baoma_add_on
+  add_on_params:
+    dea_max_age_trading_days: 14
+    max_add_on_count: 2
+  sizing_rule: equal_weight
+  sizing_params:
+    max_holding_count: 800
+    min_order_quantity: 100
+constraints:
+  ashare:
+    enabled: true
+    t_plus_one: true
+    limit_up_down: true
+    suspension: true
+    board_lot_size: 100
+broker:
+  initial_cash: 10000000000
+  commission_rate: 0.0003
+  stamp_tax_rate: 0.001
+  transfer_fee_rate: 1.0e-05
+  slippage:
+    type: percent
+    value: 0.0005
+execution:
+  engine: baoma_v1_business
+  stake: 100
+  baoma:
+    buy_slice_fraction: 0.33
+    scale_out_mode: atr_multiple
+    first_scale_out_atr_multiple: 2.0
+    second_scale_out_atr_multiple: 4.0
+    second_scale_out_confirmation:
+      enabled: true
+      mode: kdj_cci_boll_up_distance
+      min_kdj_j: 100.0
+      min_cci14: 150.0
+      min_boll_up_distance: 0.03
+    force_exit_at_end: false
+output:
+  persist: true
+  report_root: reports
+  artifact_detail: compact
+  signal_audit_sample_limit: 200
+analysis:
+  industry_attribution:
+    enabled: false
+    source: SW2021
+    levels:
+    - 1
+    - 2
+    - 3
+  market_regime:
+    enabled: true
+    timeframes:
+    - D
+    - W
+    - M
+  scenario_fit:
+    enabled: true
+    min_trades: 3
+  post_exit:
+    enabled: true
+    window_days:
+    - 5
+    primary_window_days: 5
+  entry_attribution:
+    enabled: false

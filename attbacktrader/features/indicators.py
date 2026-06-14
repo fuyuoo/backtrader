@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import sqrt
 from typing import Sequence
 
 
@@ -36,6 +37,21 @@ class RSIValue:
 class ATRValue:
     period: int
     value: float
+
+
+@dataclass(frozen=True)
+class CCIValue:
+    period: int
+    value: float
+
+
+@dataclass(frozen=True)
+class BollingerValue:
+    period: int
+    devfactor: float
+    mid: float
+    upper: float
+    lower: float
 
 
 def calculate_sma(values: Sequence[float], *, period: int) -> tuple[MAValue | None, ...]:
@@ -179,6 +195,76 @@ def calculate_kdj(
         d_value = (2.0 / 3.0) * d_value + (1.0 / 3.0) * k_value
         j_value = 3.0 * k_value - 2.0 * d_value
         values.append(KDJValue(k=k_value, d=d_value, j=j_value))
+
+    return tuple(values)
+
+
+def calculate_cci(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    *,
+    period: int = 14,
+    constant: float = 0.015,
+) -> tuple[CCIValue | None, ...]:
+    """Calculate CCI using typical price and mean absolute deviation."""
+
+    if period <= 0:
+        raise ValueError("period must be positive")
+    if constant <= 0:
+        raise ValueError("constant must be positive")
+    if not (len(highs) == len(lows) == len(closes)):
+        raise ValueError("highs, lows, and closes must have the same length")
+
+    typical_prices = [
+        (float(high) + float(low) + float(close)) / 3.0
+        for high, low, close in zip(highs, lows, closes)
+    ]
+    values: list[CCIValue | None] = []
+    for index, typical_price in enumerate(typical_prices):
+        if index + 1 < period:
+            values.append(None)
+            continue
+
+        window = typical_prices[index - period + 1 : index + 1]
+        average = sum(window) / period
+        mean_deviation = sum(abs(value - average) for value in window) / period
+        if mean_deviation == 0:
+            cci = 0.0
+        else:
+            cci = (typical_price - average) / (constant * mean_deviation)
+        values.append(CCIValue(period=period, value=cci))
+
+    return tuple(values)
+
+
+def calculate_bollinger(
+    closes: Sequence[float],
+    *,
+    period: int = 20,
+    devfactor: float = 2.0,
+) -> tuple[BollingerValue | None, ...]:
+    """Calculate Bollinger bands with SMA and population standard deviation."""
+
+    if period <= 0:
+        raise ValueError("period must be positive")
+    if devfactor <= 0:
+        raise ValueError("devfactor must be positive")
+
+    values: list[BollingerValue | None] = []
+    for index, close in enumerate(closes):
+        _ = close
+        if index + 1 < period:
+            values.append(None)
+            continue
+
+        window = [float(value) for value in closes[index - period + 1 : index + 1]]
+        mid = sum(window) / period
+        variance = sum((value - mid) ** 2 for value in window) / period
+        stddev = sqrt(abs(variance))
+        upper = mid + devfactor * stddev
+        lower = mid - devfactor * stddev
+        values.append(BollingerValue(period=period, devfactor=devfactor, mid=mid, upper=upper, lower=lower))
 
     return tuple(values)
 
