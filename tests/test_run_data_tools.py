@@ -290,6 +290,78 @@ def test_attribution_wide_samples_builds_field_index_and_enriched_environment_fi
     )
 
 
+def test_attribution_wide_samples_ignores_reference_metadata_fields_without_rows(tmp_path: Path) -> None:
+    run_dir = _run_dir(tmp_path)
+    reference_path = _reference_snapshot(tmp_path)
+    reference = json.loads(reference_path.read_text(encoding="utf-8"))
+    reference["metadata"]["fields"].extend(
+        [
+            {
+                "field_key": "symbol.metadata_only",
+                "label_zh": "仅声明的个股字段",
+                "value_type": "value",
+                "timing": "symbol",
+                "scope": "symbol",
+            },
+            {
+                "field_key": "sizing.metadata_only",
+                "label_zh": "仅声明的仓位字段",
+                "value_type": "value",
+                "timing": "sizing",
+                "scope": "sizing",
+            },
+        ]
+    )
+    reference["metadata"]["environment_fit_default_fields"].extend(
+        ["symbol.metadata_only", "sizing.metadata_only"]
+    )
+    reference["metadata"]["environment_fit_pair_whitelist"].append(
+        ["symbol.metadata_only", "entry.price_position.near_high_20d_bucket"]
+    )
+    reference_path.write_text(json.dumps(reference, ensure_ascii=False), encoding="utf-8")
+    run_payload = json.loads((run_dir / "trade_attribution.json").read_text(encoding="utf-8"))
+    run_payload["attributions"].append(
+        {
+            "trade_index": 2,
+            "symbol": "600519.SH",
+            "outcome": "win",
+            "entry_date": "2024-01-11",
+            "exit_date": "2024-01-18",
+            "exit_reason": "KDJ_J_ABOVE_100",
+            "return_pct": 0.10,
+            "entry": {
+                "trade_date": "2024-01-11",
+                "factors": [
+                    {"key": "industry.sw_l1.code", "value": "801780.SI", "missing": False},
+                ],
+            },
+        }
+    )
+    (run_dir / "trade_attribution.json").write_text(
+        json.dumps(run_payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    wide_samples = build_attribution_wide_samples(run_dir, reference_snapshot=reference_path)
+
+    first_fields = wide_samples["samples"][0]["field_values"]
+    second_fields = wide_samples["samples"][1]["field_values"]
+    index_by_key = {field["field_key"]: field for field in wide_samples["field_index"]["fields"]}
+    assert "symbol.metadata_only" not in first_fields
+    assert "sizing.metadata_only" not in first_fields
+    assert "symbol.metadata_only" not in index_by_key
+    assert "sizing.metadata_only" not in index_by_key
+    assert "symbol.metadata_only" not in wide_samples["environment_fit_default_fields"]
+    assert ["symbol.metadata_only", "entry.price_position.near_high_20d_bucket"] not in wide_samples[
+        "environment_fit_pair_whitelist"
+    ]
+    assert first_fields["symbol.close"]["raw"] == 9.8
+    assert "symbol.close" not in second_fields
+    symbol_close = index_by_key["symbol.close"]
+    assert symbol_close["coverage_stats"]["sample_count"] == 1
+    assert symbol_close["coverage_stats"]["missing_count"] == 0
+
+
 def test_attribution_field_index_does_not_fallback_raw_for_bucket_fields() -> None:
     wide_samples = {
         "schema": "attbacktrader.attribution_wide_samples.v1",
@@ -336,6 +408,44 @@ def test_attribution_field_index_does_not_fallback_raw_for_bucket_fields() -> No
     values = {bucket["value"]: bucket["count"] for bucket in field["bucket_distribution"]}
     assert field["coverage_stats"]["missing_count"] == 1
     assert values == {"p20_p40": 1, None: 1}
+
+
+def test_attribution_field_index_uses_categorical_raw_for_bucket_fields() -> None:
+    wide_samples = {
+        "schema": "attbacktrader.attribution_wide_samples.v1",
+        "run_id": "field-index-categorical-bucket-test",
+        "source_dir": "reports/field-index-categorical-bucket-test",
+        "reference_path": "reference",
+        "samples": [
+            {
+                "trade_index": 1,
+                "return_pct": 0.02,
+                "field_values": {
+                    "symbol.kdj.week.j_bucket": {
+                        "raw": "50-80",
+                        "bucket": None,
+                        "exception_codes": [],
+                    }
+                },
+            }
+        ],
+    }
+
+    index = build_attribution_field_index(
+        wide_samples,
+        field_catalog={
+            "symbol.kdj.week.j_bucket": {
+                "field_key": "symbol.kdj.week.j_bucket",
+                "value_type": "bucket",
+            }
+        },
+    )
+
+    field = index["fields"][0]
+    values = {bucket["value"]: bucket["count"] for bucket in field["bucket_distribution"]}
+    assert field["coverage_stats"]["sample_count"] == 1
+    assert field["coverage_stats"]["missing_count"] == 0
+    assert values == {"50-80": 1}
 
 
 def test_attribution_wide_samples_treats_stale_reference_rows_as_missing(tmp_path: Path) -> None:
@@ -415,6 +525,8 @@ def test_attribution_wide_samples_derives_path_and_signal_strength_from_daily_ca
     assert fields["trade.path.reached_10pct_bucket"]["bucket"] == "not_reached"
     assert fields["trade.path.reached_15pct_bucket"]["bucket"] == "not_reached"
     assert fields["trade.path.post_exit_5d_max_high_return_bucket"]["bucket"] == "up_gt_10pct"
+    assert "trade.path.sold_too_early_5d_bucket" not in fields
+    assert "trade.path.stop_loss_rebound_5d_bucket" not in fields
     assert fields["trade.exit.reason"]["bucket"] == "FIXED_5_PERCENT_STOP"
     assert "entry.weekly.symbol_kdj_state" in wide_samples["environment_fit_default_fields"]
     assert "industry.weekly.kdj_state" in wide_samples["environment_fit_default_fields"]

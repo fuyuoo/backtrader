@@ -418,6 +418,50 @@ _Avoid_: Stop-loss rule, optimized stop distance, using future-day indicators
 A comparison between winning and losing entry attribution samples that ranks factors by differences such as true-rate gap, average-value gap, or category-rate gap.
 _Avoid_: Predictive signal proof, statistical causality claim
 
+**Bayesian Factor Discovery**:
+A post-run statistical lens that classifies persisted attribution evidence into favorable, unfavorable, or weak candidate factor buckets using completed-trade outcomes. It is research evidence only and does not create live entry, exit, scale-out, or sizing rules.
+_Avoid_: Bayesian parameter tuning, live trading model, causal proof
+
+**Factor Quality Score**:
+A research scoring objective for Bayesian factor discovery that balances capital return, per-trade expected return, profit factor, win rate, drawdown risk, and sample reliability when ranking factor buckets. It is not a portfolio Sharpe ratio and is not an automatic parameter-tuning target.
+_Avoid_: Sharpe ratio proxy, win-rate-only score, optimization objective
+
+**Tradable Pre-Entry Factor Discovery**:
+The part of Bayesian factor discovery that only uses evidence visible at or before the entry decision, making it eligible for later review as a candidate strategy rule.
+_Avoid_: Full-lifecycle diagnosis, future-data factor, post-trade filter
+
+**Entry Factor Optimization Experiment**:
+A validation experiment that turns tradable pre-entry factor findings into candidate entry filters and tests them with separate backtest evidence before any strategy rule is changed. It only concerns entry-time factors and does not optimize exits, scale-outs, sizing, or lifecycle diagnostics.
+_Avoid_: Bayesian parameter tuning system, live rule change, lifecycle optimization
+
+**Market-Stage Stratified Entry Validation**:
+An entry-factor validation lens that compares candidate filters by year and by objective entry market stage so market-regime differences are not mistaken for factor quality. It treats stage-specific results as conditional evidence rather than universal entry rules.
+_Avoid_: Simple year split, bull-market overfit, unconditioned validation
+
+**Single-Factor Entry Filter Experiment**:
+An entry optimization experiment that tests one tradable pre-entry factor bucket at a time as either a keep filter for favorable buckets or an exclude filter for unfavorable buckets. It deliberately avoids multi-factor rule search, threshold retuning, ranking, and sizing changes in its first version.
+_Avoid_: Multi-factor optimizer, parameter search, position ranking
+
+**Offline Entry Filter Screening**:
+A pre-backtest screening step that applies candidate entry filters to already persisted completed-trade samples to estimate directional impact before spending full backtest runs. It is not a substitute for real backtest validation because it cannot model freed capital, changed holding pressure, or replacement trades.
+_Avoid_: Final validation, real portfolio simulation, strategy proof
+
+**Single-Factor Real Validation Matrix**:
+A validation matrix that tests each candidate tradable pre-entry factor as its own real strategy variant against the same baseline before any factor is combined with another. It classifies factors as stable favorable, stable unfavorable, market-stage dependent, or noise.
+_Avoid_: Sequential lock-in, offline-only screening, multi-factor search
+
+**Stable Entry Factor Combination Validation**:
+A second-stage validation that combines only factors that survived single-factor real validation and re-runs the strategy after each added filter. It checks whether individually useful entry factors still improve the strategy when combined.
+_Avoid_: Exhaustive combination search, unvalidated factor stacking, permanent default rule
+
+**Full-Lifecycle Attribution Diagnosis**:
+A comprehensive Bayesian attribution view that may include entry, exit, holding-path, post-exit, and scale-out evidence to explain where a strategy works or fails across the trade lifecycle. It is diagnostic evidence and must not be treated as an entry signal when it uses information unavailable at entry time.
+_Avoid_: Tradable pre-entry factor, future-function buy rule, automatic strategy change
+
+**Lifecycle Diagnostic Factor**:
+A factor bucket from exit, holding-path, post-exit, scale-out, or other post-entry evidence that explains trade outcomes but is not eligible to become an entry rule without a separate pre-entry proxy.
+_Avoid_: Entry signal, tradable factor, future-function filter
+
 **Exit Attribution**:
 A post-run explanation that links a completed trade back to the exit intent that closed it and summarizes the decision evidence visible at exit time.
 _Avoid_: Entry attribution, report-time exit calculation

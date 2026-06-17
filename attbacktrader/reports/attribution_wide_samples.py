@@ -989,8 +989,6 @@ def build_attribution_wide_samples(
             }
 
         for key, value in _entry_factor_values(trade).items():
-            if key not in field_values and key not in field_catalog:
-                field_catalog[key] = _fallback_field_catalog_item(key)
             field_values.setdefault(
                 key,
                 {
@@ -1070,18 +1068,26 @@ def build_attribution_wide_samples(
         "sample_count": len(samples),
         "field_count": len(field_catalog),
         "environment_fit_default_fields": _environment_default_fields(field_catalog, reference["metadata"]),
-        "environment_fit_pair_whitelist": _environment_pair_whitelist(reference["metadata"]),
+        "environment_fit_pair_whitelist": _environment_pair_whitelist(
+            reference["metadata"],
+            available_field_keys=field_catalog,
+        ),
         "outcome_diagnostic_pair_whitelist": _outcome_diagnostic_pair_whitelist(),
         "samples": samples,
         "reference_metadata": reference["metadata"],
     }
     payload["field_index"] = build_attribution_field_index(payload, field_catalog=field_catalog)
+    payload["field_count"] = payload["field_index"]["field_count"]
     return payload
 
 
 def _field_index_value(field_key: str, field_catalog_item: Mapping[str, Any], payload: Mapping[str, Any]) -> Any:
     if _is_bucket_field(field_key, field_catalog_item):
-        return payload.get("bucket")
+        bucket = payload.get("bucket")
+        if bucket is not None:
+            return bucket
+        raw = payload.get("raw")
+        return raw if isinstance(raw, str) and raw else None
     bucket = payload.get("bucket")
     return bucket if bucket is not None else payload.get("raw")
 
@@ -1195,7 +1201,8 @@ def build_attribution_field_index(
         "field_count": len(fields),
         "environment_fit_default_fields": defaults,
         "environment_fit_pair_whitelist": _environment_pair_whitelist(
-            _as_mapping(wide_samples.get("reference_metadata"))
+            _as_mapping(wide_samples.get("reference_metadata")),
+            available_field_keys=catalog,
         ),
         "outcome_diagnostic_pair_whitelist": _outcome_diagnostic_pair_whitelist(),
         "fields": fields,
@@ -1936,10 +1943,25 @@ def _add_post_exit_path_fields(
             POST_EXIT_MAX_HIGH_5D_FIELD,
             POST_EXIT_MAX_CLOSE_5D_FIELD,
             POST_EXIT_MIN_LOW_5D_FIELD,
-            SOLD_TOO_EARLY_5D_FIELD,
-            STOP_LOSS_REBOUND_5D_FIELD,
         ):
             field_values[field_key] = _derived_payload(
+                raw=None,
+                bucket=None,
+                asof_date=asof_date,
+                reference_count=0,
+                exception_codes=["post_exit_price_missing"],
+            )
+        exit_reason = _as_str(trade.get("exit_reason"))
+        if exit_reason == "BAOMA_MA25_PROFIT_EXIT_TRIGGERED":
+            field_values[SOLD_TOO_EARLY_5D_FIELD] = _derived_payload(
+                raw=None,
+                bucket=None,
+                asof_date=asof_date,
+                reference_count=0,
+                exception_codes=["post_exit_price_missing"],
+            )
+        if exit_reason == "BAOMA_MA60_STOP_TRIGGERED":
+            field_values[STOP_LOSS_REBOUND_5D_FIELD] = _derived_payload(
                 raw=None,
                 bucket=None,
                 asof_date=asof_date,
@@ -1956,8 +1978,10 @@ def _add_post_exit_path_fields(
     min_low_return = _optional_float(low.min()) / exit_price - 1.0 if not low.empty and pd.notna(low.min()) else None
     reference_count = int(len(rows))
     exit_reason = _as_str(trade.get("exit_reason"))
-    sold_too_early = exit_reason == "BAOMA_MA25_PROFIT_EXIT_TRIGGERED" and max_high_return is not None and max_high_return >= 0.05
-    stop_rebound = exit_reason == "BAOMA_MA60_STOP_TRIGGERED" and max_high_return is not None and max_high_return >= 0.05
+    is_take_profit_exit = exit_reason == "BAOMA_MA25_PROFIT_EXIT_TRIGGERED"
+    is_stop_loss_exit = exit_reason == "BAOMA_MA60_STOP_TRIGGERED"
+    sold_too_early = max_high_return is not None and max_high_return >= 0.05
+    stop_rebound = max_high_return is not None and max_high_return >= 0.05
 
     field_values[POST_EXIT_MAX_HIGH_5D_FIELD] = _derived_payload(
         raw=max_high_return,
@@ -1980,20 +2004,22 @@ def _add_post_exit_path_fields(
         reference_count=reference_count,
         exception_codes=[] if min_low_return is not None else ["post_exit_price_missing"],
     )
-    field_values[SOLD_TOO_EARLY_5D_FIELD] = _derived_payload(
-        raw=sold_too_early if exit_reason == "BAOMA_MA25_PROFIT_EXIT_TRIGGERED" else None,
-        bucket=_diagnostic_bool_bucket(sold_too_early) if exit_reason == "BAOMA_MA25_PROFIT_EXIT_TRIGGERED" else None,
-        asof_date=asof_date,
-        reference_count=reference_count,
-        exception_codes=[] if exit_reason == "BAOMA_MA25_PROFIT_EXIT_TRIGGERED" else ["not_take_profit_exit"],
-    )
-    field_values[STOP_LOSS_REBOUND_5D_FIELD] = _derived_payload(
-        raw=stop_rebound if exit_reason == "BAOMA_MA60_STOP_TRIGGERED" else None,
-        bucket=_diagnostic_bool_bucket(stop_rebound) if exit_reason == "BAOMA_MA60_STOP_TRIGGERED" else None,
-        asof_date=asof_date,
-        reference_count=reference_count,
-        exception_codes=[] if exit_reason == "BAOMA_MA60_STOP_TRIGGERED" else ["not_stop_loss_exit"],
-    )
+    if is_take_profit_exit:
+        field_values[SOLD_TOO_EARLY_5D_FIELD] = _derived_payload(
+            raw=sold_too_early if max_high_return is not None else None,
+            bucket=_diagnostic_bool_bucket(sold_too_early) if max_high_return is not None else None,
+            asof_date=asof_date,
+            reference_count=reference_count,
+            exception_codes=[] if max_high_return is not None else ["post_exit_price_missing"],
+        )
+    if is_stop_loss_exit:
+        field_values[STOP_LOSS_REBOUND_5D_FIELD] = _derived_payload(
+            raw=stop_rebound if max_high_return is not None else None,
+            bucket=_diagnostic_bool_bucket(stop_rebound) if max_high_return is not None else None,
+            asof_date=asof_date,
+            reference_count=reference_count,
+            exception_codes=[] if max_high_return is not None else ["post_exit_price_missing"],
+        )
 
 
 def _add_entry_signal_strength_fields(
@@ -2821,12 +2847,15 @@ def _load_reference_snapshot(path_like: str | Path) -> dict[str, Any]:
         parquet_path = path / "reference_values.parquet"
         metadata_path = path / "metadata.json"
         metadata = _as_mapping(_load_json_if_exists(metadata_path)) if metadata_path.exists() else {}
-        if json_path.exists():
+        if parquet_path.exists():
+            if not metadata and json_path.exists():
+                payload = _as_mapping(_load_json_if_exists(json_path))
+                metadata = _as_mapping(payload.get("metadata"))
+            rows = _parquet_rows(parquet_path)
+        elif json_path.exists():
             payload = _as_mapping(_load_json_if_exists(json_path))
             metadata = _as_mapping(payload.get("metadata")) or metadata
             rows = _as_sequence(payload.get("rows") or payload.get("samples"))
-        elif parquet_path.exists():
-            rows = _parquet_rows(parquet_path)
         else:
             raise FileNotFoundError(f"reference snapshot directory lacks reference.json or reference_values.parquet: {path}")
         return {"source_path": path, "metadata": metadata, "rows": [_as_mapping(row) for row in rows]}
@@ -2845,26 +2874,38 @@ def _load_reference_snapshot(path_like: str | Path) -> dict[str, Any]:
 
 def _parquet_rows(path: Path) -> list[dict[str, Any]]:
     frame = pd.read_parquet(path)
-    return [row.dropna().to_dict() for _, row in frame.iterrows()]
+    records = frame.astype(object).where(pd.notna(frame), None).to_dict("records")
+    return [
+        {key: value for key, value in record.items() if value is not None}
+        for record in records
+    ]
 
 
 def _field_catalog(reference: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     metadata = _as_mapping(reference.get("metadata"))
     fields = metadata.get("fields")
-    catalog: dict[str, dict[str, Any]] = {}
+    metadata_items: dict[str, dict[str, Any]] = {}
     if isinstance(fields, Mapping):
         for key, value in fields.items():
-            catalog[str(key)] = dict(_fallback_field_catalog_item(str(key)), **_as_mapping(value))
+            metadata_items[str(key)] = _as_mapping(value)
     elif isinstance(fields, list):
         for value in fields:
             item = _as_mapping(value)
             key = _as_str(item.get("field_key"))
             if key:
-                catalog[key] = dict(_fallback_field_catalog_item(key), **item)
+                metadata_items[key] = item
+
+    row_keys: list[str] = []
+    seen_row_keys: set[str] = set()
     for row in _as_sequence(reference.get("rows")):
         key = _as_str(_as_mapping(row).get("field_key"))
-        if key:
-            catalog.setdefault(key, _fallback_field_catalog_item(key))
+        if key and key not in seen_row_keys:
+            row_keys.append(key)
+            seen_row_keys.add(key)
+
+    catalog: dict[str, dict[str, Any]] = {}
+    for key in row_keys:
+        catalog[key] = dict(_fallback_field_catalog_item(key), **_as_mapping(metadata_items.get(key)))
     return catalog
 
 
@@ -2887,7 +2928,12 @@ def _fallback_field_catalog_item(field_key: str) -> dict[str, Any]:
 
 
 def _environment_default_fields(catalog: Mapping[str, Mapping[str, Any]], metadata: Mapping[str, Any]) -> list[str]:
-    configured = [str(item) for item in _as_sequence(metadata.get("environment_fit_default_fields"))]
+    catalog_keys = set(catalog)
+    configured = [
+        str(item)
+        for item in _as_sequence(metadata.get("environment_fit_default_fields"))
+        if str(item) in catalog_keys
+    ]
     defaults = configured or []
     for key in sorted(catalog):
         if _as_mapping(catalog[key]).get("default_in_environment_fit") is True and key not in defaults:
@@ -2895,11 +2941,24 @@ def _environment_default_fields(catalog: Mapping[str, Mapping[str, Any]], metada
     return defaults
 
 
-def _environment_pair_whitelist(metadata: Mapping[str, Any]) -> list[list[str]]:
+def _environment_pair_whitelist(
+    metadata: Mapping[str, Any],
+    *,
+    available_field_keys: Mapping[str, Any] | set[str] | None = None,
+) -> list[list[str]]:
+    available = set(available_field_keys) if available_field_keys is not None else None
+
+    def pair_is_available(pair: Sequence[str]) -> bool:
+        return available is None or all(part in available for part in pair)
+
     configured = _as_sequence(metadata.get("environment_fit_pair_whitelist"))
     pairs = []
     if configured:
-        pairs.extend([[str(part) for part in _as_sequence(pair)] for pair in configured if len(_as_sequence(pair)) == 2])
+        pairs.extend(
+            [str(part) for part in _as_sequence(pair)]
+            for pair in configured
+            if len(_as_sequence(pair)) == 2 and pair_is_available([str(part) for part in _as_sequence(pair)])
+        )
     else:
         pairs.extend([[left, right] for left, right in DEFAULT_ENVIRONMENT_FIT_PAIR_WHITELIST])
     seen = {tuple(pair) for pair in pairs}

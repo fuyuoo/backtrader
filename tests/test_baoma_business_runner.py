@@ -11,7 +11,13 @@ from attbacktrader.engines.business import (
     run_baoma_v1_business,
 )
 from attbacktrader.features import ATRValue, CCIValue, IndicatorFrame, KDJValue, MACDValue, MAValue
-from attbacktrader.strategies import EntryAttributionContext, EntryAttributionEvidence, TradeIntentType
+from attbacktrader.strategies import (
+    EntryAttributionContext,
+    EntryAttributionEvidence,
+    EntryAttributionFilterCondition,
+    EntryAttributionFilterRule,
+    TradeIntentType,
+)
 
 
 SYMBOL = "000001.SZ"
@@ -116,6 +122,47 @@ def test_baoma_business_runner_injects_post_trade_attribution_into_entry_add_on_
     assert add_on_intent.signal_values["attribution"]["checks"]["market.hs300.bullish_trend"] is True
     assert exit_intent.signal_values["attribution"]["checks"]["market.hs300.bullish_trend"] is True
     assert exit_intent.signal_values["attribution"]["checks"]["position.profit_exit_confirmed_profitable"] is True
+
+
+def test_baoma_business_runner_applies_entry_attribution_filter_before_buy() -> None:
+    bars, frame, trade_dates = _baoma_fixture(
+        opens=(10.0, 12.0, 10.0),
+        closes=(10.0, 11.0, 10.0),
+        dea_values=(0.0, 0.1, 0.2),
+        ma60_values=(9.0, 9.0, 9.0),
+        ma25_values=(9.0, 9.0, 9.0),
+    )
+    evidence = EntryAttributionEvidence(categories={"market.hs300.trend_state": "bullish"})
+    context = EntryAttributionContext(
+        evidence_by_key={(SYMBOL, trade_date): evidence for trade_date in trade_dates},
+        enabled_factor_keys=frozenset({"market.hs300.trend_state"}),
+        entry_filter=EntryAttributionFilterRule(
+            enabled=True,
+            conditions=(
+                EntryAttributionFilterCondition(
+                    field="market.hs300.trend_state",
+                    value="bearish",
+                    action="keep",
+                ),
+            ),
+        ),
+    )
+
+    result = run_baoma_v1_business(
+        {SYMBOL: bars},
+        indicators_by_symbol={SYMBOL: frame},
+        config=_one_lot_config(),
+        entry_attribution_context=context,
+    )
+
+    filtered_intent = next(intent for intent in result.intents if intent.reason_code == "ENTRY_ATTRIBUTION_FILTERED")
+
+    assert filtered_intent.intent_type == TradeIntentType.AVOID
+    assert filtered_intent.blocked_by == "ENTRY_ATTRIBUTION_FILTER"
+    assert filtered_intent.signal_values["entry_attribution_filter"]["failed_conditions"] == [
+        "market.hs300.trend_state"
+    ]
+    assert [event for event in result.lifecycle_events if event.side == "buy"] == []
 
 
 def test_baoma_business_runner_exits_at_close_and_injects_lifecycle_cost_for_ma25_profit_exit() -> None:

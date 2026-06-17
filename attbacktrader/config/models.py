@@ -318,9 +318,36 @@ class ScenarioFitConfig(FrozenModel):
     min_trades: PositiveInt = 3
 
 
+class EntryAttributionFilterConditionConfig(FrozenModel):
+    field: str = Field(min_length=1)
+    value: Any
+    action: Literal["keep", "exclude"]
+    operator: Literal["eq"] = "eq"
+
+    @field_validator("field")
+    @classmethod
+    def validate_field(cls, field_name: str) -> str:
+        normalized = field_name.strip()
+        if not normalized:
+            raise ValueError("analysis.entry_attribution.entry_filter.conditions.field cannot be empty")
+        if _entry_filter_condition_uses_future_field(normalized):
+            raise ValueError(f"entry attribution filter condition cannot use future field: {normalized}")
+        if not _entry_filter_condition_has_allowed_namespace(normalized):
+            raise ValueError(f"unknown entry attribution filter condition field: {normalized}")
+        return normalized
+
+    @field_validator("value")
+    @classmethod
+    def validate_value(cls, value: Any) -> Any:
+        if value is None or not isinstance(value, (str, int, float, bool)):
+            raise ValueError("analysis.entry_attribution.entry_filter.conditions.value must be a scalar value")
+        return value
+
+
 class EntryAttributionFilterConfig(FrozenModel):
     enabled: bool = False
     require_checks: tuple[str, ...] = ()
+    conditions: tuple[EntryAttributionFilterConditionConfig, ...] = ()
     missing_policy: Literal["block", "pass"] = "block"
     reason_code: str = "ENTRY_ATTRIBUTION_FILTERED"
     blocked_by: str = "ENTRY_ATTRIBUTION_FILTER"
@@ -345,6 +372,20 @@ class EntryAttributionFilterConfig(FrozenModel):
             raise ValueError(f"entry attribution filter can only require check factors: {non_checks}")
 
         return require_checks
+
+    @field_validator("conditions")
+    @classmethod
+    def validate_conditions(
+        cls,
+        conditions: tuple[EntryAttributionFilterConditionConfig, ...],
+    ) -> tuple[EntryAttributionFilterConditionConfig, ...]:
+        condition_keys = tuple(
+            (condition.field, condition.operator, condition.value, condition.action)
+            for condition in conditions
+        )
+        if len(set(condition_keys)) != len(condition_keys):
+            raise ValueError("analysis.entry_attribution.entry_filter.conditions cannot contain duplicates")
+        return conditions
 
 
 class EntryAttributionConfig(FrozenModel):
@@ -374,8 +415,10 @@ class EntryAttributionConfig(FrozenModel):
         if self.market_fast_period >= self.market_slow_period:
             raise ValueError("analysis.entry_attribution.market_fast_period must be less than market_slow_period")
 
-        if self.entry_filter.enabled and not self.entry_filter.require_checks:
-            raise ValueError("analysis.entry_attribution.entry_filter.require_checks cannot be empty when enabled")
+        if self.entry_filter.enabled and not (self.entry_filter.require_checks or self.entry_filter.conditions):
+            raise ValueError(
+                "analysis.entry_attribution.entry_filter.require_checks or conditions cannot be empty when enabled"
+            )
 
         if self.factors:
             missing_filter_factors = sorted(set(self.entry_filter.require_checks) - set(self.factors))
@@ -383,6 +426,14 @@ class EntryAttributionConfig(FrozenModel):
                 raise ValueError(
                     "analysis.entry_attribution.entry_filter.require_checks must be included in "
                     f"analysis.entry_attribution.factors: {missing_filter_factors}"
+                )
+            missing_filter_condition_fields = sorted(
+                set(_declared_entry_filter_condition_fields(self.entry_filter.conditions)) - set(self.factors)
+            )
+            if missing_filter_condition_fields:
+                raise ValueError(
+                    "analysis.entry_attribution.entry_filter.conditions must be included in "
+                    f"analysis.entry_attribution.factors: {missing_filter_condition_fields}"
                 )
 
         return self
@@ -392,6 +443,43 @@ class EntryAttributionConfig(FrozenModel):
         if self.factors:
             return self.factors
         return tuple(entry_attribution_declaration_by_key())
+
+
+def _entry_filter_condition_uses_future_field(field_name: str) -> bool:
+    normalized = field_name.lower()
+    future_prefixes = (
+        "trade.",
+        "exit.",
+        "post_exit.",
+        "entry_to_exit.",
+        "sizing.",
+        "execution.",
+        "portfolio.",
+    )
+    future_tokens = (
+        "entry_to_exit",
+        "post_exit",
+        "sold_too_early",
+        "stop_loss_rebound",
+    )
+    if normalized.startswith(future_prefixes):
+        return True
+    return any(token in normalized for token in future_tokens)
+
+
+def _entry_filter_condition_has_allowed_namespace(field_name: str) -> bool:
+    declarations = entry_attribution_declaration_by_key()
+    declaration = declarations.get(field_name)
+    if declaration is not None:
+        return "entry" in declaration.timings and declaration.scope in {"symbol", "industry", "market"}
+    return field_name.startswith(("entry.", "symbol.", "industry.", "market."))
+
+
+def _declared_entry_filter_condition_fields(
+    conditions: tuple[EntryAttributionFilterConditionConfig, ...],
+) -> tuple[str, ...]:
+    declarations = entry_attribution_declaration_by_key()
+    return tuple(condition.field for condition in conditions if condition.field in declarations)
 
 
 class AttributionConfig(FrozenModel):
@@ -469,6 +557,15 @@ class AnalysisConfig(FrozenModel):
                 raise ValueError(
                     "analysis.entry_attribution.entry_filter.require_checks must be included in resolved "
                     f"attribution factors: {missing_filter_factors}"
+                )
+            missing_filter_condition_fields = sorted(
+                set(_declared_entry_filter_condition_fields(self.entry_attribution.entry_filter.conditions))
+                - set(self.resolved_entry_attribution_factors)
+            )
+            if missing_filter_condition_fields:
+                raise ValueError(
+                    "analysis.entry_attribution.entry_filter.conditions must be included in resolved "
+                    f"attribution factors: {missing_filter_condition_fields}"
                 )
         return self
 

@@ -398,6 +398,77 @@ def test_entry_attribution_config_validates_factors_and_filter_checks() -> None:
     )
 
 
+def test_entry_attribution_config_loads_filter_conditions() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "entry_attribution": {
+            "entry_filter": {
+                "enabled": True,
+                "conditions": [
+                    {
+                        "field": "symbol.kdj.week.j_bucket",
+                        "value": "<13",
+                        "action": "exclude",
+                    }
+                ],
+                "missing_policy": "block",
+            },
+        }
+    }
+
+    run_plan = RunPlan.from_mapping(raw_config)
+
+    condition = run_plan.analysis.entry_attribution.entry_filter.conditions[0]
+    assert condition.field == "symbol.kdj.week.j_bucket"
+    assert condition.value == "<13"
+    assert condition.action == "exclude"
+    assert condition.operator == "eq"
+    assert run_plan.analysis.entry_attribution.entry_filter.require_checks == ()
+
+
+def test_entry_attribution_filter_conditions_reject_future_fields() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "entry_attribution": {
+            "entry_filter": {
+                "enabled": True,
+                "conditions": [
+                    {
+                        "field": "entry_to_exit.max_return_bucket",
+                        "value": ">10pct",
+                        "action": "keep",
+                    }
+                ],
+            },
+        }
+    }
+
+    with pytest.raises(ValidationError, match="future"):
+        RunPlan.from_mapping(raw_config)
+
+
+def test_entry_attribution_filter_conditions_must_be_enabled_factors_when_declared() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "entry_attribution": {
+            "factors": ["symbol.ma.price_above_ma25"],
+            "entry_filter": {
+                "enabled": True,
+                "conditions": [
+                    {
+                        "field": "symbol.kdj.week.j_bucket",
+                        "value": "<13",
+                        "action": "exclude",
+                    }
+                ],
+            },
+        }
+    }
+
+    with pytest.raises(ValidationError, match="conditions must be included"):
+        RunPlan.from_mapping(raw_config)
+
+
 def test_attribution_config_resolves_include_and_not_include() -> None:
     raw_config = minimal_config()
     raw_config["analysis"] = {

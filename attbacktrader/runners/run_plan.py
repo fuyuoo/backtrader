@@ -48,6 +48,7 @@ from attbacktrader.runners.prepared_data import (
 )
 from attbacktrader.strategies import (
     EntryAttributionContext,
+    EntryAttributionFilterCondition,
     EntryAttributionFilterRule,
     TradeIntent,
     build_entry_attribution_context,
@@ -514,39 +515,11 @@ def _entry_attribution_context(run_plan: RunPlan, prepared_data) -> EntryAttribu
     if not config.enabled:
         return EntryAttributionContext(evidence_by_key={}, enabled_factor_keys=frozenset())
 
-    entry_filter = EntryAttributionFilterRule(
-        enabled=config.entry_filter.enabled,
-        required_checks=config.entry_filter.require_checks,
-        missing_policy=config.entry_filter.missing_policy,
-        reason_code=config.entry_filter.reason_code,
-        blocked_by=config.entry_filter.blocked_by,
+    entry_filter = _entry_attribution_filter_rule(config)
+    enabled_factor_keys = _entry_attribution_enabled_factor_keys(
+        run_plan,
+        run_plan.analysis.resolved_entry_attribution_factors,
     )
-    return build_entry_attribution_context(
-        bars_by_symbol=prepared_data.bars_by_symbol,
-        indicators_by_symbol=prepared_data.indicators_by_symbol,
-        benchmark_bars_by_symbol=prepared_data.benchmark_calculation_bars_by_symbol(run_plan),
-        industry_index_bars_by_symbol=prepared_data.industry_index_calculation_bars_by_symbol(run_plan),
-        memberships_by_symbol=prepared_data.memberships_by_symbol,
-        market_symbol=config.market_symbol,
-        market_fast_period=config.market_fast_period,
-        market_slow_period=config.market_slow_period,
-        industry_kdj_threshold=config.industry_kdj_threshold,
-        enabled_factor_keys=run_plan.analysis.resolved_entry_attribution_factors,
-        entry_filter=entry_filter,
-    )
-
-
-def _baoma_post_trade_attribution_context(run_plan: RunPlan, prepared_data) -> EntryAttributionContext:
-    selection = run_plan.analysis.resolved_attribution_factor_selection
-    if not selection.get("enabled", True):
-        return EntryAttributionContext(evidence_by_key={}, enabled_factor_keys=frozenset())
-
-    entry_keys = set(entry_attribution_factor_keys())
-    enabled_factor_keys = tuple(key for key in selection.get("include", ()) if key in entry_keys)
-    if not enabled_factor_keys:
-        return EntryAttributionContext(evidence_by_key={}, enabled_factor_keys=frozenset())
-
-    config = run_plan.analysis.entry_attribution
     return build_entry_attribution_context(
         bars_by_symbol=prepared_data.bars_by_symbol,
         indicators_by_symbol=prepared_data.indicators_by_symbol,
@@ -558,8 +531,69 @@ def _baoma_post_trade_attribution_context(run_plan: RunPlan, prepared_data) -> E
         market_slow_period=config.market_slow_period,
         industry_kdj_threshold=config.industry_kdj_threshold,
         enabled_factor_keys=enabled_factor_keys,
-        entry_filter=EntryAttributionFilterRule(),
+        entry_filter=entry_filter,
     )
+
+
+def _baoma_post_trade_attribution_context(run_plan: RunPlan, prepared_data) -> EntryAttributionContext:
+    config = run_plan.analysis.entry_attribution
+    entry_filter = _entry_attribution_filter_rule(config)
+    selection = run_plan.analysis.resolved_attribution_factor_selection
+    if not selection.get("enabled", True) and not entry_filter.is_active():
+        return EntryAttributionContext(evidence_by_key={}, enabled_factor_keys=frozenset())
+
+    entry_keys = set(entry_attribution_factor_keys())
+    base_factor_keys = (
+        tuple(key for key in selection.get("include", ()) if key in entry_keys)
+        if selection.get("enabled", True)
+        else ()
+    )
+    enabled_factor_keys = _entry_attribution_enabled_factor_keys(run_plan, base_factor_keys)
+    if not enabled_factor_keys and not entry_filter.is_active():
+        return EntryAttributionContext(evidence_by_key={}, enabled_factor_keys=frozenset())
+
+    return build_entry_attribution_context(
+        bars_by_symbol=prepared_data.bars_by_symbol,
+        indicators_by_symbol=prepared_data.indicators_by_symbol,
+        benchmark_bars_by_symbol=prepared_data.benchmark_calculation_bars_by_symbol(run_plan),
+        industry_index_bars_by_symbol=prepared_data.industry_index_calculation_bars_by_symbol(run_plan),
+        memberships_by_symbol=prepared_data.memberships_by_symbol,
+        market_symbol=config.market_symbol,
+        market_fast_period=config.market_fast_period,
+        market_slow_period=config.market_slow_period,
+        industry_kdj_threshold=config.industry_kdj_threshold,
+        enabled_factor_keys=enabled_factor_keys,
+        entry_filter=entry_filter,
+    )
+
+
+def _entry_attribution_filter_rule(config) -> EntryAttributionFilterRule:
+    if not config.enabled:
+        return EntryAttributionFilterRule()
+    return EntryAttributionFilterRule(
+        enabled=config.entry_filter.enabled,
+        required_checks=config.entry_filter.require_checks,
+        conditions=tuple(
+            EntryAttributionFilterCondition(
+                field=condition.field,
+                value=condition.value,
+                action=condition.action,
+                operator=condition.operator,
+            )
+            for condition in config.entry_filter.conditions
+        ),
+        missing_policy=config.entry_filter.missing_policy,
+        reason_code=config.entry_filter.reason_code,
+        blocked_by=config.entry_filter.blocked_by,
+    )
+
+
+def _entry_attribution_enabled_factor_keys(run_plan: RunPlan, base_factor_keys) -> tuple[str, ...]:
+    condition_fields = tuple(
+        condition.field
+        for condition in run_plan.analysis.entry_attribution.entry_filter.conditions
+    )
+    return tuple(dict.fromkeys((*base_factor_keys, *condition_fields)))
 
 
 def _symbol_results_from_portfolio(

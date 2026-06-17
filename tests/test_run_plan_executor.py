@@ -507,6 +507,9 @@ def test_execute_run_plan_can_route_to_baoma_dedicated_business_runner(tmp_path:
     assert captured["profit_exit_method"].method_name == "baoma_ma25_profit_exit"
     assert captured["stop_loss_method"].method_name == "baoma_ma60_stop"
     assert captured["add_on_method"].method_name == "baoma_add_on"
+    entry_context = captured["entry_attribution_context"]
+    assert entry_context.entry_filter.conditions[0].field == "entry.volatility.atr_20d_bucket"
+    assert "entry.volatility.atr_20d_bucket" in entry_context.enabled_factor_keys
 
 
 def _run_plan(snapshot_root: Path, *, refresh_snapshots: bool) -> RunPlan:
@@ -664,6 +667,18 @@ def _baoma_route_run_plan(snapshot_root: Path) -> RunPlan:
                 "industry_attribution": {"enabled": False},
                 "market_regime": {"enabled": False},
                 "scenario_fit": {"enabled": False},
+                "entry_attribution": {
+                    "entry_filter": {
+                        "enabled": True,
+                        "conditions": [
+                            {
+                                "field": "entry.volatility.atr_20d_bucket",
+                                "value": "2_3pct",
+                                "action": "keep",
+                            }
+                        ],
+                    },
+                },
             },
         }
     )

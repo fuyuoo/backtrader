@@ -26,7 +26,7 @@ from attbacktrader.features import (
     join_bars_with_indicators,
 )
 from attbacktrader.strategies import EntryAttributionContext, TradeIntent, TradeIntentType
-from attbacktrader.strategies.attribution import with_entry_attribution_evidence
+from attbacktrader.strategies.attribution import apply_entry_attribution_filter, with_entry_attribution_evidence
 from attbacktrader.strategies.methods import BaomaAddOn, BaomaEntry, BaomaMa25ProfitExit, BaomaMa60Stop
 
 
@@ -942,7 +942,8 @@ def _intent_with_attribution(
 ) -> TradeIntent:
     if context is None:
         return intent
-    return with_entry_attribution_evidence(intent, context.evidence_for(symbol, trade_date))
+    controlled_intent = with_entry_attribution_evidence(intent, context.evidence_for(symbol, trade_date))
+    return apply_entry_attribution_filter(controlled_intent, context.entry_filter)
 
 
 def _collect_new_closed_trades(
