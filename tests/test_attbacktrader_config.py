@@ -426,6 +426,58 @@ def test_entry_attribution_config_loads_filter_conditions() -> None:
     assert run_plan.analysis.entry_attribution.entry_filter.require_checks == ()
 
 
+def test_entry_attribution_config_accepts_reference_snapshot_condition() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "entry_attribution": {
+            "factors": ["entry.market_cap.total_mv_abs_bucket"],
+            "entry_filter": {
+                "enabled": True,
+                "conditions": [
+                    {
+                        "field": "entry.market_cap.total_mv_abs_bucket",
+                        "value": "0_100yi",
+                        "action": "keep",
+                    }
+                ],
+            },
+        }
+    }
+
+    run_plan = RunPlan.from_mapping(raw_config)
+
+    assert run_plan.analysis.entry_attribution.entry_filter.conditions[0].field == (
+        "entry.market_cap.total_mv_abs_bucket"
+    )
+
+
+def test_entry_attribution_config_loads_numeric_filter_operator() -> None:
+    raw_config = minimal_config()
+    raw_config["analysis"] = {
+        "entry_attribution": {
+            "entry_filter": {
+                "enabled": True,
+                "conditions": [
+                    {
+                        "field": "entry.price_position.signal_close_ma60_pct",
+                        "operator": "gte",
+                        "value": 0.10,
+                        "action": "keep",
+                    }
+                ],
+            },
+        }
+    }
+
+    run_plan = RunPlan.from_mapping(raw_config)
+
+    condition = run_plan.analysis.entry_attribution.entry_filter.conditions[0]
+    assert condition.field == "entry.price_position.signal_close_ma60_pct"
+    assert condition.operator == "gte"
+    assert condition.value == 0.10
+    assert condition.action == "keep"
+
+
 def test_entry_attribution_filter_conditions_reject_future_fields() -> None:
     raw_config = minimal_config()
     raw_config["analysis"] = {

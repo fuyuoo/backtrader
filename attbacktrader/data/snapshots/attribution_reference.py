@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -22,6 +23,14 @@ ATTRIBUTION_REFERENCE_FIELDS_VERSION = "attribution_reference_fields.v1"
 DEFAULT_REFERENCE_UNIVERSE = "full_a_main_chinext_star"
 PERCENTILE_BUCKETS = ("p0_p20", "p20_p40", "p40_p60", "p60_p80", "p80_p100")
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AttributionReferenceSnapshotCandidate:
+    path: Path
+    start_date: date
+    end_date: date
+    reference_universe: str
 
 FIELD_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"field_key": "entry.market_cap.total_mv_bucket", "label_zh": "总市值分位桶", "scope": "market_cap", "value_type": "bucket"},
@@ -94,6 +103,137 @@ def attribution_reference_snapshot_dir(
         / "attribution_reference"
         / reference_universe
         / f"{start_date:%Y-%m-%d}_{end_date:%Y-%m-%d}"
+    )
+
+
+def discover_attribution_reference_snapshot_paths(
+    snapshot_root: str | Path,
+    *,
+    reference_universe: str = DEFAULT_REFERENCE_UNIVERSE,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> tuple[AttributionReferenceSnapshotCandidate, ...]:
+    root = Path(snapshot_root) / "attribution_reference" / reference_universe
+    if not root.exists():
+        return ()
+
+    candidates: list[AttributionReferenceSnapshotCandidate] = []
+    for values_path in sorted(root.rglob("reference_values.parquet")):
+        candidate = _attribution_reference_snapshot_candidate(
+            values_path.parent,
+            reference_universe=reference_universe,
+        )
+        if candidate is None:
+            continue
+        if start_date is not None and candidate.start_date > start_date:
+            continue
+        if end_date is not None and candidate.end_date < end_date:
+            continue
+        candidates.append(candidate)
+    return tuple(sorted(candidates, key=lambda item: (item.start_date, item.end_date, item.path.name)))
+
+
+def select_attribution_reference_snapshot_path(
+    snapshot_root: str | Path,
+    *,
+    reference_universe: str = DEFAULT_REFERENCE_UNIVERSE,
+    start_date: date,
+    end_date: date,
+) -> Path | None:
+    candidates = discover_attribution_reference_snapshot_paths(
+        snapshot_root,
+        reference_universe=reference_universe,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda item: (
+            item.start_date,
+            item.end_date,
+            len(item.path.name),
+            item.path.name,
+        ),
+    ).path
+
+
+def read_attribution_reference_values_parquet(
+    snapshot_path: str | Path,
+    *,
+    symbols: Sequence[str] | None = None,
+    field_keys: Sequence[str] | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> tuple[Mapping[str, Any], ...]:
+    path = Path(snapshot_path)
+    values_path = path / "reference_values.parquet" if path.is_dir() else path
+    if not values_path.exists():
+        return ()
+
+    frame = pd.read_parquet(values_path)
+    if frame.empty:
+        return ()
+    if "symbol" not in frame.columns or "trade_date" not in frame.columns or "field_key" not in frame.columns:
+        raise ValueError(f"reference values parquet lacks required columns: {values_path}")
+
+    if symbols:
+        symbol_set = {str(symbol) for symbol in symbols}
+        frame = frame[frame["symbol"].astype(str).isin(symbol_set)]
+    if field_keys:
+        field_key_set = {str(field_key) for field_key in field_keys}
+        frame = frame[frame["field_key"].astype(str).isin(field_key_set)]
+    if start_date is not None or end_date is not None:
+        trade_dates = pd.to_datetime(frame["trade_date"], errors="coerce").dt.date
+        mask = pd.Series(True, index=frame.index)
+        if start_date is not None:
+            mask &= trade_dates >= start_date
+        if end_date is not None:
+            mask &= trade_dates <= end_date
+        frame = frame[mask]
+
+    records = frame.astype(object).where(pd.notna(frame), None).to_dict("records")
+    return tuple(
+        {str(key): value for key, value in record.items() if value is not None}
+        for record in records
+    )
+
+
+def decode_attribution_reference_cell(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
+def _attribution_reference_snapshot_candidate(
+    path: Path,
+    *,
+    reference_universe: str,
+) -> AttributionReferenceSnapshotCandidate | None:
+    metadata_path = path / "metadata.json"
+    metadata = _as_mapping(json.loads(metadata_path.read_text(encoding="utf-8"))) if metadata_path.exists() else {}
+    candidate_start = _coerce_date(metadata.get("start_date"))
+    candidate_end = _coerce_date(metadata.get("end_date"))
+    if candidate_start is None or candidate_end is None:
+        parts = path.name.split("_")
+        if len(parts) >= 2:
+            candidate_start = candidate_start or _coerce_date(parts[0])
+            candidate_end = candidate_end or _coerce_date(parts[1])
+    if candidate_start is None or candidate_end is None:
+        return None
+    universe = str(metadata.get("reference_universe") or reference_universe)
+    return AttributionReferenceSnapshotCandidate(
+        path=path,
+        start_date=candidate_start,
+        end_date=candidate_end,
+        reference_universe=universe,
     )
 
 

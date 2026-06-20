@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Mapping
@@ -26,16 +26,19 @@ from attbacktrader.data.snapshots import (
     DailyBarsSnapshotCandidate,
     IndexBarsSnapshotCandidate,
     SnapshotProvenance,
+    decode_attribution_reference_cell,
     discover_index_bars_snapshot_paths,
     discover_industry_index_bars_snapshot_paths,
     discover_tradable_bars_snapshot_paths,
     index_bars_snapshot_path,
     industry_index_bars_snapshot_path,
     read_daily_bars_parquet,
+    read_attribution_reference_values_parquet,
     read_index_bars_parquet,
     read_shenwan_classifications_parquet,
     read_stock_industry_memberships_parquet,
     read_tradability_statuses_parquet,
+    select_attribution_reference_snapshot_path,
     shenwan_classification_snapshot_path,
     stock_industry_membership_snapshot_path,
     tradable_bars_snapshot_path,
@@ -67,7 +70,7 @@ from attbacktrader.features import (
     write_indicator_snapshots_parquet,
     write_merged_indicator_snapshots_parquet,
 )
-from attbacktrader.strategies import attribution_declaration_by_key
+from attbacktrader.strategies import EntryAttributionEvidence, attribution_declaration_by_key
 from attbacktrader.strategies.bindings import required_indicators_for_strategy_config
 
 
@@ -156,6 +159,9 @@ class PreparedRunData:
     industry_membership_results: tuple[IndustryMembershipResult, ...]
     memberships_by_symbol: Mapping[str, tuple[StockIndustryMembership, ...]]
     trading_calendar: TradingCalendar | None = None
+    attribution_reference_evidence_by_symbol_date: Mapping[str, Mapping[date, EntryAttributionEvidence]] = field(
+        default_factory=dict
+    )
 
     @property
     def symbols(self) -> tuple[str, ...]:
@@ -278,6 +284,10 @@ def prepare_run_data(
         tradable_series=tradable_series,
         provider=provider,
     )
+    attribution_reference_evidence_by_symbol_date = _prepare_attribution_reference_evidence_by_symbol_date(
+        run_plan,
+        symbols=tuple(prepared_by_symbol),
+    )
 
     return PreparedRunData(
         tradable_series=tradable_series,
@@ -288,6 +298,7 @@ def prepare_run_data(
         industry_membership_results=industry_membership_results,
         memberships_by_symbol=memberships_by_symbol,
         trading_calendar=trading_calendar,
+        attribution_reference_evidence_by_symbol_date=attribution_reference_evidence_by_symbol_date,
     )
 
 
@@ -331,6 +342,110 @@ def _indicator_requirements_from_dependencies(
             continue
         requirements.append(IndicatorRequirement(name, timeframe))
     return tuple(requirements)
+
+
+def _prepare_attribution_reference_evidence_by_symbol_date(
+    run_plan: RunPlan,
+    *,
+    symbols: tuple[str, ...],
+) -> dict[str, dict[date, EntryAttributionEvidence]]:
+    field_keys = _attribution_reference_factor_keys_for_run(run_plan)
+    if not symbols or not field_keys:
+        return {}
+
+    snapshot_path = select_attribution_reference_snapshot_path(
+        run_plan.data.snapshot_root,
+        start_date=run_plan.run.from_date,
+        end_date=run_plan.run.to_date,
+    )
+    if snapshot_path is None:
+        return {}
+
+    rows = read_attribution_reference_values_parquet(
+        snapshot_path,
+        symbols=symbols,
+        field_keys=field_keys,
+        start_date=run_plan.run.from_date,
+        end_date=run_plan.run.to_date,
+    )
+    declarations = attribution_declaration_by_key()
+    payload_by_symbol_date: dict[str, dict[date, dict[str, dict[str, Any]]]] = {}
+    for row in rows:
+        symbol = str(row.get("symbol") or "")
+        trade_date = _reference_trade_date(row)
+        field_key = str(row.get("field_key") or "")
+        declaration = declarations.get(field_key)
+        if not symbol or trade_date is None or declaration is None:
+            continue
+        payload = payload_by_symbol_date.setdefault(symbol, {}).setdefault(
+            trade_date,
+            {"checks": {}, "values": {}, "categories": {}},
+        )
+        raw_value = decode_attribution_reference_cell(row.get("value"))
+        bucket = decode_attribution_reference_cell(row.get("bucket"))
+        if declaration.factor_type == "category":
+            category_value = bucket if bucket is not None else raw_value
+            if category_value is not None:
+                payload["categories"][field_key] = str(category_value)
+        elif declaration.factor_type == "check":
+            if isinstance(raw_value, bool):
+                payload["checks"][field_key] = raw_value
+        else:
+            if raw_value is not None and not isinstance(raw_value, bool):
+                payload["values"][field_key] = raw_value
+
+    return {
+        symbol: {
+            trade_date: EntryAttributionEvidence(
+                checks=payload["checks"],
+                values=payload["values"],
+                categories=payload["categories"],
+            )
+            for trade_date, payload in by_date.items()
+            if payload["checks"] or payload["values"] or payload["categories"]
+        }
+        for symbol, by_date in payload_by_symbol_date.items()
+        if by_date
+    }
+
+
+def _attribution_reference_factor_keys_for_run(run_plan: RunPlan) -> tuple[str, ...]:
+    selection = run_plan.analysis.resolved_attribution_factor_selection
+    configured_source = str(selection.get("configured_source") or "")
+    config = run_plan.analysis.entry_attribution
+    should_consider_selection = (
+        config.enabled
+        or config.entry_filter.enabled
+        or configured_source in {"analysis.attribution.include", "analysis.entry_attribution.factors"}
+    )
+    selected_keys: set[str] = set()
+    if selection.get("enabled", True) and should_consider_selection:
+        selected_keys.update(str(key) for key in selection.get("include", ()))
+    selected_keys.update(str(condition.field) for condition in config.entry_filter.conditions)
+
+    declarations = attribution_declaration_by_key()
+    return tuple(
+        sorted(
+            key
+            for key in selected_keys
+            if (declaration := declarations.get(key)) is not None
+            and declaration.source == "attribution_reference_snapshot"
+        )
+    )
+
+
+def _reference_trade_date(row: Mapping[str, Any]) -> date | None:
+    for key in ("trade_date", "asof_date"):
+        value = row.get(key)
+        if isinstance(value, date):
+            return value
+        if value is None:
+            continue
+        try:
+            return date.fromisoformat(str(value))
+        except ValueError:
+            continue
+    return None
 
 
 def _trading_calendar_for_run(
@@ -417,17 +532,51 @@ def _calendar_days_for_trading_bars(bar_count: int) -> int:
     return ((bar_count * 7) + 4) // 5 + 7
 
 
+_OBJECTIVE_MARKET_COMPONENT_INDEXES = ("000300.SH", "000905.SH")
+_OBJECTIVE_MARKET_COMPOSITE_INDEX = "000985.CSI"
+_OBJECTIVE_MARKET_FACTOR_KEYS = (
+    "market.objective.entry_index_drawdown_250d_bucket",
+    "market.objective.entry_index_ma60_slope_20d_bucket",
+)
+
+
+def _objective_market_component_symbols(run_plan: RunPlan) -> tuple[str, ...]:
+    if not _entry_attribution_has_any_factor(run_plan, keys=_OBJECTIVE_MARKET_FACTOR_KEYS):
+        return ()
+
+    configured_indexes = set(run_plan.data.benchmark_series.indexes)
+    if _OBJECTIVE_MARKET_COMPOSITE_INDEX in configured_indexes:
+        return (_OBJECTIVE_MARKET_COMPOSITE_INDEX,)
+    if set(_OBJECTIVE_MARKET_COMPONENT_INDEXES).issubset(configured_indexes):
+        return _OBJECTIVE_MARKET_COMPONENT_INDEXES
+    return ()
+
+
+def _objective_market_calculation_start_date(run_start_date: date) -> date:
+    return run_start_date - timedelta(days=_calendar_days_for_trading_bars(249))
+
+
+def _entry_attribution_has_any_factor(run_plan: RunPlan, *, keys: tuple[str, ...]) -> bool:
+    config = run_plan.analysis.entry_attribution
+    return config.enabled and any(key in config.resolved_factors for key in keys)
+
+
 def _market_index_calculation_start_date(run_plan: RunPlan, *, symbol: str) -> date:
     config = run_plan.analysis.entry_attribution
     start_date = run_plan.run.from_date
+    if symbol in _objective_market_component_symbols(run_plan):
+        start_date = min(start_date, _objective_market_calculation_start_date(run_plan.run.from_date))
     if not config.enabled or symbol != config.market_symbol:
         if symbol == "000300.SH" and _selected_attribution_has_any_factor(
             run_plan,
             prefixes=("industry.relative.hs300.", "market.hs300.ma"),
         ):
-            return _indicator_calculation_start_date(
+            start_date = min(
                 start_date,
-                indicator_requirements=(IndicatorRequirement("ma60", "D"),),
+                _indicator_calculation_start_date(
+                    run_plan.run.from_date,
+                    indicator_requirements=(IndicatorRequirement("ma60", "D"),),
+                ),
             )
         return start_date
     if _entry_attribution_has_factor(run_plan, prefix="market."):

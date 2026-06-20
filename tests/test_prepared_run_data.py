@@ -15,9 +15,11 @@ from attbacktrader.data import (
     TradabilityStatus,
 )
 from attbacktrader.data.snapshots import (
+    attribution_reference_snapshot_dir,
     read_daily_bars_csv,
     read_daily_bars_parquet,
     tradable_bars_snapshot_path,
+    write_attribution_reference_snapshot,
     write_daily_bars_parquet,
 )
 from attbacktrader.features import (
@@ -151,6 +153,45 @@ def test_prepare_run_data_returns_one_interface_for_snapshots_features_and_analy
     assert prepared.risk_group_by_symbol(level=1) == {"000001.SZ": "801780.SI"}
 
 
+def test_prepare_run_data_loads_attribution_reference_snapshot_evidence(tmp_path: Path) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    provider = FakePreparedDataProvider(bars)
+    run_plan = _run_plan(tmp_path)
+    reference_dir = attribution_reference_snapshot_dir(
+        tmp_path,
+        reference_universe="full_a_main_chinext_star",
+        start_date=date(2023, 1, 1),
+        end_date=date(2024, 12, 31),
+    )
+    write_attribution_reference_snapshot(
+        {
+            "metadata": {
+                "reference_universe": "full_a_main_chinext_star",
+                "start_date": "2023-01-01",
+                "end_date": "2024-12-31",
+            },
+            "rows": [
+                {
+                    "symbol": "000001.SZ",
+                    "trade_date": "2024-01-02",
+                    "field_key": "entry.market_cap.total_mv_abs_bucket",
+                    "value": 80.0,
+                    "bucket": "0_100yi",
+                    "asof_date": "2024-01-02",
+                    "staleness_trading_days": 0,
+                    "exception_codes": [],
+                }
+            ],
+        },
+        reference_dir,
+    )
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+
+    evidence = prepared.attribution_reference_evidence_by_symbol_date["000001.SZ"][date(2024, 1, 2)]
+    assert evidence.categories["entry.market_cap.total_mv_abs_bucket"] == "0_100yi"
+
+
 def test_prepare_run_data_fetches_warmup_windows_for_entry_attribution_indexes(tmp_path: Path) -> None:
     bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
     provider = FakePreparedDataProvider(bars)
@@ -176,6 +217,46 @@ def test_prepare_run_data_fetches_warmup_windows_for_entry_attribution_indexes(t
     assert prepared.benchmark_calculation_bars_by_symbol(run_plan)["000300.SH"][0].trade_date == date(2023, 10, 4)
     assert prepared.industry_index_calculation_bars_by_symbol(run_plan)["801780.SI"][0].trade_date == date(2023, 12, 14)
     assert prepared.benchmark_bars_by_symbol(run_plan)["000300.SH"][0].trade_date >= run_plan.run.from_date
+
+
+def test_prepare_run_data_fetches_objective_market_component_warmup_windows(tmp_path: Path) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    provider = FakePreparedDataProvider(bars)
+    run_plan = _run_plan(tmp_path)
+    run_plan = run_plan.model_copy(
+        update={
+            "data": run_plan.data.model_copy(
+                update={
+                    "benchmark_series": run_plan.data.benchmark_series.model_copy(
+                        update={"indexes": ("000300.SH", "000905.SH")}
+                    )
+                }
+            ),
+            "analysis": run_plan.analysis.model_copy(
+                update={
+                    "entry_attribution": run_plan.analysis.entry_attribution.model_copy(
+                        update={
+                            "factors": (
+                                "market.objective.entry_index_drawdown_250d_bucket",
+                                "market.objective.entry_index_ma60_slope_20d_bucket",
+                            )
+                        }
+                    )
+                }
+            ),
+        }
+    )
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+
+    assert provider.index_ranges == [
+        ("000300.SH", date(2023, 1, 11), run_plan.run.to_date),
+        ("000905.SH", date(2023, 1, 11), run_plan.run.to_date),
+    ]
+    assert prepared.benchmark_calculation_bars_by_symbol(run_plan)["000300.SH"][0].trade_date == date(2023, 1, 11)
+    assert prepared.benchmark_calculation_bars_by_symbol(run_plan)["000905.SH"][0].trade_date == date(2023, 1, 11)
+    assert prepared.benchmark_bars_by_symbol(run_plan)["000300.SH"][0].trade_date >= run_plan.run.from_date
+    assert prepared.benchmark_bars_by_symbol(run_plan)["000905.SH"][0].trade_date >= run_plan.run.from_date
 
 
 def test_prepare_run_data_fetches_warmup_windows_for_selected_industry_relative_attribution(

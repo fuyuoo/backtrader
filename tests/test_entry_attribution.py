@@ -10,6 +10,7 @@ from attbacktrader.features import (
     indicator_frame_from_snapshots,
 )
 from attbacktrader.strategies import (
+    EntryAttributionEvidence,
     EntryAttributionFilterCondition,
     EntryAttributionFilterRule,
     TradeIntent,
@@ -141,12 +142,14 @@ def test_entry_attribution_context_builds_symbol_market_and_industry_evidence() 
     assert evidence.categories["entry.price_position.interval_20d_bucket"] in interval_buckets
     assert evidence.categories["entry.price_position.interval_60d_bucket"] in interval_buckets
     assert evidence.categories["entry.price_position.signal_close_ma60_atr_multiple_bucket"] in atr_multiple_buckets
+    assert isinstance(evidence.values["entry.price_position.signal_close_ma60_pct"], float)
     assert evidence.categories["entry.signal_strength.dea_value_bucket"] in strength_buckets
     assert evidence.categories["entry.signal_strength.macd_bar_bucket"] in strength_buckets
     assert evidence.categories["entry.signal_strength.dif_dea_distance_bucket"] in strength_buckets
     assert evidence.categories["entry.signal_strength.ma25_above_ma60_spread_bucket"] in ma_spread_buckets
     assert evidence.categories["entry.signal_strength.ma60_slope_20d_bucket"] in ma60_slope_buckets
     assert evidence.categories["entry.signal_strength.signal_candle_body_bucket"] == "lt_1pct"
+    assert isinstance(evidence.values["entry.signal_strength.signal_candle_body_pct"], float)
     assert evidence.categories["entry.signal_strength.signal_upper_lower_shadow_bucket"] in shadow_buckets
     assert evidence.categories["entry.signal_strength.dea_waterline_age_trading_days_bucket"] in {
         "day_0",
@@ -284,6 +287,30 @@ def test_entry_attribution_context_uses_completed_weekly_symbol_context() -> Non
         "above_gt_15pct",
     }
     assert evidence.categories["entry.weekly.symbol_ma_trend_bucket"] in {"uptrend", "downtrend", "mixed"}
+
+
+def test_entry_attribution_context_merges_reference_snapshot_evidence() -> None:
+    bars = _daily_bars("000001.SZ", count=5, start_close=10.0, step=0.2)
+    reference_date = bars[1].trade_date
+
+    context = build_entry_attribution_context(
+        bars_by_symbol={"000001.SZ": bars},
+        indicators_by_symbol={},
+        attribution_reference_evidence_by_symbol_date={
+            "000001.SZ": {
+                reference_date: EntryAttributionEvidence(
+                    categories={"entry.market_cap.total_mv_abs_bucket": "0_100yi"}
+                )
+            }
+        },
+        enabled_factor_keys=("entry.market_cap.total_mv_abs_bucket",),
+    )
+
+    evidence = context.evidence_for("000001.SZ", bars[-1].trade_date)
+
+    assert evidence is not None
+    assert evidence.categories["entry.market_cap.total_mv_abs_bucket"] == "0_100yi"
+    assert evidence.values == {}
 
 
 def test_entry_attribution_context_builds_objective_market_index_components() -> None:
@@ -579,6 +606,80 @@ def test_entry_attribution_filter_exclude_condition_blocks_matching_category() -
     filter_audit = filtered.signal_values["entry_attribution_filter"]
     assert filter_audit["failed_conditions"] == ["entry.volatility.atr_20d_bucket"]
     assert filter_audit["conditions"][0]["matched"] is True
+    assert filter_audit["conditions"][0]["passed"] is False
+
+
+def test_entry_attribution_filter_keep_condition_allows_matching_numeric_range() -> None:
+    intent = TradeIntent(
+        intent_type=TradeIntentType.ENTER,
+        symbol="000001.SZ",
+        trade_date=date(2024, 1, 2),
+        method_name="date_entry",
+        reason_code="DATE_ENTRY",
+        signal_values={
+            "attribution": {
+                "values": {
+                    "entry.price_position.signal_close_ma60_pct": 0.12,
+                }
+            }
+        },
+    )
+    rule = EntryAttributionFilterRule(
+        enabled=True,
+        conditions=(
+            EntryAttributionFilterCondition(
+                field="entry.price_position.signal_close_ma60_pct",
+                operator="gte",
+                value=0.10,
+                action="keep",
+            ),
+        ),
+        missing_policy="block",
+    )
+
+    filtered = apply_entry_attribution_filter(intent, rule)
+
+    assert filtered.intent_type == TradeIntentType.ENTER
+    filter_audit = filtered.signal_values["entry_attribution_filter"]
+    assert filter_audit["passed"] is True
+    assert filter_audit["conditions"][0]["matched"] is True
+    assert filter_audit["conditions"][0]["source"] == "values"
+
+
+def test_entry_attribution_filter_keep_condition_blocks_non_matching_numeric_range() -> None:
+    intent = TradeIntent(
+        intent_type=TradeIntentType.ENTER,
+        symbol="000001.SZ",
+        trade_date=date(2024, 1, 2),
+        method_name="date_entry",
+        reason_code="DATE_ENTRY",
+        signal_values={
+            "attribution": {
+                "values": {
+                    "entry.signal_strength.signal_candle_body_pct": 0.02,
+                }
+            }
+        },
+    )
+    rule = EntryAttributionFilterRule(
+        enabled=True,
+        conditions=(
+            EntryAttributionFilterCondition(
+                field="entry.signal_strength.signal_candle_body_pct",
+                operator="gte",
+                value=0.03,
+                action="keep",
+            ),
+        ),
+        missing_policy="block",
+    )
+
+    filtered = apply_entry_attribution_filter(intent, rule)
+
+    assert filtered.intent_type == TradeIntentType.AVOID
+    filter_audit = filtered.signal_values["entry_attribution_filter"]
+    assert filter_audit["failed_conditions"] == ["entry.signal_strength.signal_candle_body_pct"]
+    assert filter_audit["conditions"][0]["matched"] is False
     assert filter_audit["conditions"][0]["passed"] is False
 
 

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from attbacktrader.cli import single_factor_attribution as single_factor_attribution_cli
 from attbacktrader.reports import (
     build_single_factor_attribution_report,
@@ -18,15 +20,34 @@ def test_single_factor_attribution_splits_entry_and_post_trade_fields(tmp_path: 
     assert report["entry_factor_count"] == 2
     assert report["post_trade_stat_count"] == 1
     assert report["excluded_field_count"] == 2
+    assert report["overall"]["average_return_pct"] == pytest.approx(0.013333333333333334)
+    assert report["overall"]["median_return_pct"] == pytest.approx(0.01)
+    assert report["overall"]["max_return_pct"] == pytest.approx(0.05)
+    assert report["overall"]["min_return_pct"] == pytest.approx(-0.02)
+    assert report["overall"]["return_volatility_pct"] == pytest.approx(0.02867441755680876)
+    assert report["overall"]["return_path_max_drawdown_pct"] == pytest.approx(0.02)
+    assert report["overall"]["pnl_path_max_drawdown_on_entry_value"] == pytest.approx(20 / 3000)
     assert json_path.exists()
     assert markdown_path.exists()
-    assert "## 按胜率排序" in markdown
+    assert "## 按平均收益排序" in markdown
+    assert "最大单笔收益" in markdown
+    assert "交易PnL路径最大回撤" in markdown
     assert "## 持仓后统计" in markdown
 
     entry_values = {
         (summary["field_key"], summary["value"])
         for summary in report["entry_single_factor_summaries"]
     }
+    low_summary = next(
+        summary
+        for summary in report["entry_single_factor_summaries"]
+        if summary["field_key"] == "entry.foo_bucket" and summary["value"] == "low"
+    )
+    assert low_summary["average_return_pct"] == pytest.approx(0.015)
+    assert low_summary["max_return_pct"] == pytest.approx(0.05)
+    assert low_summary["return_volatility_pct"] == pytest.approx(0.035)
+    assert low_summary["return_path_max_drawdown_pct"] == pytest.approx(0.02)
+    assert low_summary["pnl_path_max_drawdown_on_entry_value"] == pytest.approx(20 / 2000)
     assert ("entry.foo_bucket", "low") in entry_values
     assert ("entry.foo_bucket", 0.1) not in entry_values
     assert any(summary["field_key"] == "trade.path.holding_days_bucket" for summary in report["post_trade_summaries"])

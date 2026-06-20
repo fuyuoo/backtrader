@@ -294,6 +294,10 @@ _Avoid_: Order, buy/sell command
 A post-run explanation that links a completed trade back to its entry date and the entry decision evidence that was visible on that date.
 _Avoid_: Report recalculation, hindsight indicator calculation
 
+**Entry Signal Date**:
+The trading date whose completed bar provides the entry decision evidence for an entry that executes on the following trading date. For a trade executed on day T, the entry signal date is T-1 in the Baoma entry flow.
+_Avoid_: Entry execution date, same-day open evidence, post-entry evidence
+
 **Entry Attribution Configuration**:
 The run-plan section that selects which declared entry attribution factors are retained, configures market and industry attribution parameters, and optionally enables decision-layer entry filters before sizing.
 _Avoid_: Indicator config, report-only option
@@ -429,6 +433,22 @@ _Avoid_: Sharpe ratio proxy, win-rate-only score, optimization objective
 **Tradable Pre-Entry Factor Discovery**:
 The part of Bayesian factor discovery that only uses evidence visible at or before the entry decision, making it eligible for later review as a candidate strategy rule.
 _Avoid_: Full-lifecycle diagnosis, future-data factor, post-trade filter
+
+**All Entry Single-Factor Attribution Analysis**:
+A pre-entry attribution review that examines all individual entry-time factors directly to screen candidate entry factor values. Candidate screening happens at the factor-value level, such as keeping or excluding a specific `field=value`, while the factor-field level is only used for summary ranking and navigation. Values that satisfy the full candidate threshold form separate keep-filter and exclude-filter validation candidate pools; values with visible but incomplete evidence stay on direction-specific watchlists instead of being promoted. It does not try to explain every source of returns, compress factors into broader themes, or combine multiple factors into a rule. It is research evidence for understanding each factor value's standalone relationship with completed-trade outcomes, not a validation run or a strategy change.
+_Avoid_: Whole-field rule, return-source explanation, theme compression, multi-factor rule search, real validation matrix, treating watchlist evidence as validated
+
+**Entry Single-Factor Candidate Screening Report**:
+A derived report that screens the all-entry single-factor attribution facts into keep-filter candidates, exclude-filter candidates, direction-specific watchlists, execution factors, and exposure watchlists. It is separate from the base all-entry single-factor attribution report so factual attribution and candidate screening decisions remain distinct.
+_Avoid_: Replacing the base attribution report, theme report, validation matrix, strategy rule file
+
+**Entry Execution Factor**:
+An entry candidate factor that is observable at the entry execution moment, such as the opening gap from the entry signal date close to the entry execution price. It may be screened together with entry-time factors when the intended rule can act at the execution moment, but it must be labeled separately from T-1 pre-selection evidence.
+_Avoid_: Previous-night stock selection factor, post-entry evidence, hidden future data
+
+**Entry Exposure Watchlist Factor**:
+An entry attribution factor value that describes exposure sensitivity, such as a Shenwan industry code, and is useful for risk review but should not become a formal keep or exclude candidate without separate stability evidence across periods or market stages.
+_Avoid_: Immediate hard industry rule, generic entry factor, validated filter
 
 **Entry Factor Optimization Experiment**:
 A validation experiment that turns tradable pre-entry factor findings into candidate entry filters and tests them with separate backtest evidence before any strategy rule is changed. It only concerns entry-time factors and does not optimize exits, scale-outs, sizing, or lifecycle diagnostics.

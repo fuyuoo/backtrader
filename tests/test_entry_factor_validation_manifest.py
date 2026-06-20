@@ -114,7 +114,7 @@ def test_entry_factor_validation_manifest_skips_future_candidates_even_if_ranked
     ]
 
 
-def test_entry_factor_validation_manifest_skips_undeclared_runtime_candidates() -> None:
+def test_entry_factor_validation_manifest_includes_reference_snapshot_candidates() -> None:
     discovery = _discovery_report_fixture()
     discovery["rankings"]["tradable_pre_entry"]["positive"].insert(
         0,
@@ -129,7 +129,7 @@ def test_entry_factor_validation_manifest_skips_undeclared_runtime_candidates() 
     )
 
     assert manifest["generated_count"] == 1
-    assert manifest["candidates"][0]["field_key"] == "symbol.ma.trend_state"
+    assert manifest["candidates"][0]["field_key"] == "entry.market_cap.total_mv_abs_bucket"
 
 
 def test_entry_factor_validation_manifest_includes_new_runtime_bucket_candidates() -> None:

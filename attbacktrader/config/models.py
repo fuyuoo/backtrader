@@ -322,7 +322,7 @@ class EntryAttributionFilterConditionConfig(FrozenModel):
     field: str = Field(min_length=1)
     value: Any
     action: Literal["keep", "exclude"]
-    operator: Literal["eq"] = "eq"
+    operator: Literal["eq", "gt", "gte", "lt", "lte"] = "eq"
 
     @field_validator("field")
     @classmethod

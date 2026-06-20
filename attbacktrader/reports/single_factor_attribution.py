@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -100,7 +101,7 @@ def build_single_factor_attribution_report(
         ),
         "excluded_fields": sorted(excluded_fields, key=lambda item: str(item.get("field_key"))),
         "ai_usage_rules": [
-            "entry_single_factor_summaries 只包含 timing=entry 的事前/入场字段，可作为后续二因子组合候选池。",
+            "entry_single_factor_summaries 包含 timing=entry 字段，以及离散的 symbol/industry/market 旧版事前字段，可作为后续二因子组合候选池。",
             "post_trade_summaries 只用于持仓后路径统计，不能用于筛选入场环境或构造入场组合。",
             "rankings 只排序不筛除；low_sample、no_contrast、high_missing 等 flags 是风险提示，不是自动结论。",
             "该报告只消费已落盘 attribution_wide_samples 和 attribution_field_index，不重跑策略、不联网拉数据。",
@@ -127,6 +128,11 @@ def render_single_factor_attribution_markdown_zh(report: Mapping[str, Any], *, r
         f"| 未进入本报告主归因字段 | {report.get('excluded_field_count')} |",
         f"| 全样本胜率 | {_format_percent(overall.get('win_rate'))} |",
         f"| 全样本平均收益 | {_format_percent(overall.get('average_return_pct'))} |",
+        f"| 全样本中位收益 | {_format_percent(overall.get('median_return_pct'))} |",
+        f"| 全样本最大单笔收益 | {_format_percent(overall.get('max_return_pct'))} |",
+        f"| 全样本最差单笔收益 | {_format_percent(overall.get('min_return_pct'))} |",
+        f"| 全样本单笔收益波动率 | {_format_percent(overall.get('return_volatility_pct'))} |",
+        f"| 全样本交易PnL路径最大回撤/入场资金 | {_format_percent(overall.get('pnl_path_max_drawdown_on_entry_value'))} |",
         f"| 全样本净PnL | {_format_money(overall.get('net_pnl'))} |",
         f"| 全样本资金收益率 | {_format_percent(overall.get('return_on_entry_value'))} |",
     ]
@@ -135,16 +141,23 @@ def render_single_factor_attribution_markdown_zh(report: Mapping[str, Any], *, r
             "",
             "## 口径",
             "",
-            "- 事前归因只使用 `timing=entry` 字段；这些字段可作为后续二因子组合候选池。",
+            "- 事前归因使用 `timing=entry` 字段，并纳入离散的 `symbol`、`industry`、`market` 旧版事前字段。",
             "- `timing=post_trade` 字段只做持仓后路径统计，不参与入场组合。",
+            "- 平均收益、最大收益和波动率都基于单笔 `return_pct`，不是账户总权益曲线。",
+            "- 表格里的 PnL 回撤按 `trade_index` 顺序累计每笔 `net_pnl`，再除以该桶总入场资金；不是账户总权益曲线。",
+            "- JSON 额外保留 `return_path_max_drawdown_pct`，即等权复利串联单笔收益率后的交易收益路径回撤。",
             "- 所有桶都保留在 JSON 中；Markdown 的榜单只是多视角排序。",
             "- `low_sample`、`no_contrast`、`high_missing` 是风险标记，不会自动删除字段。",
         ]
     )
 
     lines.extend(_field_overview_section(_as_sequence(report.get("entry_factor_fields"))))
-    lines.extend(_ranking_section("按胜率排序", _as_mapping(report.get("entry_rankings")).get("by_win_rate"), ranking_limit))
     lines.extend(_ranking_section("按平均收益排序", _as_mapping(report.get("entry_rankings")).get("by_average_return"), ranking_limit))
+    lines.extend(_ranking_section("按风险调整收益排序", _as_mapping(report.get("entry_rankings")).get("by_risk_adjusted_return"), ranking_limit))
+    lines.extend(_ranking_section("按最大单笔收益排序", _as_mapping(report.get("entry_rankings")).get("by_max_return"), ranking_limit))
+    lines.extend(_ranking_section("按交易PnL路径低回撤排序", _as_mapping(report.get("entry_rankings")).get("by_low_pnl_path_drawdown"), ranking_limit))
+    lines.extend(_ranking_section("按单笔收益低波动排序", _as_mapping(report.get("entry_rankings")).get("by_low_return_volatility"), ranking_limit))
+    lines.extend(_ranking_section("按胜率排序", _as_mapping(report.get("entry_rankings")).get("by_win_rate"), ranking_limit))
     lines.extend(_ranking_section("按资金收益率排序", _as_mapping(report.get("entry_rankings")).get("by_return_on_entry_value"), ranking_limit))
     lines.extend(_ranking_section("按净PnL排序", _as_mapping(report.get("entry_rankings")).get("by_net_pnl"), ranking_limit))
     lines.extend(_ranking_section("按MA60退出高发排序", _as_mapping(report.get("entry_rankings")).get("by_ma60_stop_exit_rate"), ranking_limit))
@@ -262,6 +275,12 @@ def _stats(samples: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     ]
     wins = [value for value in returns if value > 0]
     losses = [value for value in returns if value <= 0]
+    negative_returns = [value for value in returns if value < 0]
+    average_return = _average(returns)
+    average_win_return = _average(wins)
+    average_loss_return = _average(losses)
+    average_negative_return = _average(negative_returns)
+    return_volatility = _population_stddev(returns)
     contributions = [
         _as_mapping(sample.get("profit_contribution"))
         for sample in samples
@@ -278,9 +297,29 @@ def _stats(samples: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "win_count": len(wins),
         "loss_count": len(losses),
         "win_rate": len(wins) / len(returns) if returns else None,
-        "average_return_pct": _average(returns),
-        "average_win_return_pct": _average(wins),
-        "average_loss_return_pct": _average(losses),
+        "average_return_pct": average_return,
+        "median_return_pct": _percentile(returns, 0.5),
+        "p10_return_pct": _percentile(returns, 0.1),
+        "p25_return_pct": _percentile(returns, 0.25),
+        "p75_return_pct": _percentile(returns, 0.75),
+        "p90_return_pct": _percentile(returns, 0.9),
+        "max_return_pct": max(returns) if returns else None,
+        "min_return_pct": min(returns) if returns else None,
+        "return_volatility_pct": return_volatility,
+        "return_path_max_drawdown_pct": _return_path_max_drawdown(samples),
+        "pnl_path_max_drawdown_on_entry_value": _pnl_path_max_drawdown_on_entry_value(samples),
+        "risk_adjusted_return": (
+            average_return / return_volatility
+            if average_return is not None and return_volatility not in (None, 0)
+            else None
+        ),
+        "average_win_return_pct": average_win_return,
+        "average_loss_return_pct": average_loss_return,
+        "profit_loss_ratio": (
+            average_win_return / abs(average_negative_return)
+            if average_win_return is not None and average_negative_return not in (None, 0)
+            else None
+        ),
         "financial_trade_count": len(contributions),
         "total_entry_value": total_entry_value if contributions else None,
         "net_pnl": total_net_pnl if contributions else None,
@@ -301,6 +340,26 @@ def _rankings(summaries: Sequence[Mapping[str, Any]], *, min_bucket_sample_count
     return {
         "by_win_rate": _rank(summaries, key="win_rate", min_bucket_sample_count=min_bucket_sample_count),
         "by_average_return": _rank(summaries, key="average_return_pct", min_bucket_sample_count=min_bucket_sample_count),
+        "by_risk_adjusted_return": _rank(summaries, key="risk_adjusted_return", min_bucket_sample_count=min_bucket_sample_count),
+        "by_max_return": _rank(summaries, key="max_return_pct", min_bucket_sample_count=min_bucket_sample_count),
+        "by_low_return_volatility": _rank(
+            summaries,
+            key="return_volatility_pct",
+            min_bucket_sample_count=min_bucket_sample_count,
+            lower_is_better=True,
+        ),
+        "by_low_return_path_max_drawdown": _rank(
+            summaries,
+            key="return_path_max_drawdown_pct",
+            min_bucket_sample_count=min_bucket_sample_count,
+            lower_is_better=True,
+        ),
+        "by_low_pnl_path_drawdown": _rank(
+            summaries,
+            key="pnl_path_max_drawdown_on_entry_value",
+            min_bucket_sample_count=min_bucket_sample_count,
+            lower_is_better=True,
+        ),
         "by_return_on_entry_value": _rank(summaries, key="return_on_entry_value", min_bucket_sample_count=min_bucket_sample_count),
         "by_net_pnl": _rank(summaries, key="net_pnl", min_bucket_sample_count=min_bucket_sample_count),
         "by_ma60_stop_exit_rate": _rank(summaries, key="ma60_stop_exit_rate", min_bucket_sample_count=min_bucket_sample_count),
@@ -308,7 +367,13 @@ def _rankings(summaries: Sequence[Mapping[str, Any]], *, min_bucket_sample_count
     }
 
 
-def _rank(summaries: Sequence[Mapping[str, Any]], *, key: str, min_bucket_sample_count: int) -> list[dict[str, Any]]:
+def _rank(
+    summaries: Sequence[Mapping[str, Any]],
+    *,
+    key: str,
+    min_bucket_sample_count: int,
+    lower_is_better: bool = False,
+) -> list[dict[str, Any]]:
     ranked = [
         _compact_summary(summary)
         for summary in summaries
@@ -316,10 +381,10 @@ def _rank(summaries: Sequence[Mapping[str, Any]], *, key: str, min_bucket_sample
     ]
     ranked.sort(
         key=lambda item: (
-            float(item.get(key) or float("-inf")),
+            float(item.get(key) or 0.0),
             int(item.get("sample_count") or 0),
         ),
-        reverse=True,
+        reverse=not lower_is_better,
     )
     return [
         {
@@ -340,10 +405,19 @@ def _compact_summary(summary: Mapping[str, Any]) -> dict[str, Any]:
         "field_key": summary.get("field_key"),
         "field_label_zh": summary.get("field_label_zh"),
         "value": summary.get("value"),
+        "value_label_zh": summary.get("value_label_zh"),
         "label_zh": summary.get("label_zh"),
         "sample_count": summary.get("sample_count"),
         "win_rate": summary.get("win_rate"),
         "average_return_pct": summary.get("average_return_pct"),
+        "median_return_pct": summary.get("median_return_pct"),
+        "max_return_pct": summary.get("max_return_pct"),
+        "min_return_pct": summary.get("min_return_pct"),
+        "return_volatility_pct": summary.get("return_volatility_pct"),
+        "return_path_max_drawdown_pct": summary.get("return_path_max_drawdown_pct"),
+        "pnl_path_max_drawdown_on_entry_value": summary.get("pnl_path_max_drawdown_on_entry_value"),
+        "risk_adjusted_return": summary.get("risk_adjusted_return"),
+        "profit_loss_ratio": summary.get("profit_loss_ratio"),
         "net_pnl": summary.get("net_pnl"),
         "return_on_entry_value": summary.get("return_on_entry_value"),
         "ma25_profit_exit_rate": summary.get("ma25_profit_exit_rate"),
@@ -380,8 +454,8 @@ def _ranking_section(title: str, rows: Any, limit: int) -> list[str]:
         "",
         f"## {title}",
         "",
-        "| 排名 | 因子桶 | 样本 | 胜率 | 平均收益 | 资金收益率 | 净PnL | MA25退出 | MA60退出 | 标记 | trade_index样例 |",
-        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---|---|",
+        "| 排名 | 因子桶 | 样本 | 平均收益 | 中位收益 | 最大收益 | 最差收益 | 波动率 | PnL回撤 | 胜率 | 盈亏比 | 标记 | trade_index样例 |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
     ]
     for index, raw in enumerate(_as_sequence(rows)[:limit], start=1):
         row = _as_mapping(raw)
@@ -394,8 +468,8 @@ def _all_bucket_section(title: str, rows: Sequence[Any]) -> list[str]:
         "",
         f"## {title}",
         "",
-        "| 因子桶 | 样本 | 胜率 | 平均收益 | 资金收益率 | 净PnL | MA25退出 | MA60退出 | 标记 | trade_index样例 |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---|---|",
+        "| 因子桶 | 样本 | 平均收益 | 中位收益 | 最大收益 | 最差收益 | 波动率 | PnL回撤 | 胜率 | 盈亏比 | 标记 | trade_index样例 |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
     ]
     for raw in rows:
         lines.append(_summary_row(None, _as_mapping(raw)))
@@ -409,12 +483,14 @@ def _summary_row(index: int | None, row: Mapping[str, Any]) -> str:
         f"{prefix}"
         f"{_escape(row.get('label_zh'))} | "
         f"{row.get('sample_count')} | "
-        f"{_format_percent(row.get('win_rate'))} | "
         f"{_format_percent(row.get('average_return_pct'))} | "
-        f"{_format_percent(row.get('return_on_entry_value'))} | "
-        f"{_format_money(row.get('net_pnl'))} | "
-        f"{_format_percent(row.get('ma25_profit_exit_rate'))} | "
-        f"{_format_percent(row.get('ma60_stop_exit_rate'))} | "
+        f"{_format_percent(row.get('median_return_pct'))} | "
+        f"{_format_percent(row.get('max_return_pct'))} | "
+        f"{_format_percent(row.get('min_return_pct'))} | "
+        f"{_format_percent(row.get('return_volatility_pct'))} | "
+        f"{_format_percent(row.get('pnl_path_max_drawdown_on_entry_value'))} | "
+        f"{_format_percent(row.get('win_rate'))} | "
+        f"{_format_number(row.get('profit_loss_ratio'))} | "
         f"{_escape(','.join(_as_sequence(row.get('flags'))) or '-')} | "
         f"{_escape(','.join(str(item) for item in _as_sequence(row.get('sample_trade_indexes') or row.get('trade_indexes'))[:5]))} |"
     )
@@ -447,9 +523,39 @@ def _field_role(field: Mapping[str, Any]) -> str:
     timing = str(field.get("timing") or "")
     if timing == "entry" and not key.startswith("trade."):
         return "entry_factor"
+    if timing in {"symbol", "industry", "market"} and _is_discrete_legacy_entry_field(field):
+        return "entry_factor"
     if timing == "post_trade" or key.startswith("trade.path."):
         return "post_trade_stat"
     return "excluded"
+
+
+def _is_discrete_legacy_entry_field(field: Mapping[str, Any]) -> bool:
+    key = str(field.get("field_key") or "")
+    value_type = str(field.get("value_type") or "")
+    if key.startswith("trade."):
+        return False
+    if value_type in {"bucket", "category"} or key.endswith("_bucket"):
+        return True
+    discrete_suffixes = (
+        ".code",
+        ".energy_zone",
+        ".source_index",
+        ".state",
+        ".trend_state",
+        ".bullish_trend",
+        ".loss_making",
+    )
+    if key.endswith(discrete_suffixes):
+        return True
+    discrete_fragments = (
+        ".j_below_threshold",
+        ".price_above_",
+        ".ma20_above_",
+        ".ma25_above_",
+        ".ma60_above_",
+    )
+    return any(fragment in key for fragment in discrete_fragments)
 
 
 def _excluded_reason(field: Mapping[str, Any]) -> str:
@@ -459,6 +565,8 @@ def _excluded_reason(field: Mapping[str, Any]) -> str:
         return "exit_outcome_diagnostic"
     if timing == "sizing":
         return "sizing_diagnostic"
+    if timing in {"symbol", "industry", "market"}:
+        return "continuous_legacy_pre_entry_field"
     return "legacy_or_not_entry_timing"
 
 
@@ -466,7 +574,12 @@ def _field_value(field_key: str, field: Mapping[str, Any], payload: Mapping[str,
     if field.get("value_type") == "bucket" or str(field_key).endswith("_bucket"):
         return payload.get("bucket")
     bucket = payload.get("bucket")
-    return bucket if bucket is not None else payload.get("raw")
+    if bucket is not None:
+        return bucket
+    raw = payload.get("raw")
+    if isinstance(raw, (str, bool)) or raw is None:
+        return raw
+    return None
 
 
 def _field_flags(*, missing_ratio: float | None, non_empty_bucket_count: int, high_missing_ratio: float) -> list[str]:
@@ -480,6 +593,88 @@ def _field_flags(*, missing_ratio: float | None, non_empty_bucket_count: int, hi
 
 def _average(values: Sequence[float]) -> float | None:
     return sum(values) / len(values) if values else None
+
+
+def _population_stddev(values: Sequence[float]) -> float | None:
+    if not values:
+        return None
+    average = sum(values) / len(values)
+    return math.sqrt(sum((value - average) ** 2 for value in values) / len(values))
+
+
+def _percentile(values: Sequence[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = (len(ordered) - 1) * percentile
+    lower_index = int(math.floor(position))
+    upper_index = int(math.ceil(position))
+    if lower_index == upper_index:
+        return ordered[lower_index]
+    lower = ordered[lower_index]
+    upper = ordered[upper_index]
+    return lower + (upper - lower) * (position - lower_index)
+
+
+def _return_path_max_drawdown(samples: Sequence[Mapping[str, Any]]) -> float | None:
+    ordered_returns = [
+        _optional_float(sample.get("return_pct"))
+        for sample in sorted(samples, key=_trade_sort_key)
+    ]
+    returns = [value for value in ordered_returns if value is not None]
+    if not returns:
+        return None
+    equity = 1.0
+    peak = 1.0
+    max_drawdown = 0.0
+    for value in returns:
+        equity *= max(0.0, 1.0 + value)
+        peak = max(peak, equity)
+        if peak > 0:
+            max_drawdown = max(max_drawdown, (peak - equity) / peak)
+    return max_drawdown
+
+
+def _pnl_path_max_drawdown_on_entry_value(samples: Sequence[Mapping[str, Any]]) -> float | None:
+    ordered_contributions: list[Mapping[str, Any]] = []
+    total_entry_value = 0.0
+    for sample in sorted(samples, key=_trade_sort_key):
+        contribution = _as_mapping(sample.get("profit_contribution"))
+        if contribution.get("contribution_available") is not True:
+            continue
+        entry_value = _optional_float(contribution.get("entry_gross_value"))
+        net_pnl = _optional_float(contribution.get("net_pnl"))
+        if entry_value is None or entry_value <= 0 or net_pnl is None:
+            continue
+        total_entry_value += entry_value
+        ordered_contributions.append(contribution)
+    if not ordered_contributions or total_entry_value <= 0:
+        return None
+
+    cumulative = 0.0
+    peak = 0.0
+    max_drawdown = 0.0
+    for contribution in ordered_contributions:
+        cumulative += _optional_float(contribution.get("net_pnl")) or 0.0
+        peak = max(peak, cumulative)
+        max_drawdown = max(max_drawdown, peak - cumulative)
+    return max_drawdown / total_entry_value
+
+
+def _trade_sort_key(sample: Mapping[str, Any]) -> tuple[int, str, str, str]:
+    trade_index = sample.get("trade_index")
+    try:
+        index_value = int(trade_index)
+    except (TypeError, ValueError):
+        index_value = 10**12
+    return (
+        index_value,
+        str(sample.get("entry_date") or ""),
+        str(sample.get("exit_date") or ""),
+        str(sample.get("symbol") or ""),
+    )
 
 
 def _optional_float(value: Any) -> float | None:
@@ -533,6 +728,11 @@ def _format_percent(value: Any) -> str:
 def _format_money(value: Any) -> str:
     number = _optional_float(value)
     return "-" if number is None else f"{number:,.2f}"
+
+
+def _format_number(value: Any) -> str:
+    number = _optional_float(value)
+    return "-" if number is None else f"{number:.3f}"
 
 
 def _escape(value: Any) -> str:

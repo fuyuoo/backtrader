@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from attbacktrader.data import DailyBar, IndexBar, StockIndustryMembership, resample_daily_bars
+from attbacktrader.data.snapshots.attribution_reference import FIELD_DEFINITIONS as ATTRIBUTION_REFERENCE_FIELD_DEFINITIONS
 from attbacktrader.features import (
     IndicatorFrame,
     IndicatorRequirement,
@@ -140,8 +141,8 @@ class EntryAttributionFilterCondition:
         if not field_name:
             raise ValueError("entry attribution filter condition field cannot be empty")
         operator = str(self.operator)
-        if operator != "eq":
-            raise ValueError("entry attribution filter condition operator must be eq")
+        if operator not in {"eq", "gt", "gte", "lt", "lte"}:
+            raise ValueError("entry attribution filter condition operator must be one of eq, gt, gte, lt, lte")
         action = str(self.action)
         if action not in {"keep", "exclude"}:
             raise ValueError("entry attribution filter condition action must be keep or exclude")
@@ -628,6 +629,14 @@ STANDARD_ENTRY_ATTRIBUTION_FACTORS = (
         dependencies=("close", "ma60:D", "atr20"),
     ),
     EntryAttributionFactorDeclaration(
+        key="entry.price_position.signal_close_ma60_pct",
+        factor_type="value",
+        label_zh="信号日收盘价距 MA60 百分比",
+        label_en="Signal close distance from MA60 percentage",
+        scope="symbol",
+        dependencies=("close", "ma60:D"),
+    ),
+    EntryAttributionFactorDeclaration(
         key="entry.signal_strength.dea_value_bucket",
         factor_type="category",
         label_zh="信号日 DEA 强度桶",
@@ -680,6 +689,14 @@ STANDARD_ENTRY_ATTRIBUTION_FACTORS = (
         factor_type="category",
         label_zh="信号 K 线实体占比桶",
         label_en="Signal candle body percentage bucket",
+        scope="symbol",
+        dependencies=("open", "close"),
+    ),
+    EntryAttributionFactorDeclaration(
+        key="entry.signal_strength.signal_candle_body_pct",
+        factor_type="value",
+        label_zh="信号 K 线实体占比",
+        label_en="Signal candle body percentage",
         scope="symbol",
         dependencies=("open", "close"),
     ),
@@ -1234,6 +1251,38 @@ STANDARD_ENTRY_ATTRIBUTION_FACTORS = (
     ),
 )
 
+_STANDARD_ENTRY_ATTRIBUTION_FACTOR_KEYS = frozenset(
+    declaration.key for declaration in STANDARD_ENTRY_ATTRIBUTION_FACTORS
+)
+
+
+def _reference_entry_attribution_declaration(
+    definition: Mapping[str, Any],
+) -> EntryAttributionFactorDeclaration:
+    field_key = str(definition.get("field_key") or "")
+    value_type = str(definition.get("value_type") or ("bucket" if field_key.endswith("_bucket") else "value"))
+    factor_type = "category" if value_type in {"bucket", "category"} else "value"
+    scope = "industry" if field_key.startswith("industry.") else "symbol"
+    return EntryAttributionFactorDeclaration(
+        key=field_key,
+        factor_type=factor_type,
+        label_zh=str(definition.get("label_zh") or field_key),
+        label_en=field_key,
+        scope=scope,
+        dependencies=("attribution_reference_snapshot",),
+        source="attribution_reference_snapshot",
+        value_type=value_type,
+    )
+
+
+REFERENCE_ENTRY_ATTRIBUTION_FACTORS = tuple(
+    _reference_entry_attribution_declaration(definition)
+    for definition in ATTRIBUTION_REFERENCE_FIELD_DEFINITIONS
+    if str(definition.get("field_key") or "") not in _STANDARD_ENTRY_ATTRIBUTION_FACTOR_KEYS
+)
+
+STANDARD_ENTRY_ATTRIBUTION_FACTORS = STANDARD_ENTRY_ATTRIBUTION_FACTORS + REFERENCE_ENTRY_ATTRIBUTION_FACTORS
+
 STANDARD_ATTRIBUTION_FACTORS = STANDARD_ENTRY_ATTRIBUTION_FACTORS
 
 
@@ -1392,7 +1441,11 @@ def _entry_attribution_condition_audits(
     audits: list[dict[str, Any]] = []
     for condition in conditions:
         found, actual, source = _entry_attribution_condition_value(attribution, condition.field)
-        matched = found and actual == condition.value
+        matched = found and _entry_attribution_condition_matches(
+            actual,
+            operator=condition.operator,
+            expected=condition.value,
+        )
         if not found:
             passed = missing_policy == "pass"
         elif condition.action == "keep":
@@ -1412,6 +1465,43 @@ def _entry_attribution_condition_audits(
             }
         )
     return audits
+
+
+def _entry_attribution_condition_matches(
+    actual: Any,
+    *,
+    operator: str,
+    expected: Any,
+) -> bool:
+    if operator == "eq":
+        return actual == expected
+    actual_number = _filter_number(actual)
+    expected_number = _filter_number(expected)
+    if actual_number is None or expected_number is None:
+        return False
+    if operator == "gt":
+        return actual_number > expected_number
+    if operator == "gte":
+        return actual_number >= expected_number
+    if operator == "lt":
+        return actual_number < expected_number
+    if operator == "lte":
+        return actual_number <= expected_number
+    return False
+
+
+def _filter_number(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        if not math.isfinite(float(value)):
+            return None
+        return float(value)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def _entry_attribution_condition_value(
@@ -1546,6 +1636,9 @@ def build_entry_attribution_context(
     benchmark_bars_by_symbol: Mapping[str, Sequence[IndexBar]] | None = None,
     industry_index_bars_by_symbol: Mapping[str, Sequence[IndexBar]] | None = None,
     memberships_by_symbol: Mapping[str, Sequence[StockIndustryMembership]] | None = None,
+    attribution_reference_evidence_by_symbol_date: (
+        Mapping[str, Mapping[date, EntryAttributionEvidence]] | None
+    ) = None,
     market_symbol: str = "000300.SH",
     market_fast_period: int = 20,
     market_slow_period: int = 60,
@@ -1559,6 +1652,7 @@ def build_entry_attribution_context(
     benchmark_bars_by_symbol = dict(benchmark_bars_by_symbol or {})
     industry_index_bars_by_symbol = dict(industry_index_bars_by_symbol or {})
     memberships_by_symbol = dict(memberships_by_symbol or {})
+    attribution_reference_evidence_by_symbol_date = dict(attribution_reference_evidence_by_symbol_date or {})
     market_evidence_by_date: dict[date, EntryAttributionEvidence] = {}
     market_symbols = tuple(dict.fromkeys((market_symbol, *benchmark_bars_by_symbol)))
     for current_market_symbol in market_symbols:
@@ -1602,8 +1696,10 @@ def build_entry_attribution_context(
         symbol_derived_evidence_by_date = _symbol_derived_evidence_by_date(ordered_bars)
         symbol_cross_section_evidence_by_date = symbol_cross_section_evidence_by_symbol.get(symbol, {})
         symbol_industry_relative_evidence_by_date = symbol_industry_relative_evidence_by_symbol.get(symbol, {})
+        attribution_reference_evidence_by_date = attribution_reference_evidence_by_symbol_date.get(symbol, {})
         for bar in ordered_bars:
             evidence = _merge_evidence(
+                _latest_evidence_on_or_before(attribution_reference_evidence_by_date, bar.trade_date),
                 _latest_evidence_on_or_before(symbol_derived_evidence_by_date, bar.trade_date),
                 _latest_evidence_on_or_before(symbol_cross_section_evidence_by_date, bar.trade_date),
                 _latest_evidence_on_or_before(symbol_industry_relative_evidence_by_date, bar.trade_date),
@@ -1766,6 +1862,7 @@ def _symbol_derived_evidence_by_date(
 
     evidence_by_date: dict[date, EntryAttributionEvidence] = {}
     for bar in ordered_bars:
+        values: dict[str, Any] = {}
         categories: dict[str, str] = {}
         near_high_20d_bucket = _near_high_bucket(near_high_20d.get(bar.trade_date))
         near_high_60d_bucket = _near_high_bucket(near_high_60d.get(bar.trade_date))
@@ -1777,14 +1874,18 @@ def _symbol_derived_evidence_by_date(
         atr_value = atr_20d.get(bar.trade_date)
         atr_pct_value = atr_pct_20d.get(bar.trade_date)
         ma60_value = ma60_values.get(bar.trade_date)
+        signal_close_ma60_pct = None
         signal_close_ma60_atr_multiple_bucket = None
         if atr_value is not None and atr_value > 0 and ma60_value is not None:
             signal_close_ma60_atr_multiple_bucket = _atr_multiple_bucket((bar.close - ma60_value) / atr_value)
+        if ma60_value is not None and ma60_value > 0:
+            signal_close_ma60_pct = bar.close / ma60_value - 1.0
         fixed_atr_multiple_bucket = None
         if atr_pct_value is not None and atr_pct_value > 0:
             fixed_atr_multiple_bucket = _fixed_atr_multiple_bucket(0.05 / atr_pct_value)
         ma60_slope_20d_bucket = _ma60_slope_bucket(ma60_slope_20d.get(bar.trade_date))
-        signal_body_bucket = _candle_body_bucket(_candle_body_pct(bar))
+        signal_body_pct = _candle_body_pct(bar)
+        signal_body_bucket = _candle_body_bucket(signal_body_pct)
         signal_shadow_bucket = _signal_shadow_bucket(bar)
         weekly_close_vs_ma20_bucket = _ma20_distance_bucket(
             _latest_number_before(weekly_close_vs_ma20, bar.trade_date)
@@ -1807,12 +1908,16 @@ def _symbol_derived_evidence_by_date(
             categories["entry.price_position.interval_60d_bucket"] = interval_60d_bucket
         if signal_close_ma60_atr_multiple_bucket is not None:
             categories["entry.price_position.signal_close_ma60_atr_multiple_bucket"] = signal_close_ma60_atr_multiple_bucket
+        if signal_close_ma60_pct is not None:
+            values["entry.price_position.signal_close_ma60_pct"] = signal_close_ma60_pct
         if fixed_atr_multiple_bucket is not None:
             categories["entry.stop_fit.fixed_atr_multiple_bucket"] = fixed_atr_multiple_bucket
         if ma60_slope_20d_bucket is not None:
             categories["entry.signal_strength.ma60_slope_20d_bucket"] = ma60_slope_20d_bucket
         if signal_body_bucket is not None:
             categories["entry.signal_strength.signal_candle_body_bucket"] = signal_body_bucket
+        if signal_body_pct is not None:
+            values["entry.signal_strength.signal_candle_body_pct"] = signal_body_pct
         if signal_shadow_bucket is not None:
             categories["entry.signal_strength.signal_upper_lower_shadow_bucket"] = signal_shadow_bucket
         if weekly_close_vs_ma20_bucket is not None:
@@ -1820,8 +1925,8 @@ def _symbol_derived_evidence_by_date(
         if weekly_ma_trend_bucket is not None:
             categories["entry.weekly.symbol_ma_trend_bucket"] = weekly_ma_trend_bucket
 
-        if categories:
-            evidence_by_date[bar.trade_date] = EntryAttributionEvidence(categories=categories)
+        if values or categories:
+            evidence_by_date[bar.trade_date] = EntryAttributionEvidence(values=values, categories=categories)
 
     return evidence_by_date
 
