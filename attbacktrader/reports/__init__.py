@@ -116,6 +116,7 @@ from .bayesian_factor_discovery import (
 from .entry_factor_validation_manifest import (
     ENTRY_FACTOR_VALIDATION_MANIFEST_SCHEMA,
     build_entry_factor_validation_manifest,
+    build_entry_factor_validation_manifest_from_screening,
     render_entry_factor_validation_manifest_markdown_zh,
     safe_entry_factor_validation_manifest_dir_name,
     write_entry_factor_validation_manifest,
@@ -507,6 +508,7 @@ __all__ = [
     "build_entry_single_factor_candidate_screening_report",
     "build_bayesian_factor_discovery_report",
     "build_entry_factor_validation_manifest",
+    "build_entry_factor_validation_manifest_from_screening",
     "build_entry_factor_validation_run_record",
     "build_entry_factor_validation_matrix",
     "build_entry_factor_validation_classification",

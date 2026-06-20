@@ -471,7 +471,7 @@ def _entry_filter_condition_has_allowed_namespace(field_name: str) -> bool:
     declarations = entry_attribution_declaration_by_key()
     declaration = declarations.get(field_name)
     if declaration is not None:
-        return "entry" in declaration.timings and declaration.scope in {"symbol", "industry", "market"}
+        return "entry" in declaration.timings and declaration.scope in {"symbol", "industry", "market", "execution"}
     return field_name.startswith(("entry.", "symbol.", "industry.", "market."))
 
 
