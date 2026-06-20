@@ -3,9 +3,14 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy import stats as sp_stats
 
-from my_strategy.tools.stats_helpers import t_test_one_sample, t_test_welch, bucket_stats_with_significance
+from my_strategy.tools.stats_helpers import (
+    bucket_stats_with_significance,
+    chi2_contingency_2x2,
+    spearmanr,
+    t_test_one_sample,
+    t_test_welch,
+)
 
 
 def _payoff_block(sub: pd.DataFrame, dimension: str, bucket: str) -> dict:
@@ -133,7 +138,7 @@ def compute_signal_correlation_matrix(trades: pd.DataFrame, signals_whitelist: l
             if len(sub) < 2:
                 continue
             pearson = sub[a].corr(sub[b], method='pearson')
-            spearman = sub[a].corr(sub[b], method='spearman')
+            spearman, _ = spearmanr(sub[a], sub[b])
             rows.append({
                 'signal_a': a, 'signal_b': b,
                 'pearson_r': round(float(pearson), 4) if pd.notna(pearson) else np.nan,
@@ -253,7 +258,7 @@ def _compute_ic_monthly(
     for _, g in df.groupby('m'):
         if len(g) < 5:
             continue
-        rho, _ = sp_stats.spearmanr(g['s'], g['f'])
+        rho, _ = spearmanr(g['s'], g['f'])
         if pd.notna(rho):
             monthly_ic.append(rho)
     if len(monthly_ic) < 2:
@@ -304,7 +309,7 @@ def compute_signal_importance_ranking(
         mean_false = r_false.mean() if len(r_false) > 0 else np.nan
         effect = mean_true - mean_false if pd.notna(mean_true) and pd.notna(mean_false) else np.nan
         if len(r_true) >= 2 and len(r_false) >= 2:
-            t_stat, p_val = sp_stats.ttest_ind(r_true, r_false, equal_var=False)
+            t_stat, p_val = t_test_welch(r_true, r_false)
         else:
             t_stat, p_val = (np.nan, np.nan)
 
@@ -402,9 +407,9 @@ def compute_loss_attribution(
                 c = n_losses - n_l                  # signal!=val & loss
                 d = (n_universe - n_u) - (n_losses - n_l)  # signal!=val & non-loss
                 contingency = np.array([[a, b], [c, d]])
-                _, _, _, expected = sp_stats.chi2_contingency(contingency, correction=False)
+                _, _, _, expected = chi2_contingency_2x2(contingency)
                 if (expected >= 5).all():
-                    chi2_stat, p_val, _, _ = sp_stats.chi2_contingency(contingency, correction=False)[:4]
+                    chi2_stat, p_val, _, _ = chi2_contingency_2x2(contingency)
                     chi2_stat = float(chi2_stat)
                     p_val = float(p_val)
 

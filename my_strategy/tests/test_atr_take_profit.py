@@ -64,7 +64,7 @@ def _make_feed_with_buy_signal(n=150, start='2020-01-01'):
     low = np.minimum(close, open_) * np.random.uniform(0.98, 1.0, n)
     volume = np.random.randint(100000, 500000, n).astype(float)
     ma25 = pd.Series(close).rolling(25).mean().values
-    ma60 = pd.Series(close).rolling(60).mean().values
+    ma60 = (pd.Series(close).rolling(60).mean() * 0.9).values
     # dea: 前70根为负，之后为正 → ma60 有效后（第60根），第61~70根 dea < 0，第71根起 dea > 0
     # 第72根起满足"过去5天有 dea < 0"条件
     dea = np.where(np.arange(n) >= 70, 0.1, -0.1)
