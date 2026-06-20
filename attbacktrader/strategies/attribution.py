@@ -717,6 +717,15 @@ STANDARD_ENTRY_ATTRIBUTION_FACTORS = (
         dependencies=("high", "low", "close"),
     ),
     EntryAttributionFactorDeclaration(
+        key="entry.execution.signal_to_entry_return_bucket",
+        factor_type="category",
+        label_zh="信号日close到入场成交价涨跌桶",
+        label_en="Signal close to entry execution return bucket",
+        scope="execution",
+        dependencies=("trade_lifecycle",),
+        source="trade_lifecycle",
+    ),
+    EntryAttributionFactorDeclaration(
         key="entry.weekly.symbol_kdj_j_bucket",
         factor_type="category",
         label_zh="个股周线KDJ J分桶",

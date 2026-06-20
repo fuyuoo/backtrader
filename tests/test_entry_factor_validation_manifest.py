@@ -8,6 +8,7 @@ from attbacktrader.config import RunPlan
 from attbacktrader.reports import (
     ENTRY_FACTOR_VALIDATION_MANIFEST_SCHEMA,
     build_entry_factor_validation_manifest,
+    build_entry_factor_validation_manifest_from_screening,
     render_entry_factor_validation_manifest_markdown_zh,
     write_entry_factor_validation_manifest,
 )
@@ -187,6 +188,116 @@ def test_entry_factor_validation_manifest_includes_new_runtime_bucket_candidates
     ]
 
 
+def test_entry_factor_validation_manifest_from_screening_uses_formal_candidates_by_default() -> None:
+    manifest = build_entry_factor_validation_manifest_from_screening(
+        _screening_report_fixture(),
+        _baseline_run_plan_fixture(),
+        reuse_snapshots=True,
+    )
+
+    assert manifest["schema"] == ENTRY_FACTOR_VALIDATION_MANIFEST_SCHEMA
+    assert manifest["source_mode"] == "entry_single_factor_candidate_screening"
+    assert manifest["source_screening_run_id"] == "screening-test"
+    assert manifest["generated_count"] == 3
+    assert [candidate["field_key"] for candidate in manifest["candidates"]] == [
+        "symbol.ma.trend_state",
+        "entry.execution.signal_to_entry_return_bucket",
+        "symbol.macd.energy_zone",
+    ]
+    assert [candidate["direction"] for candidate in manifest["candidates"]] == [
+        "positive",
+        "positive",
+        "negative",
+    ]
+    assert [candidate["action"] for candidate in manifest["candidates"]] == [
+        "keep",
+        "keep",
+        "exclude",
+    ]
+    assert [candidate["source_candidate"]["primary_category"] for candidate in manifest["candidates"]] == [
+        "keep_candidates",
+        "keep_candidates",
+        "exclude_candidates",
+    ]
+
+    execution = manifest["candidates"][1]
+    assert execution["source_candidate"]["factor_kind"] == "entry_execution"
+    assert execution["source_candidate"]["win_rate"] == 0.65
+    assert execution["run_plan"]["analysis"]["entry_attribution"]["entry_filter"]["conditions"] == [
+        {
+            "field": "entry.execution.signal_to_entry_return_bucket",
+            "operator": "eq",
+            "value": "gap_down_2_5pct",
+            "action": "keep",
+        }
+    ]
+
+    for candidate in manifest["candidates"]:
+        RunPlan.from_mapping(candidate["run_plan"])
+
+    generated_fields = {candidate["field_key"] for candidate in manifest["candidates"]}
+    assert "entry.momentum.return_20d_bucket" not in generated_fields
+    assert "entry.stop_fit.fixed_atr_multiple_bucket" not in generated_fields
+    assert "industry.sw_l1.code" not in generated_fields
+    skipped = {row["field_key"]: row["skip_reasons"] for row in manifest["skipped_candidates"]}
+    assert "watchlist_excluded_by_default" in skipped["entry.momentum.return_20d_bucket"]
+    assert "exposure_watchlist_excluded_by_default" in skipped["industry.sw_l1.code"]
+    assert "unsafe_or_unknown_entry_factor" in skipped["trade.path.reached_10pct_bucket"]
+
+
+def test_entry_factor_validation_manifest_from_screening_can_include_watchlists() -> None:
+    manifest = build_entry_factor_validation_manifest_from_screening(
+        _screening_report_fixture(),
+        _baseline_run_plan_fixture(),
+        include_watchlist=True,
+    )
+
+    assert manifest["generated_count"] == 5
+    assert [candidate["field_key"] for candidate in manifest["candidates"]] == [
+        "symbol.ma.trend_state",
+        "entry.execution.signal_to_entry_return_bucket",
+        "symbol.macd.energy_zone",
+        "entry.momentum.return_20d_bucket",
+        "entry.stop_fit.fixed_atr_multiple_bucket",
+    ]
+    assert manifest["candidates"][3]["action"] == "keep"
+    assert manifest["candidates"][4]["action"] == "exclude"
+
+
+def test_entry_factor_validation_manifest_cli_accepts_screening_source(tmp_path: Path, capsys) -> None:
+    screening_path = tmp_path / "entry_single_factor_candidate_screening.json"
+    screening_path.write_text(json.dumps(_screening_report_fixture(), ensure_ascii=False), encoding="utf-8")
+    baseline_path = tmp_path / "baseline.yaml"
+    baseline_path.write_text(yaml.safe_dump(_baseline_run_plan_fixture(), allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    exit_code = manifest_cli.main(
+        [
+            "--screening",
+            str(screening_path),
+            "--baseline-run-plan",
+            str(baseline_path),
+            "--output-dir",
+            str(tmp_path / "manifest"),
+        ]
+    )
+    stdout = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert stdout["schema"] == ENTRY_FACTOR_VALIDATION_MANIFEST_SCHEMA
+    assert stdout["source_mode"] == "entry_single_factor_candidate_screening"
+    assert stdout["source_run_id"] == "screening-test"
+    assert stdout["generated_count"] == 3
+    assert (tmp_path / "manifest" / "entry_factor_validation_manifest.json").exists()
+    assert (tmp_path / "manifest" / "entry_factor_validation_manifest.zh.md").exists()
+    assert len(stdout["artifacts"]["entry_factor_validation_run_plan_paths"]) == 3
+
+    generated = yaml.safe_load(Path(stdout["artifacts"]["entry_factor_validation_run_plan_paths"][1]).read_text(encoding="utf-8"))
+    RunPlan.from_mapping(generated)
+    assert generated["analysis"]["entry_attribution"]["entry_filter"]["conditions"][0]["field"] == (
+        "entry.execution.signal_to_entry_return_bucket"
+    )
+
+
 def _discovery_report_fixture() -> dict:
     return {
         "schema": "attbacktrader.bayesian_factor_discovery.v1",
@@ -227,6 +338,157 @@ def _candidate(field_key: str, value: str, direction: str, score: float, sample_
         "sample_count": sample_count,
         "future_function_guard": {"eligible_for_entry_rule_review": not field_key.startswith("trade.")},
         "flags": [],
+    }
+
+
+def _screening_report_fixture() -> dict:
+    return {
+        "schema": "attbacktrader.entry_single_factor_candidate_screening.v1",
+        "run_id": "screening-test",
+        "source_artifacts": {"single_factor_attribution": "single.json"},
+        "category_counts": {
+            "keep_candidates": 3,
+            "exclude_candidates": 1,
+            "keep_watchlist": 1,
+            "exclude_watchlist": 1,
+            "exposure_watchlist": 1,
+        },
+        "keep_candidates": [
+            _screening_row(
+                "keep_candidates",
+                "keep",
+                "entry_signal",
+                "symbol.ma.trend_state",
+                "bullish",
+                0.70,
+                0.050,
+                0.052,
+                1.8,
+                0.30,
+            ),
+            _screening_row(
+                "keep_candidates",
+                "keep",
+                "entry_execution",
+                "entry.execution.signal_to_entry_return_bucket",
+                "gap_down_2_5pct",
+                0.65,
+                0.048,
+                0.041,
+                1.7,
+                0.36,
+                scope="execution",
+            ),
+            _screening_row(
+                "keep_candidates",
+                "keep",
+                "entry_signal",
+                "trade.path.reached_10pct_bucket",
+                "reached",
+                0.80,
+                0.090,
+                0.080,
+                2.0,
+                0.10,
+            ),
+        ],
+        "exclude_candidates": [
+            _screening_row(
+                "exclude_candidates",
+                "exclude",
+                "entry_signal",
+                "symbol.macd.energy_zone",
+                "green_bar_or_zero",
+                0.20,
+                -0.020,
+                -0.020,
+                0.8,
+                0.85,
+            )
+        ],
+        "keep_watchlist": [
+            _screening_row(
+                "keep_watchlist",
+                "keep",
+                "entry_signal",
+                "entry.momentum.return_20d_bucket",
+                "p80_p100",
+                0.58,
+                0.025,
+                0.020,
+                1.4,
+                0.50,
+            )
+        ],
+        "exclude_watchlist": [
+            _screening_row(
+                "exclude_watchlist",
+                "exclude",
+                "entry_signal",
+                "entry.stop_fit.fixed_atr_multiple_bucket",
+                "lt_1atr",
+                0.28,
+                -0.010,
+                -0.008,
+                0.9,
+                0.75,
+            )
+        ],
+        "exposure_watchlist": [
+            _screening_row(
+                "exposure_watchlist",
+                "keep",
+                "entry_exposure",
+                "industry.sw_l1.code",
+                "801770.SI",
+                0.56,
+                0.045,
+                0.034,
+                1.5,
+                0.44,
+                scope="industry",
+            )
+        ],
+    }
+
+
+def _screening_row(
+    primary_category: str,
+    direction: str,
+    factor_kind: str,
+    field_key: str,
+    value: str,
+    win_rate: float,
+    average_return_pct: float,
+    return_on_entry_value: float,
+    profit_loss_ratio: float,
+    ma60_stop_exit_rate: float,
+    *,
+    scope: str = "entry",
+) -> dict:
+    return {
+        "primary_category": primary_category,
+        "direction": direction,
+        "factor_kind": factor_kind,
+        "field_key": field_key,
+        "field_label_zh": field_key,
+        "scope": scope,
+        "value": value,
+        "value_label_zh": value,
+        "sample_count": 120,
+        "win_rate": win_rate,
+        "average_return_pct": average_return_pct,
+        "median_return_pct": average_return_pct / 2,
+        "return_on_entry_value": return_on_entry_value,
+        "profit_loss_ratio": profit_loss_ratio,
+        "ma60_stop_exit_rate": ma60_stop_exit_rate,
+        "pnl_path_max_drawdown_on_entry_value": 0.01,
+        "return_path_max_drawdown_pct": 0.20,
+        "watchlist_score": 4,
+        "candidate_source": "reverse_filter_positive" if direction == "keep" else "reverse_filter_negative",
+        "flags": [],
+        "category_reasons": ["fixture_reason"],
+        "sample_trade_indexes": [1, 2, 3],
     }
 
 
