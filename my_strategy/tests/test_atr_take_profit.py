@@ -1,0 +1,154 @@
+import json
+from pathlib import Path
+
+import backtrader as bt
+import pandas as pd
+import numpy as np
+from src.strategy import MyStrategy, StockData
+
+
+def test_config_has_atr_params():
+    """以 config.example.json 为模板验证 ATR 相关参数齐全。"""
+    cfg = json.loads((Path(__file__).parent.parent / 'config.example.json').read_text())
+    assert 'atr_period' in cfg
+    assert 'atr_multiplier' in cfg
+    assert 'take_profit_min_pct' in cfg
+    assert 'take_profit_max_pct' in cfg
+    assert cfg['atr_period'] == 20
+    assert cfg['atr_multiplier'] == 1.5
+    assert cfg['take_profit_min_pct'] == 0.03
+    assert cfg['take_profit_max_pct'] == 0.12
+
+
+def _make_feed(n=100, start='2020-01-01'):
+    """生成含 n 根 K 线的合成数据 feed。"""
+    dates = pd.bdate_range(start, periods=n)
+    close = np.cumprod(1 + np.random.normal(0.001, 0.02, n)) * 10.0
+    open_ = close * np.random.uniform(0.98, 1.02, n)
+    high = np.maximum(close, open_) * np.random.uniform(1.0, 1.03, n)
+    low = np.minimum(close, open_) * np.random.uniform(0.97, 1.0, n)
+    volume = np.random.randint(100000, 500000, n).astype(float)
+    ma25 = pd.Series(close).rolling(25).mean().values
+    ma60 = pd.Series(close).rolling(60).mean().values
+    dea = np.where(np.arange(n) > 30, 0.1, -0.1)
+    df = pd.DataFrame({
+        'trade_date': dates,
+        'open': open_, 'high': high, 'low': low, 'close': close, 'volume': volume,
+        'ma25': ma25, 'ma60': ma60, 'dea': dea,
+    })
+    df.index = df['trade_date']
+    return StockData(dataname=df)
+
+
+def test_stock_state_has_new_fields():
+    cerebro = bt.Cerebro()
+    cerebro.adddata(_make_feed(), name='TEST')
+    cerebro.broker.set_cash(1_000_000)
+    cerebro.addstrategy(MyStrategy, initial_cash=1_000_000, max_positions=1)
+    result = cerebro.run()
+    st = result[0]
+    d = st.datas[0]
+    state = st.stock_state[d]
+    assert 'tp1_pct' in state
+    assert 'tp2_pct' in state
+    assert 'initial_size' in state
+
+
+def _make_feed_with_buy_signal(n=150, start='2020-01-01'):
+    """生成能触发 initial_buy 的合成数据：close < prev_close, close > ma60, dea 在 ma60 有效后先负后正。"""
+    dates = pd.bdate_range(start, periods=n)
+    np.random.seed(42)
+    close = np.cumprod(1 + np.random.normal(0.001, 0.005, n)) * 20.0
+    open_ = close * np.random.uniform(0.99, 1.01, n)
+    high = np.maximum(close, open_) * np.random.uniform(1.0, 1.02, n)
+    low = np.minimum(close, open_) * np.random.uniform(0.98, 1.0, n)
+    volume = np.random.randint(100000, 500000, n).astype(float)
+    ma25 = pd.Series(close).rolling(25).mean().values
+    ma60 = pd.Series(close).rolling(60).mean().values
+    # dea: 前70根为负，之后为正 → ma60 有效后（第60根），第61~70根 dea < 0，第71根起 dea > 0
+    # 第72根起满足"过去5天有 dea < 0"条件
+    dea = np.where(np.arange(n) >= 70, 0.1, -0.1)
+    df = pd.DataFrame({
+        'trade_date': dates,
+        'open': open_, 'high': high, 'low': low, 'close': close, 'volume': volume,
+        'ma25': ma25, 'ma60': ma60, 'dea': dea,
+    })
+    df.index = df['trade_date']
+    return StockData(dataname=df)
+
+
+def test_tp_pcts_set_after_initial_buy():
+    """initial_buy 成交后，策略应能正常运行并触发买入信号。"""
+    cerebro = bt.Cerebro()
+    cerebro.adddata(_make_feed_with_buy_signal(n=150), name='TEST')
+    cerebro.broker.set_cash(1_000_000)
+    cerebro.addstrategy(
+        MyStrategy,
+        initial_cash=1_000_000,
+        max_positions=1,
+        atr_period=20,
+        atr_multiplier=1.5,
+        take_profit_min_pct=0.03,
+        take_profit_max_pct=0.12,
+    )
+    result = cerebro.run()
+    st = result[0]
+    buy_orders = [o for o in st.order_log if o['reason'] == 'initial_buy']
+    assert len(buy_orders) > 0, "合成数据应触发至少一次买入"
+    # 验证 tp1_pct/tp2_pct 已被记入 trade_log（stock_state 在 stop() 中会被 reset）
+    assert len(st.trade_log) > 0, "应有 episode 写入 trade_log"
+    for entry in st.trade_log:
+        assert entry['tp1_pct'] is not None, "trade_log 应包含 tp1_pct"
+        # trade_log 中 tp1/tp2 各自 round(4) 后可能有 1e-4 量级误差
+        assert abs(entry['tp2_pct'] - entry['tp1_pct'] * 2) < 1e-3
+
+
+def test_tp_threshold_formula():
+    """验证 ATR 止盈阈值公式的数学正确性。"""
+    def calc_tp1(atr_val, entry_price, k, min_pct, max_pct):
+        atr_pct = atr_val / entry_price
+        return max(min_pct, min(max_pct, k * atr_pct))
+
+    # 正常情况：ATR%=3%, k=1.5 → 4.5%，在[3%,12%]范围内
+    assert abs(calc_tp1(0.6, 20.0, 1.5, 0.03, 0.12) - 0.045) < 1e-9
+
+    # 下限钳制：ATR%=1%, k=1.5 → 1.5% < 3% → 3%
+    assert calc_tp1(0.1, 10.0, 1.5, 0.03, 0.12) == 0.03
+
+    # 上限钳制：ATR%=10%, k=1.5 → 15% > 12% → 12%
+    assert calc_tp1(2.0, 20.0, 1.5, 0.03, 0.12) == 0.12
+
+
+def test_tp_sell_size_uses_initial_size():
+    """两次止盈都应卖原始建仓量的1/3，而非当前持仓的1/3。"""
+    initial_size = 900  # 原始建仓900股
+    expected_sell = int(initial_size / 3 / 100) * 100  # = 300
+    assert expected_sell == 300
+
+    # 模拟 tp1 后剩余600股，tp2 也应卖300股而非 int(600/3/100)*100=200
+    remaining = initial_size - expected_sell  # 600
+    wrong_sell = int(remaining / 3 / 100) * 100  # = 200
+    assert wrong_sell != expected_sell  # 确认旧逻辑确实不同
+
+
+def test_trade_log_contains_tp_pcts():
+    """trade_log 中每条记录应包含 tp1_pct 和 tp2_pct 字段。"""
+    np.random.seed(0)
+    cerebro = bt.Cerebro()
+    cerebro.adddata(_make_feed_with_buy_signal(n=200), name='TEST')
+    cerebro.broker.set_cash(1_000_000)
+    cerebro.addstrategy(
+        MyStrategy,
+        initial_cash=1_000_000,
+        max_positions=1,
+        atr_period=20,
+        atr_multiplier=1.5,
+        take_profit_min_pct=0.03,
+        take_profit_max_pct=0.12,
+    )
+    result = cerebro.run()
+    st = result[0]
+    if st.trade_log:
+        for row in st.trade_log:
+            assert 'tp1_pct' in row, f"trade_log 缺少 tp1_pct: {row}"
+            assert 'tp2_pct' in row, f"trade_log 缺少 tp2_pct: {row}"

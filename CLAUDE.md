@@ -1,30 +1,5 @@
-## Agent skills
+# CLAUDE.md
 
-### Workspace
-
-Use `C:\Work\GitWork\GoalStockBacktrad` as the working directory for this repository. Do not inspect, edit, or rely on files under the old `E:\GithubWorkSpace\GoalStockBacktrad` checkout.
-
-### GitHub repository
-
-For GitHub issue and PRD operations, explicitly target `fuyuoo/backtrader`. Do not rely on `gh` remote inference because the clone also has the upstream `mementum/backtrader` remote.
-
-### Issue tracker
-
-Issues are tracked in GitHub Issues for this repository. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the default canonical triage labels. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-This repo uses a single-context domain layout. See `docs/agents/domain.md`.
-
-### Project structure
-
-Before adding modules, commands, scripts, or tests, use `docs/architecture/project-structure.md` as the placement guide.
-
-# General project guidance
 * 全程使用中文回答
 * 不允许静默处理和降级操作，要暴露异常
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
@@ -218,5 +193,3 @@ except ImportError:
 - 工作区干净时方可直接开始；如存在未提交改动，`MUST` 向用户列出改动范围并取得明确确认（"可以在当前状态下继续" 或 "先提交/暂存再开始"），不得自行判断改动是否相关。
 - 不允许在多任务改动堆叠的状态下直接进入新一轮 superpowers 流程；新任务的 diff 必须可与既有改动清晰区分。
 - 用户明确要求"忽略当前未提交改动直接开始"时方可继续，并在执行说明中记录该例外。
-
-

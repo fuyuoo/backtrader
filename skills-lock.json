@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "tushare-data": {
+      "source": "waditu-tushare/skills",
+      "sourceType": "github",
+      "skillPath": "tushare-data/SKILL.md",
+      "computedHash": "8db3f43e2b3e6ef639e7db43a2dcf126ad08cf61a34f613fa03bee21654cb204"
+    }
+  }
+}

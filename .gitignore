@@ -69,9 +69,20 @@ samples2/
 datas/*.py
 
 .idea/
+.pytest_cache/
 .codegraph/
 .secrets/
 .venv/
+.serena/
 data/snapshots/
 /reports/
 examples/generated-entry-factor-validation/
+/my_strategy/data
+/my_strategy/config.json
+/my_strategy/download_errors.log
+/my_strategy/logs/
+/my_strategy/a_stock_list.txt
+/my_strategy/stock_list_backup*.csv
+/my_strategy/results
+/my_strategy/reports
+learn_backtrader/

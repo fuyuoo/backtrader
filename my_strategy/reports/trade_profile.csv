@@ -1,0 +1,5 @@
+bucket,count,avg_return,avg_holding_days,mean_factor_momentum_60d,median_factor_momentum_60d,q25_factor_momentum_60d,q75_factor_momentum_60d,mean_factor_ma60_dist,median_factor_ma60_dist,q25_factor_ma60_dist,q75_factor_ma60_dist,mean_factor_macd_strength,median_factor_macd_strength,q25_factor_macd_strength,q75_factor_macd_strength,mean_factor_sector_momentum_60d,median_factor_sector_momentum_60d,q25_factor_sector_momentum_60d,q75_factor_sector_momentum_60d
+大亏,423,-14.7018,22.8,0.09806,0.067278,-0.011748,0.182464,0.097555,0.084278,0.048381,0.131269,0.264208,0.11,0.04,0.285,,,,
+大盈,1029,19.7005,65.6,0.046316,0.020419,-0.045243,0.119326,0.071937,0.057011,0.032467,0.093953,0.194373,0.08,0.03,0.19,,,,
+小亏,3165,-4.3371,18.9,0.023078,0.007195,-0.04901,0.073991,0.039595,0.030264,0.014903,0.054262,0.108411,0.04,0.02,0.1,,,,
+小盈,1294,5.4565,43.2,0.02927,0.021164,-0.036513,0.087314,0.050272,0.038676,0.018966,0.067725,0.120031,0.04,0.02,0.11,,,,
