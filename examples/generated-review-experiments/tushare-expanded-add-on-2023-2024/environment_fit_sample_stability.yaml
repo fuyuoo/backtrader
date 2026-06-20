@@ -1,0 +1,97 @@
+draft_id: environment_fit_sample_stability
+status: draft_requires_manual_confirmation
+source_candidate_id: candidate.environment_fit.sample_stability
+title_zh: 环境适配稳定性验证
+purpose_zh: 验证当前 environment_fit 中表现突出的入场环境是否能在更大股票池或更长年份中保持稳定。
+base_config_path: examples\run-tushare-expanded-add-on.yaml
+suggested_run_id: tushare-expanded-add-on-2023-2024__review__environment_fit_sample_stability
+candidate_direction: environment_fit_validation
+candidate_type: sample_stability_probe
+suggested_change:
+  artifact_or_config: environment_fit.json / environment_fit_comparison.json
+  change_zh: 扩大股票池或年份后重跑同一策略，再用 att-compare-environment-fit 比较最佳环境、资金收益率和低样本组合数量。
+  not_allowed:
+  - 不要直接把环境统计结论转成买卖规则
+  - 不要基于低样本组合调参
+validation_plan_zh: 用相同策略在更大样本生成 environment_fit，对比 best_by_net_pnl、best_by_return_on_entry_value、low_sample_combination_count
+  和代表 trade_index 是否仍集中。
+evidence_refs:
+- artifact: review_packet
+  section: environment_fit
+sample_refs:
+- kind: trade
+  trade_index: 120
+  symbol: 600030.SH
+  entry_date: '2024-10-17'
+  exit_date: '2024-11-07'
+- kind: trade
+  trade_index: 35
+  symbol: 600030.SH
+  entry_date: '2023-06-26'
+  exit_date: '2023-07-28'
+- kind: trade
+  trade_index: 112
+  symbol: 002475.SZ
+  entry_date: '2024-08-28'
+  exit_date: '2024-09-30'
+- kind: trade
+  trade_index: 110
+  symbol: 600276.SH
+  entry_date: '2024-08-20'
+  exit_date: '2024-09-27'
+- kind: trade
+  trade_index: 117
+  symbol: 000858.SZ
+  entry_date: '2024-09-18'
+  exit_date: '2024-09-25'
+- kind: trade
+  trade_index: 34
+  symbol: 000858.SZ
+  entry_date: '2023-06-26'
+  exit_date: '2023-07-28'
+- kind: trade
+  trade_index: 77
+  symbol: 000858.SZ
+  entry_date: '2024-02-01'
+  exit_date: '2024-02-22'
+- kind: trade
+  trade_index: 100
+  symbol: 600276.SH
+  entry_date: '2024-07-02'
+  exit_date: '2024-07-12'
+- kind: trade
+  trade_index: 116
+  symbol: 600030.SH
+  entry_date: '2024-09-12'
+  exit_date: '2024-09-24'
+- kind: trade
+  trade_index: 25
+  symbol: 000001.SZ
+  entry_date: '2023-04-25'
+  exit_date: '2023-05-08'
+manual_steps:
+- 读取 source_candidate_id 对应的 environment_fit candidate 和 sample_refs。
+- 扩大股票池或年份后重跑相同策略；不要修改买入、卖出、加仓或仓位参数。
+- 比较新旧 environment_fit.json 的最佳环境、资金收益率、低样本组合数量和代表 trade_index。
+- 如果需要新增环境维度，先补 decision-time evidence producer，再重新生成报告和 review packet。
+run_plan_patch:
+  run:
+    id: tushare-expanded-add-on-2023-2024__review__environment_fit_sample_stability
+  review_candidate:
+    source_candidate_id: candidate.environment_fit.sample_stability
+    manual_confirmation_required: true
+    validation_plan_zh: 用相同策略在更大样本生成 environment_fit，对比 best_by_net_pnl、best_by_return_on_entry_value、low_sample_combination_count
+      和代表 trade_index 是否仍集中。
+    inspect_artifacts:
+    - environment_fit.json
+    - environment_fit_comparison.json
+    - environment_fit_comparison.zh.md
+    - review_packet.all.json
+    - review_findings.all.json
+    comparison_dimensions:
+    - best_by_net_pnl
+    - best_by_return_on_entry_value
+    - low_sample_combination_count
+    - trade_contributions
+    validation_note: 扩大样本验证环境适配稳定性，不直接修改策略参数。
+not_runnable_until: 人工确认 run_plan_patch 并转成合法 RunPlan YAML

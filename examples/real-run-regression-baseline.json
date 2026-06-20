@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "description": "Accepted real-run metric baseline for the 2023-2024 expanded Tushare examples.",
+  "runs": {
+    "tushare-expanded-baseline-2023-2024": {
+      "metrics": {
+        "evidence_validation_status": "ok",
+        "evidence_validation_error_count": 0,
+        "evidence_validation_warning_count": 0,
+        "final_value": 989324.9511796256,
+        "cumulative_return": -0.0106750488203744,
+        "max_drawdown": 0.05910619701484498,
+        "trade_count": 184,
+        "win_rate": 0.4782608695652174,
+        "profit_loss_ratio": 1.2877607177744628,
+        "execution_rejection_count": 0,
+        "rejection_reason_count.BOARD_LOT_TOO_SMALL": 0,
+        "entry_filter_count": 0,
+        "add_on_signal_count": 0,
+        "completed_order_count": 374
+      },
+      "tolerances": {
+        "final_value": 0.000001,
+        "cumulative_return": 0.000000000001,
+        "max_drawdown": 0.000000000001,
+        "win_rate": 0.000000000001,
+        "profit_loss_ratio": 0.000000000001
+      }
+    },
+    "tushare-expanded-sized-2023-2024": {
+      "metrics": {
+        "evidence_validation_status": "ok",
+        "evidence_validation_error_count": 0,
+        "evidence_validation_warning_count": 0,
+        "final_value": 942143.6226874419,
+        "cumulative_return": -0.057856377312558105,
+        "max_drawdown": 0.18595714926570844,
+        "trade_count": 127,
+        "win_rate": 0.4330708661417323,
+        "profit_loss_ratio": 1.323276973081112,
+        "execution_rejection_count": 13,
+        "rejection_reason_count.BOARD_LOT_TOO_SMALL": 13,
+        "entry_filter_count": 0,
+        "add_on_signal_count": 0,
+        "completed_order_count": 259
+      },
+      "tolerances": {
+        "final_value": 0.000001,
+        "cumulative_return": 0.000000000001,
+        "max_drawdown": 0.000000000001,
+        "win_rate": 0.000000000001,
+        "profit_loss_ratio": 0.000000000001
+      }
+    },
+    "tushare-attribution-filter-2023-2024": {
+      "metrics": {
+        "evidence_validation_status": "ok",
+        "evidence_validation_error_count": 0,
+        "evidence_validation_warning_count": 0,
+        "final_value": 1024963.5979407353,
+        "cumulative_return": 0.024963597940735216,
+        "max_drawdown": 0.021220914509214085,
+        "trade_count": 6,
+        "win_rate": 0.6666666666666666,
+        "profit_loss_ratio": 0.902980511927624,
+        "execution_rejection_count": 0,
+        "rejection_reason_count.BOARD_LOT_TOO_SMALL": 0,
+        "entry_filter_count": 344,
+        "add_on_signal_count": 0,
+        "completed_order_count": 13
+      },
+      "tolerances": {
+        "final_value": 0.000001,
+        "cumulative_return": 0.000000000001,
+        "max_drawdown": 0.000000000001,
+        "win_rate": 0.000000000001,
+        "profit_loss_ratio": 0.000000000001
+      }
+    },
+    "tushare-expanded-add-on-2023-2024": {
+      "metrics": {
+        "evidence_validation_status": "ok",
+        "evidence_validation_error_count": 0,
+        "evidence_validation_warning_count": 0,
+        "final_value": 985642.2497650513,
+        "cumulative_return": -0.014357750234948674,
+        "max_drawdown": 0.1886705986935961,
+        "trade_count": 129,
+        "win_rate": 0.4418604651162791,
+        "profit_loss_ratio": 1.347651679076129,
+        "execution_rejection_count": 0,
+        "rejection_reason_count.BOARD_LOT_TOO_SMALL": 0,
+        "entry_filter_count": 0,
+        "add_on_signal_count": 4,
+        "completed_order_count": 266
+      },
+      "tolerances": {
+        "final_value": 0.000001,
+        "cumulative_return": 0.000000000001,
+        "max_drawdown": 0.000000000001,
+        "win_rate": 0.000000000001,
+        "profit_loss_ratio": 0.000000000001
+      }
+    }
+  }
+}

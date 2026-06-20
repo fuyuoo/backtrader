@@ -1,0 +1,132 @@
+run:
+  id: tushare-expanded-add-on-2023-2024__review__environment_fit_sample_stability
+  from_date: '2023-01-01'
+  to_date: '2024-12-31'
+data:
+  snapshot_root: data/snapshots
+  provider: tushare
+  price_adjustment: qfq
+  refresh_snapshots: true
+  tradable_series:
+  - symbol: 000001.SZ
+    asset_type: stock
+    price_adjustment: qfq
+  - symbol: 600036.SH
+    asset_type: stock
+    price_adjustment: qfq
+  - symbol: 600519.SH
+    asset_type: stock
+    price_adjustment: qfq
+  - symbol: 000858.SZ
+    asset_type: stock
+    price_adjustment: qfq
+  - symbol: 000333.SZ
+    asset_type: stock
+    price_adjustment: qfq
+  - symbol: 600276.SH
+    asset_type: stock
+    price_adjustment: qfq
+  - symbol: 300750.SZ
+    asset_type: stock
+    price_adjustment: qfq
+  - symbol: 002475.SZ
+    asset_type: stock
+    price_adjustment: qfq
+  - symbol: 601318.SH
+    asset_type: stock
+    price_adjustment: qfq
+  - symbol: 600030.SH
+    asset_type: stock
+    price_adjustment: qfq
+  decision_series:
+    indexes: []
+  benchmark_series:
+    indexes:
+    - 000001.SH
+    - 000300.SH
+    - 399006.SZ
+    - 000905.SH
+  industry_series:
+    source: SW2021
+    indexes:
+    - 801780.SI
+    - 801120.SI
+    - 801110.SI
+    - 801150.SI
+    - 801730.SI
+    - 801080.SI
+    - 801790.SI
+strategy:
+  template: trend_template_v1
+  entry_method: kdj_oversold_entry
+  profit_taking_method: kdj_overheated_exit
+  stop_loss_method: fixed_percent_stop
+  add_on_method: kdj_oversold_add_on
+  add_on_params:
+    threshold: 13
+    min_profit_percent: 0.03
+    max_add_on_count: 1
+  sizing_rule: equal_weight
+  sizing_params:
+    max_holding_count: 5
+    max_position_percent: 0.18
+    max_total_exposure_percent: 0.9
+    max_risk_group_exposure_percent: 0.3
+    cash_reserve_percent: 0.05
+    max_turnover_percent: 0.35
+    risk_group_level: 1
+    atr_risk_percent: 0.01
+    atr_multiple: 2.0
+    atr_period: 14
+    atr_timeframe: D
+constraints:
+  ashare:
+    enabled: true
+    t_plus_one: true
+    limit_up_down: true
+    suspension: true
+    board_lot_size: 100
+broker:
+  initial_cash: 1000000
+  commission_rate: 0.0003
+  stamp_tax_rate: 0.001
+  transfer_fee_rate: 1.0e-05
+  slippage:
+    type: percent
+    value: 0.0005
+execution:
+  engine: backtrader
+  stake: 100
+output:
+  persist: true
+  report_root: reports
+analysis:
+  industry_attribution:
+    enabled: true
+    source: SW2021
+    levels:
+    - 1
+    - 2
+    - 3
+  market_regime:
+    enabled: true
+    timeframes:
+    - D
+    - W
+    - M
+  scenario_fit:
+    enabled: true
+    min_trades: 10
+  post_exit:
+    window_days:
+    - 3
+    - 5
+    - 10
+    - 20
+    primary_window_days: 5
+    sold_too_early_threshold: 0.0
+    rebound_thresholds:
+    - 0.0
+    - 0.02
+    - 0.05
+    - 0.1

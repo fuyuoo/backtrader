@@ -1,0 +1,260 @@
+{
+  "schema": "attbacktrader.market_segment_run_manifest.v1",
+  "catalog_path": "examples\\manual-market-segments\\a-share-market-type-validation.yaml",
+  "base_config_path": "examples\\run-tushare-market-type-add-on.yaml",
+  "base_run_id": "tushare-market-type-add-on-validation",
+  "generated_count": 9,
+  "market_types": [
+    {
+      "market_type_id": "bull_market",
+      "label_zh": "牛市",
+      "strategy_switching_use_zh": "验证趋势持有、放宽止盈、顺势加仓是否比快进快出更有效。",
+      "selection_rule_zh": "指数中期趋势向上，回撤后仍能继续向上推进或创阶段高点。"
+    },
+    {
+      "market_type_id": "range_market",
+      "label_zh": "震荡市",
+      "strategy_switching_use_zh": "验证超卖反弹、快进快出、严格止盈是否更适合区间波动。",
+      "selection_rule_zh": "指数在较宽区间内反复波动，突破和跌破都缺少持续性。"
+    },
+    {
+      "market_type_id": "bear_market",
+      "label_zh": "熊市",
+      "strategy_switching_use_zh": "验证是否需要少做、降仓、暂停交易或只保留极强反弹信号。",
+      "selection_rule_zh": "指数中期趋势向下，反弹后难以创新高，阶段重心持续下移。"
+    }
+  ],
+  "segments": [
+    {
+      "segment_id": "2014_2015_bull_market",
+      "label_zh": "2014-2015 年杠杆牛市主升",
+      "market_type_id": "bull_market",
+      "market_type_label_zh": "牛市",
+      "validation_role": "bull_market",
+      "from_date": "2014-08-01",
+      "to_date": "2015-06-12",
+      "anchor_dates": [],
+      "run_id": "tushare-market-type-add-on-market-segment-2014_2015_bull_market",
+      "run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2014_2015_bull_market.run.yaml",
+      "manual_similarity_thesis_zh": "这段代表大级别牛市主升，指数从 2000 点附近持续上攻至 5178 点。\n",
+      "source_refs": [
+        {
+          "title": "2014 年 8 月至 2015 年 6 月沪指由 2000 点附近上涨至 5178 点",
+          "url": "https://cs.com.cn/gppd/201806/t20180612_5822313.html",
+          "evidence_zh": "资料描述沪指 10 个月由 2000 点附近上涨至 5178 点，上涨幅度超过 150%。"
+        },
+        {
+          "title": "2015 年 6 月 12 日上证指数盘中冲上 5178.19 点",
+          "url": "https://jingji.cctv.com/2017/06/13/ARTIi6f4i2ch2iia6Zn0lpMN170613.shtml",
+          "evidence_zh": "资料记录 2015-06-12 上证指数盘中达到 5178.19 点。"
+        }
+      ]
+    },
+    {
+      "segment_id": "2019_q1_bull_market",
+      "label_zh": "2019 年一季度单边上攻",
+      "market_type_id": "bull_market",
+      "market_type_label_zh": "牛市",
+      "validation_role": "bull_market",
+      "from_date": "2019-01-04",
+      "to_date": "2019-04-08",
+      "anchor_dates": [],
+      "run_id": "tushare-market-type-add-on-market-segment-2019_q1_bull_market",
+      "run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2019_q1_bull_market.run.yaml",
+      "manual_similarity_thesis_zh": "这段代表低位启动后的单边上攻，指数在短期内持续扩张涨幅。\n",
+      "source_refs": [
+        {
+          "title": "2019 年 1 月至 4 月上证指数从 2493.90 涨至 3288.45",
+          "url": "https://www.jwview.com/jingwei/12-31/284713.shtml",
+          "evidence_zh": "资料给出 2019-01-02 至 2019-04-08 上证指数上涨 31.86% 的价格区间。"
+        },
+        {
+          "title": "春季躁动历史统计关注指数涨幅和持续交易日",
+          "url": "https://wallstreetcn.com/articles/3645427",
+          "evidence_zh": "资料以持续交易日和指数涨幅描述历年春季躁动走势。"
+        }
+      ]
+    },
+    {
+      "segment_id": "2020_2021_structural_bull_market",
+      "label_zh": "2020-2021 年结构性牛市推进",
+      "market_type_id": "bull_market",
+      "market_type_label_zh": "牛市",
+      "validation_role": "bull_market",
+      "from_date": "2020-03-23",
+      "to_date": "2021-02-18",
+      "anchor_dates": [],
+      "run_id": "tushare-market-type-add-on-market-segment-2020_2021_structural_bull_market",
+      "run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2020_2021_structural_bull_market.run.yaml",
+      "manual_similarity_thesis_zh": "这段代表急跌后进入结构性牛市，指数震荡上行并在 2021 年春节后冲高。\n",
+      "source_refs": [
+        {
+          "title": "2020 年上证指数从年内低点 2646.8 点震荡反弹并快速上冲 3400 点以上",
+          "url": "https://www.yicai.com/news/100897955.html",
+          "evidence_zh": "资料描述上证指数从 3100 点下坠至 2646.8 点后震荡反弹，7 月上旬快速上冲至 3400 点以上。"
+        },
+        {
+          "title": "上交所统计月报记录 2021 年 2 月 18 日上证综指最高 3731.69 点",
+          "url": "https://www.sse.com.cn/aboutus/publication/monthly/documents/c/10061128/files/da61d7f306674a03902e0b847ce34fae.pdf",
+          "evidence_zh": "资料记录 2021 年 1-2 月上证综指最高点为 3731.69，日期为 2021-02-18。"
+        }
+      ]
+    },
+    {
+      "segment_id": "2016_post_crash_range_market",
+      "label_zh": "2016 年熔断后区间震荡",
+      "market_type_id": "range_market",
+      "market_type_label_zh": "震荡市",
+      "validation_role": "range_market",
+      "from_date": "2016-01-27",
+      "to_date": "2016-12-30",
+      "anchor_dates": [],
+      "run_id": "tushare-market-type-add-on-market-segment-2016_post_crash_range_market",
+      "run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2016_post_crash_range_market.run.yaml",
+      "manual_similarity_thesis_zh": "这段代表大跌后的修复震荡，指数底部抬高但没有形成单边牛市。\n",
+      "source_refs": [
+        {
+          "title": "2016 年上证指数 2638 点之后基本处于区间震荡",
+          "url": "https://www.scfund.com.cn/news/2017/01/10/26059/1.shtml",
+          "evidence_zh": "资料回顾 2016 年上证指数 1 月 27 日最低到 2638 点后，基本处于区间震荡且底部逐步抬高。"
+        },
+        {
+          "title": "2016 年 1 月 27 日低点至 11 月 29 日高点累计最大涨幅约 25%",
+          "url": "https://www.cs.com.cn/gppd/201704/t20170424_5255738.html",
+          "evidence_zh": "资料记录 2016-01-27 上证指数 2638.30 点低点，以及 2016-11-29 的 3301.21 点高点。"
+        }
+      ]
+    },
+    {
+      "segment_id": "2020_h2_high_range_market",
+      "label_zh": "2020 年下半年高位震荡",
+      "market_type_id": "range_market",
+      "market_type_label_zh": "震荡市",
+      "validation_role": "range_market",
+      "from_date": "2020-07-13",
+      "to_date": "2020-12-31",
+      "anchor_dates": [],
+      "run_id": "tushare-market-type-add-on-market-segment-2020_h2_high_range_market",
+      "run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2020_h2_high_range_market.run.yaml",
+      "manual_similarity_thesis_zh": "这段代表快速上冲后的高位箱体，指数围绕 3200-3500 区间反复震荡。\n",
+      "source_refs": [
+        {
+          "title": "2020 年 7 月中旬以来 A 股高位震荡，沪指在 3200 与 3400 附近反复",
+          "url": "https://finance.sina.cn/2020-08-06/detail-iivhuipn7075128.d.html",
+          "evidence_zh": "资料描述 2020 年 7 月中旬以来 A 股高位震荡，沪指曾跌破 3200 点又回到 3400 点附近。"
+        },
+        {
+          "title": "机构预判上证综指维持在 3100-3500 点之间横盘震荡",
+          "url": "https://sh.people.com.cn/n2/2020/1203/c139965-34453547.html",
+          "evidence_zh": "资料引用机构判断，上证综指仍将维持在 3100-3500 点之间横盘震荡。"
+        }
+      ]
+    },
+    {
+      "segment_id": "2021_box_range_market",
+      "label_zh": "2021 年全年箱体震荡",
+      "market_type_id": "range_market",
+      "market_type_label_zh": "震荡市",
+      "validation_role": "range_market",
+      "from_date": "2021-01-04",
+      "to_date": "2021-12-31",
+      "anchor_dates": [],
+      "run_id": "tushare-market-type-add-on-market-segment-2021_box_range_market",
+      "run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2021_box_range_market.run.yaml",
+      "manual_similarity_thesis_zh": "这段代表全年指数箱体震荡，指数多次冲高但未能形成持续突破。\n",
+      "source_refs": [
+        {
+          "title": "2021 年 A 股整体呈现箱体震荡",
+          "url": "https://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/696284870836/index.phtml",
+          "evidence_zh": "资料描述 2021 年 A 股大势为箱体震荡，全年上证指数三次站上 3700 点以上。"
+        },
+        {
+          "title": "2021 年上证指数最低 3312.72、最高 3731.69，全年振幅 12.06%",
+          "url": "https://newsxmwb.xinmin.cn/minsheng/finance/2021/12/31/32090754.html",
+          "evidence_zh": "资料记录 2021 年上证指数最高 3731.69、最低 3312.72，全年振幅 12.06%。"
+        }
+      ]
+    },
+    {
+      "segment_id": "2015_2016_bear_market",
+      "label_zh": "2015 年高点后的股灾熊市",
+      "market_type_id": "bear_market",
+      "market_type_label_zh": "熊市",
+      "validation_role": "bear_market",
+      "from_date": "2015-06-12",
+      "to_date": "2016-01-27",
+      "anchor_dates": [],
+      "run_id": "tushare-market-type-add-on-market-segment-2015_2016_bear_market",
+      "run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2015_2016_bear_market.run.yaml",
+      "manual_similarity_thesis_zh": "这段代表牛市高点之后的快速熊市，指数从 5178 点大幅下跌至 2638 点附近。\n",
+      "source_refs": [
+        {
+          "title": "2015 年 6 月 12 日上证指数盘中冲上 5178.19 点",
+          "url": "https://jingji.cctv.com/2017/06/13/ARTIi6f4i2ch2iia6Zn0lpMN170613.shtml",
+          "evidence_zh": "资料记录 2015-06-12 上证指数盘中达到 5178.19 点。"
+        },
+        {
+          "title": "2016 年 1 月 27 日上证指数创出 2638.30 点低点",
+          "url": "https://www.cs.com.cn/gppd/201704/t20170424_5255738.html",
+          "evidence_zh": "资料记录 2016-01-27 上证指数创出 2638.30 点低点。"
+        }
+      ]
+    },
+    {
+      "segment_id": "2018_bear_market",
+      "label_zh": "2018 年单边熊市",
+      "market_type_id": "bear_market",
+      "market_type_label_zh": "熊市",
+      "validation_role": "bear_market",
+      "from_date": "2018-01-29",
+      "to_date": "2019-01-04",
+      "anchor_dates": [],
+      "run_id": "tushare-market-type-add-on-market-segment-2018_bear_market",
+      "run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2018_bear_market.run.yaml",
+      "manual_similarity_thesis_zh": "这段代表年初高点之后的持续下跌，指数重心一路下移至 2019 年初阶段低点。\n",
+      "source_refs": [
+        {
+          "title": "2018 年上证指数从 3587.03 点进入单边熊市",
+          "url": "https://www.cnfin.com/stock-xh08/a/20181228/1791327.shtml?f=arelated",
+          "evidence_zh": "资料描述 2018 年年初上证指数创 3587.03 点全年高点后进入单边熊市。"
+        },
+        {
+          "title": "2019 年 1 月 4 日上证指数到达 2440.91 点阶段低位",
+          "url": "https://www.chnfund.com/article/AR20231210120748171",
+          "evidence_zh": "资料记录上证指数长期处于 3000 点下方，并在 2019-01-04 到达 2440.91 点阶段低位。"
+        }
+      ]
+    },
+    {
+      "segment_id": "2022_q1_q2_bear_market",
+      "label_zh": "2022 年年初快速熊市",
+      "market_type_id": "bear_market",
+      "market_type_label_zh": "熊市",
+      "validation_role": "bear_market",
+      "from_date": "2022-01-04",
+      "to_date": "2022-04-27",
+      "anchor_dates": [],
+      "run_id": "tushare-market-type-add-on-market-segment-2022_q1_q2_bear_market",
+      "run_plan_path": "examples\\generated-market-segment-runs\\tushare-market-type-add-on\\tushare-market-type-add-on-market-segment-2022_q1_q2_bear_market.run.yaml",
+      "manual_similarity_thesis_zh": "这段代表年初高位后快速下跌，指数在四个月内跌破 3000 点并触及年内低位。\n",
+      "source_refs": [
+        {
+          "title": "2022 年 A 股由年初 3600 点高位一度下探到 4 月 27 日 2863 点",
+          "url": "https://finance.sina.com.cn/stock/jsy/2022-12-30/doc-imxymwii2630248.shtml",
+          "evidence_zh": "资料回顾 2022 年 A 股由年初 3600 点高位一度下探到 4 月 27 日的 2863 点。"
+        },
+        {
+          "title": "截至 2022 年 4 月 26 日上证指数年内下挫 20.7%",
+          "url": "https://finance.sina.com.cn/jjxw/2022-04-27/doc-imcwipii6645283.shtml",
+          "evidence_zh": "资料记录截至 2022-04-26 收盘，上证指数年内下挫 20.7%。"
+        }
+      ]
+    }
+  ],
+  "ai_usage_rules": [
+    "这些行情段来自人工资料整理，不是代码自动识别的市场状态。",
+    "生成器只改 RunPlan 的 run.id、run.from_date 和 run.to_date，并校验 YAML 合法。",
+    "先比较同一行情类型下的多个样本，再跨类型比较 environment_fit 和 strategy_environment_profile。",
+    "如果某个行情段交易样本不足，应标记为不确定，而不是补默认值或扩大解释。"
+  ]
+}

@@ -1,0 +1,89 @@
+draft_id: post_exit_sold_too_early_dimensions
+status: draft_requires_manual_confirmation
+source_candidate_id: candidate.post_exit.sold_too_early_dimensions
+title_zh: 扩展卖飞复盘维度
+purpose_zh: 围绕最大反弹样本补充退出日证据分组，判断是否缺少可解释维度。
+base_config_path: examples\run-tushare-expanded-add-on.yaml
+suggested_run_id: tushare-expanded-add-on-2023-2024__review__post_exit_sold_too_early_dimensions
+candidate_direction: post_exit_framework
+candidate_type: review_dimension
+suggested_change:
+  artifact_or_config: analysis.post_exit / exit attribution evidence
+  change_zh: 优先检查 symbol/industry/market 退出证据覆盖，再决定是否新增退出归因因子。
+  not_allowed:
+  - 不要直接把卖飞样本变成持仓规则
+  - 不要把反弹幅度作为调参目标
+validation_plan_zh: 对 top 卖飞 trade_index 生成 sample drill-down，核对 exit_checks、entry_checks
+  和后续窗口完整性。
+evidence_refs:
+- artifact: review_packet
+  section: sold_too_early
+sample_refs:
+- kind: trade
+  trade_index: 117
+  symbol: 000858.SZ
+  entry_date: '2024-09-18'
+  exit_date: '2024-09-25'
+- kind: trade
+  trade_index: 116
+  symbol: 600030.SH
+  entry_date: '2024-09-12'
+  exit_date: '2024-09-24'
+- kind: trade
+  trade_index: 75
+  symbol: 600276.SH
+  entry_date: '2024-01-30'
+  exit_date: '2024-02-02'
+- kind: trade
+  trade_index: 110
+  symbol: 600276.SH
+  entry_date: '2024-08-20'
+  exit_date: '2024-09-27'
+- kind: trade
+  trade_index: 72
+  symbol: 300750.SZ
+  entry_date: '2024-01-08'
+  exit_date: '2024-01-30'
+- kind: trade
+  trade_index: 115
+  symbol: 000333.SZ
+  entry_date: '2024-09-10'
+  exit_date: '2024-09-19'
+- kind: trade
+  trade_index: 125
+  symbol: 002475.SZ
+  entry_date: '2024-11-15'
+  exit_date: '2024-11-25'
+- kind: trade
+  trade_index: 111
+  symbol: 000858.SZ
+  entry_date: '2024-08-27'
+  exit_date: '2024-09-13'
+- kind: trade
+  trade_index: 35
+  symbol: 600030.SH
+  entry_date: '2023-06-26'
+  exit_date: '2023-07-28'
+- kind: trade
+  trade_index: 112
+  symbol: 002475.SZ
+  entry_date: '2024-08-28'
+  exit_date: '2024-09-30'
+manual_steps:
+- 读取 source_candidate_id 对应的 candidate 和 sample_refs。
+- 用 review_sample 或 review_sample_batch 核对证据是否完整。
+- 人工决定是否需要新增 evidence producer、分组维度或配置变体。
+- 确认后再把 run_plan_patch 转成合法 RunPlan YAML 并执行回测。
+run_plan_patch:
+  run:
+    id: tushare-expanded-add-on-2023-2024__review__post_exit_sold_too_early_dimensions
+  review_candidate:
+    source_candidate_id: candidate.post_exit.sold_too_early_dimensions
+    manual_confirmation_required: true
+    validation_plan_zh: 对 top 卖飞 trade_index 生成 sample drill-down，核对 exit_checks、entry_checks
+      和后续窗口完整性。
+  analysis:
+    post_exit:
+      enabled: true
+      review_note: 人工确认是否新增退出证据分组；不要直接修改止损参数。
+not_runnable_until: 人工确认 run_plan_patch 并转成合法 RunPlan YAML

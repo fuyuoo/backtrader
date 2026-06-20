@@ -109,7 +109,13 @@ setuptools.setup(
     # project is installed. For an analysis of "install_requires" vs pip's
     # requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
-    # install_requires=['six'],
+    install_requires=[
+        'pandas>=2,<4',
+        'pyarrow>=15',
+        'pydantic>=2,<3',
+        'PyYAML>=6,<7',
+        'tushare>=1.4',
+    ],
 
     # List additional groups of dependencies here
     # (e.g. development dependencies).
@@ -134,7 +140,57 @@ setuptools.setup(
     # "scripts" keyword. Entry points provide cross-platform support and allow
     # pip to create the appropriate form of executable for the target platform.
     # entry_points={'console_scripts': ['sample=sample:main',],},
-    entry_points={'console_scripts': ['btrun=backtrader.btrun:btrun']},
+    entry_points={'console_scripts': [
+        'btrun=backtrader.btrun:btrun',
+        'att-run-plan=attbacktrader.cli.run_plan:main',
+        'att-compare-runs=attbacktrader.cli.compare_runs:main',
+        'att-compare-environment-fit=attbacktrader.cli.compare_environment_fit:main',
+        'att-generate-attribution-filter-experiments=attbacktrader.cli.attribution_filter_experiments:main',
+        'att-generate-market-segment-runs=attbacktrader.cli.market_segment_runs:main',
+        'att-market-type-summary=attbacktrader.cli.market_type_summary:main',
+        'att-strategy-adaptation-matrix=attbacktrader.cli.strategy_adaptation_matrix:main',
+        'att-strategy-adaptation-drilldown=attbacktrader.cli.strategy_adaptation_drilldown:main',
+        'att-strategy-variant-drafts=attbacktrader.cli.strategy_variant_drafts:main',
+        'att-generate-strategy-variant-runs=attbacktrader.cli.strategy_variant_runs:main',
+        'att-strategy-variant-validation=attbacktrader.cli.strategy_variant_validation:main',
+        'att-strategy-variant-attribution=attbacktrader.cli.strategy_variant_attribution:main',
+        'att-attribution-matrix=attbacktrader.cli.attribution_matrix:main',
+        'att-attribution-summary=attbacktrader.cli.attribution_summary:main',
+        'att-attribution-wide-samples=attbacktrader.cli.attribution_wide_samples:main',
+        'att-prepare-attribution-reference=attbacktrader.cli.prepare_attribution_reference:main',
+        'att-environment-fit=attbacktrader.cli.environment_fit:main',
+        'att-single-factor-attribution=attbacktrader.cli.single_factor_attribution:main',
+        'att-bayesian-factor-discovery=attbacktrader.cli.bayesian_factor_discovery:main',
+        'att-generate-entry-factor-validation-manifest=attbacktrader.cli.entry_factor_validation_manifest:main',
+        'att-run-entry-factor-validation=attbacktrader.cli.entry_factor_validation_run:main',
+        'att-run-entry-factor-validation-matrix=attbacktrader.cli.entry_factor_validation_matrix:main',
+        'att-classify-entry-factor-validation=attbacktrader.cli.entry_factor_validation_classification:main',
+        'att-strategy-environment-profile=attbacktrader.cli.strategy_environment_profile:main',
+        'att-review-brief=attbacktrader.cli.review_brief:main',
+        'att-review-expand-samples=attbacktrader.cli.review_expand_samples:main',
+        'att-review-experiment-candidates=attbacktrader.cli.review_experiment_candidates:main',
+        'att-review-experiment-confirm=attbacktrader.cli.review_experiment_confirm:main',
+        'att-review-experiment-drafts=attbacktrader.cli.review_experiment_drafts:main',
+        'att-review-findings=attbacktrader.cli.review_findings:main',
+        'att-review-golden-check=attbacktrader.cli.review_golden_check:main',
+        'att-review-packet=attbacktrader.cli.review_packet:main',
+        'att-review-result=attbacktrader.cli.review_result:main',
+        'att-review-sample=attbacktrader.cli.review_sample:main',
+        'att-run-data-attribution-index=attbacktrader.cli.run_data_attribution_index:main',
+        'att-run-catalog=attbacktrader.cli.run_catalog:main',
+        'att-experiment-lifecycle=attbacktrader.cli.experiment_lifecycle:main',
+        'att-experiment-decisions=attbacktrader.cli.experiment_decisions:main',
+        'att-workbench-closure-snapshot=attbacktrader.cli.workbench_closure_snapshot:main',
+        'att-workbench-closure-golden-check=attbacktrader.cli.workbench_closure_golden_check:main',
+        'att-ai-skill-entry-contract=attbacktrader.cli.ai_skill_entry_contract:main',
+        'att-validate-strategy-integration=attbacktrader.cli.strategy_integration_validation:main',
+        'att-run-data-dictionary=attbacktrader.cli.run_data_dictionary:main',
+        'att-run-data-drilldown=attbacktrader.cli.run_data_drilldown:main',
+        'att-run-data-drilldown-batch=attbacktrader.cli.run_data_drilldown_batch:main',
+        'att-run-data-overview=attbacktrader.cli.run_data_overview:main',
+        'att-validate-run-regression=attbacktrader.cli.validate_run_regression:main',
+        'att-tushare-backtest=attbacktrader.cli.tushare_backtest:main',
+    ]},
 
     scripts=['tools/bt-run.py'],
 )

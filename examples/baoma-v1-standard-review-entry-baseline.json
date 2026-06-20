@@ -1,0 +1,128 @@
+{
+  "schema": "attbacktrader.baoma_v1_standard_review_entry_baseline.v1",
+  "generated_on": "2026-06-12",
+  "purpose_zh": "记录 Baoma V1 两年与十年归因复盘的标准 AI 入口 artifact。该 baseline 只固化入口路径、schema 和校验状态，不保存 ignored reports/ 下的大体积内容。",
+  "report_root": "reports",
+  "catalog": {
+    "path": "reports/run-catalog/run_catalog.json",
+    "markdown_path": "reports/run-catalog/run_catalog.zh.md",
+    "schema": "attbacktrader.run_catalog.v1",
+    "run_count": 29,
+    "contains_runs": [
+      "baoma-v1-fixed-sample-2015-2024-maxhold800",
+      "baoma-v1-fixed-sample-2023-2024-maxhold800"
+    ]
+  },
+  "runs": [
+    {
+      "run_id": "baoma-v1-fixed-sample-2015-2024-maxhold800",
+      "role_zh": "十年归因主样本",
+      "evidence_validation_status": "ok",
+      "evidence_error_count": 0,
+      "evidence_warning_count": 0,
+      "artifacts": [
+        {
+          "kind": "overview",
+          "path": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/run_data_overview.json",
+          "markdown_path": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/run_data_overview.zh.md",
+          "schema": "attbacktrader.run_data_overview.v1"
+        },
+        {
+          "kind": "dictionary",
+          "path": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/run_data_dictionary.json",
+          "markdown_path": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/run_data_dictionary.zh.md",
+          "schema": "attbacktrader.run_data_dictionary.v1",
+          "artifact_count": 18
+        },
+        {
+          "kind": "environment_fit_review_packet",
+          "path": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/review_packet.environment_fit.json",
+          "markdown_path": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/review_packet.environment_fit.zh.md",
+          "schema": "attbacktrader.review_packet.v1"
+        },
+        {
+          "kind": "environment_fit_findings",
+          "path": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/review_findings.environment_fit.json",
+          "markdown_path": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/review_findings.environment_fit.zh.md",
+          "schema": "attbacktrader.ai_review_findings.v1",
+          "finding_count": 1
+        },
+        {
+          "kind": "environment_fit_brief",
+          "path": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/review_brief.environment_fit.json",
+          "markdown_path": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/review_brief.environment_fit.zh.md",
+          "schema": "attbacktrader.ai_review_brief.v1",
+          "section_count": 1
+        }
+      ]
+    },
+    {
+      "run_id": "baoma-v1-fixed-sample-2023-2024-maxhold800",
+      "role_zh": "两年对照样本",
+      "evidence_validation_status": "ok",
+      "evidence_error_count": 0,
+      "evidence_warning_count": 0,
+      "artifacts": [
+        {
+          "kind": "overview",
+          "path": "reports/baoma-v1-fixed-sample-2023-2024-maxhold800/run_data_overview.json",
+          "markdown_path": "reports/baoma-v1-fixed-sample-2023-2024-maxhold800/run_data_overview.zh.md",
+          "schema": "attbacktrader.run_data_overview.v1"
+        },
+        {
+          "kind": "dictionary",
+          "path": "reports/baoma-v1-fixed-sample-2023-2024-maxhold800/run_data_dictionary.json",
+          "markdown_path": "reports/baoma-v1-fixed-sample-2023-2024-maxhold800/run_data_dictionary.zh.md",
+          "schema": "attbacktrader.run_data_dictionary.v1",
+          "artifact_count": 18
+        },
+        {
+          "kind": "environment_fit_review_packet",
+          "path": "reports/baoma-v1-fixed-sample-2023-2024-maxhold800/review_packet.environment_fit.json",
+          "markdown_path": "reports/baoma-v1-fixed-sample-2023-2024-maxhold800/review_packet.environment_fit.zh.md",
+          "schema": "attbacktrader.review_packet.v1"
+        },
+        {
+          "kind": "environment_fit_findings",
+          "path": "reports/baoma-v1-fixed-sample-2023-2024-maxhold800/review_findings.environment_fit.json",
+          "markdown_path": "reports/baoma-v1-fixed-sample-2023-2024-maxhold800/review_findings.environment_fit.zh.md",
+          "schema": "attbacktrader.ai_review_findings.v1",
+          "finding_count": 1
+        },
+        {
+          "kind": "environment_fit_brief",
+          "path": "reports/baoma-v1-fixed-sample-2023-2024-maxhold800/review_brief.environment_fit.json",
+          "markdown_path": "reports/baoma-v1-fixed-sample-2023-2024-maxhold800/review_brief.environment_fit.zh.md",
+          "schema": "attbacktrader.ai_review_brief.v1",
+          "section_count": 1
+        }
+      ]
+    }
+  ],
+  "comparison_entries": [
+    {
+      "kind": "environment_fit_comparison",
+      "path": "reports/environment-fit-comparison-baoma-v1-fixed-sample-2023-2024-maxhold800__vs__baoma-v1-fixed-sample-2015-2024-maxhold800/environment_fit_comparison.json",
+      "markdown_path": "reports/environment-fit-comparison-baoma-v1-fixed-sample-2023-2024-maxhold800__vs__baoma-v1-fixed-sample-2015-2024-maxhold800/environment_fit_comparison.zh.md",
+      "schema": "attbacktrader.environment_fit_comparison.v1"
+    },
+    {
+      "kind": "factor_stability_review",
+      "path": "reports/environment-fit-comparison-baoma-v1-fixed-sample-2023-2024-maxhold800__vs__baoma-v1-fixed-sample-2015-2024-maxhold800/baoma_2y_vs_10y_factor_stability.json",
+      "markdown_path": "reports/environment-fit-comparison-baoma-v1-fixed-sample-2023-2024-maxhold800__vs__baoma-v1-fixed-sample-2015-2024-maxhold800/baoma_2y_vs_10y_factor_stability.zh.md",
+      "schema": "attbacktrader.baoma_environment_fit_stability_review.v1"
+    }
+  ],
+  "read_order_zh": [
+    "先读 reports/run-catalog/run_catalog.json，确认 run 存在。",
+    "再读目标 run 的 run_data_overview.json，确认 evidence_validation.status 为 ok。",
+    "需要解释字段或 artifact 时读 run_data_dictionary.json。",
+    "复盘 environment_fit 时优先读 review_brief.environment_fit.json，再按 finding/sample 下钻。",
+    "跨两年与十年比较时读 factor_stability_review，再读 environment_fit_comparison。"
+  ],
+  "known_caveats": [
+    "reports/ 是本地输出目录，通常被 Git ignore；本 baseline 只记录入口路径和状态。",
+    "review_packet/review_findings/review_brief 使用 focus=environment_fit，不覆盖卖飞、加仓、机会成本等非当前主题。",
+    "标准入口不改变策略、不重新回测、不生成市场阶段归因。"
+  ]
+}

@@ -1,0 +1,185 @@
+run:
+  id: baoma-v1-full-industry-expanded-attribution-check-2023-2024
+  from_date: "2023-01-01"
+  to_date: "2024-12-31"
+
+data:
+  snapshot_root: data/snapshots
+  provider: tushare
+  price_adjustment: qfq
+  refresh_snapshots: false
+  stock_pool_file: examples/stock-pools/baoma-hs300-csi500-20260607.csv
+  benchmark_series:
+    indexes:
+      - "000300.SH"
+      - "000905.SH"
+  industry_series:
+    source: SW2021
+    indexes:
+      - "801010.SI"
+      - "801030.SI"
+      - "801040.SI"
+      - "801050.SI"
+      - "801080.SI"
+      - "801110.SI"
+      - "801120.SI"
+      - "801130.SI"
+      - "801140.SI"
+      - "801150.SI"
+      - "801160.SI"
+      - "801170.SI"
+      - "801180.SI"
+      - "801200.SI"
+      - "801210.SI"
+      - "801230.SI"
+      - "801710.SI"
+      - "801720.SI"
+      - "801730.SI"
+      - "801740.SI"
+      - "801750.SI"
+      - "801760.SI"
+      - "801770.SI"
+      - "801780.SI"
+      - "801790.SI"
+      - "801880.SI"
+      - "801890.SI"
+      - "801950.SI"
+      - "801960.SI"
+      - "801970.SI"
+      - "801980.SI"
+
+strategy:
+  template: trend_template_v1
+  entry_method: baoma_entry
+  entry_params:
+    dea_max_age_trading_days: 14
+  profit_taking_method: baoma_ma25_profit_exit
+  stop_loss_method: baoma_ma60_stop
+  add_on_method: baoma_add_on
+  add_on_params:
+    dea_max_age_trading_days: 14
+    max_add_on_count: 2
+  sizing_rule: equal_weight
+  sizing_params:
+    max_holding_count: 800
+    min_order_quantity: 100
+
+constraints:
+  ashare:
+    enabled: true
+    t_plus_one: true
+    limit_up_down: true
+    suspension: true
+    board_lot_size: 100
+
+broker:
+  initial_cash: 10000000000
+  commission_rate: 0.0003
+  stamp_tax_rate: 0.001
+  transfer_fee_rate: 0.00001
+  slippage:
+    type: percent
+    value: 0.0005
+
+execution:
+  engine: baoma_v1_business
+  stake: 100
+  baoma:
+    buy_slice_fraction: 0.33
+    first_scale_out_return: 0.05
+    second_scale_out_return: 0.15
+    force_exit_at_end: false
+
+output:
+  persist: true
+  report_root: reports/_baoma-full-industry-attribution-check
+  artifact_detail: compact
+  signal_audit_sample_limit: 200
+
+analysis:
+  industry_attribution:
+    enabled: true
+    source: SW2021
+    levels: [1, 2, 3]
+  market_regime:
+    enabled: true
+    timeframes: ["D", "W", "M"]
+  scenario_fit:
+    enabled: true
+    min_trades: 3
+  post_exit:
+    enabled: true
+    window_days: [5]
+    primary_window_days: 5
+  entry_attribution:
+    enabled: false
+  attribution:
+    enabled: true
+    include:
+      - symbol.kdj.k
+      - symbol.kdj.d
+      - symbol.kdj.j
+      - symbol.kdj.threshold
+      - symbol.kdj.j_below_threshold
+      - symbol.kdj.week.indicator_date
+      - symbol.kdj.week.k
+      - symbol.kdj.week.d
+      - symbol.kdj.week.j
+      - symbol.kdj.week.j_bucket
+      - symbol.kdj.week.state
+      - industry.sw_l1.code
+      - industry.kdj.k
+      - industry.kdj.d
+      - industry.kdj.j
+      - industry.kdj.j_below_threshold
+      - industry.kdj.week.indicator_date
+      - industry.kdj.week.k
+      - industry.kdj.week.d
+      - industry.kdj.week.j
+      - industry.kdj.week.j_bucket
+      - industry.kdj.week.state
+      - industry.macd.dif
+      - industry.macd.dea
+      - industry.macd.macd_bar
+      - industry.macd.energy_zone
+      - industry.macd.week.indicator_date
+      - industry.macd.week.dif
+      - industry.macd.week.dea
+      - industry.macd.week.macd_bar
+      - industry.macd.week.energy_zone
+      - market.hs300.kdj.k
+      - market.hs300.kdj.d
+      - market.hs300.kdj.j
+      - market.hs300.kdj.threshold
+      - market.hs300.kdj.j_below_threshold
+      - symbol.macd.dea
+      - symbol.macd.dif
+      - symbol.macd.macd_bar
+      - symbol.macd.energy_zone
+      - symbol.macd.week.indicator_date
+      - symbol.macd.week.dif
+      - symbol.macd.week.dea
+      - symbol.macd.week.macd_bar
+      - symbol.macd.week.energy_zone
+      - symbol.macd.dea_positive
+      - symbol.macd.dea_recent_waterline
+      - symbol.macd.dea_waterline_age_trading_days
+      - symbol.macd.dea_waterline_max_age_days
+      - symbol.ma.price_above_ma60
+      - symbol.ma.ma60
+      - industry.kdj.j_bucket
+      - industry.kdj.state
+      - industry.ma.ma20
+      - industry.ma.ma60
+      - industry.ma.price_above_ma20
+      - industry.ma.price_above_ma60
+      - industry.ma.ma20_above_ma60
+      - industry.ma.bullish_trend
+      - industry.ma.trend_state
+      - industry.relative.hs300.return_20d
+      - industry.relative.hs300.return_60d
+      - industry.relative.hs300.excess_return_20d
+      - industry.relative.hs300.excess_return_60d
+      - industry.relative.hs300.outperform_20d
+      - industry.relative.hs300.outperform_60d
+      - industry.relative.hs300.strength_state

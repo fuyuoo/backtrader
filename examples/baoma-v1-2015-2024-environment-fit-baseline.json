@@ -1,0 +1,162 @@
+{
+  "schema": "attbacktrader.baoma_v1_environment_fit_closure_baseline.v1",
+  "sealed_on": "2026-06-12",
+  "run_id": "baoma-v1-fixed-sample-2015-2024-maxhold800",
+  "stage": "baoma_v1_2015_2024_environment_fit_review",
+  "closure_statement_zh": "封板 2015-2024、max_holding_count=800 的 Baoma V1 回测与入场环境归因结果。封板对象是本次证据链、归因宽表和环境适配观察，不是策略参数调优结果或上线结论。",
+  "source_artifacts": {
+    "run_dir": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800",
+    "run_plan": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/run_plan.json",
+    "evidence_validation": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/evidence_validation.json",
+    "data_validation_note": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/data_validation_check.zh.md",
+    "wide_samples_json": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/full_entry_scope_environment_fit_review/attribution_wide_samples.json",
+    "wide_samples_csv": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/full_entry_scope_environment_fit_review/attribution_wide_samples.csv",
+    "field_index_json": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/full_entry_scope_environment_fit_review/attribution_field_index.json",
+    "field_index_zh": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/full_entry_scope_environment_fit_review/attribution_field_index.zh.md",
+    "environment_fit_json": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/full_entry_scope_environment_fit_review/environment_fit.enriched.json",
+    "environment_fit_zh": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/full_entry_scope_environment_fit_review/environment_fit.enriched.zh.md",
+    "reference_snapshot": "data/snapshots/attribution_reference/full_a_main_chinext_star/2015-01-01_2024-12-31_baoma-v1-maxhold800-entry-scope-full-a-industry-backfilled",
+    "raw_reference_cache": "data/snapshots/tushare_reference_raw/full_a_main_chinext_star/2015-01-01_2024-12-31_baoma-v1-maxhold800-entry-scope-full-a-industry-backfilled"
+  },
+  "run_scope": {
+    "from_date": "2015-01-01",
+    "to_date": "2024-12-31",
+    "stock_pool_file": "examples/stock-pools/baoma-hs300-csi500-20260607.csv",
+    "requested_symbol_count": 800,
+    "kept_symbol_count": 671,
+    "excluded_symbol_count": 129,
+    "reference_universe": "full_a_main_chinext_star",
+    "reference_effective_start": "2014-08-28",
+    "reference_effective_end": "2024-12-31"
+  },
+  "run_config": {
+    "engine": "baoma_v1_business",
+    "entry_method": "baoma_entry",
+    "profit_taking_method": "baoma_ma25_profit_exit",
+    "stop_loss_method": "baoma_ma60_stop",
+    "add_on_method": "baoma_add_on",
+    "sizing_rule": "equal_weight",
+    "max_holding_count": 800,
+    "buy_slice_fraction": 0.33,
+    "first_scale_out_return": 0.05,
+    "second_scale_out_return": 0.15,
+    "force_exit_at_end": false,
+    "entry_dea_max_age_trading_days": 14,
+    "add_on_dea_max_age_trading_days": 14,
+    "max_add_on_count": 2,
+    "initial_cash": 10000000000.0
+  },
+  "accepted_verification": {
+    "evidence_validation_status": "ok",
+    "evidence_validation_error_count": 0,
+    "evidence_validation_warning_count": 0,
+    "wide_sample_count": 18349,
+    "wide_field_count": 176,
+    "environment_fit_default_field_count": 31,
+    "environment_fit_trade_count": 18349,
+    "environment_fit_contribution_available_count": 18349,
+    "single_factor_summary_count": 161,
+    "combination_summary_count": 831,
+    "low_sample_single_factor_count": 1,
+    "low_sample_combination_count": 42,
+    "python_compile_checked": [
+      "attbacktrader/cli/prepare_attribution_reference.py",
+      "attbacktrader/data/providers/tushare.py",
+      "attbacktrader/data/snapshots/attribution_reference.py"
+    ],
+    "pytest_checked": [
+      "tests/test_reference_snapshots.py",
+      "tests/test_tushare_provider.py",
+      "tests/test_backtest_report.py",
+      "tests/test_run_plan_executor.py"
+    ]
+  },
+  "accepted_metrics": {
+    "closed_trade_count": 18349,
+    "open_position_count": 109,
+    "signal_intent_count": 2163527,
+    "execution_event_count": 61468,
+    "starting_equity": 10000000000.0,
+    "final_equity": 11285797727.0,
+    "cumulative_return": 0.1285797727,
+    "max_drawdown": 0.018324296316145017,
+    "win_rate": 0.48324159354733226,
+    "profit_loss_ratio": 1.6600413183094498,
+    "environment_fit_net_pnl": 1285797727.0,
+    "environment_fit_return_on_entry_value": 0.011014285044171762
+  },
+  "accepted_observations": [
+    {
+      "finding_id": "baoma10y-single-ma60-distance",
+      "claim_zh": "入场价位于 MA60 上方且超过 2ATR 的分组表现明显好于整体：4234 笔，胜率 61.8%，入场资金收益率 1.92%，净 PnL 6.07 亿。",
+      "evidence_ref": "environment_fit.enriched.json single_factor_summaries entry.price_position.ma60_atr_multiple_bucket=above_ma60_gt_2atr",
+      "sample_trade_indexes": [1, 5, 10, 13, 26],
+      "claim_boundary_zh": "这是本次运行的统计观察，不是直接买入规则。"
+    },
+    {
+      "finding_id": "baoma10y-single-near-high-60d",
+      "claim_zh": "接近 60 日高点的入场环境表现较强：1602 笔，胜率 57.9%，入场资金收益率 2.06%，净 PnL 2.34 亿。",
+      "evidence_ref": "environment_fit.enriched.json single_factor_summaries entry.price_position.near_high_60d_bucket=near_high",
+      "sample_trade_indexes": [1, 28, 33, 44, 69],
+      "claim_boundary_zh": "该策略更像趋势/动量环境适配，而非低位抄底环境适配。"
+    },
+    {
+      "finding_id": "baoma10y-single-valuation",
+      "claim_zh": "PE_TTM 低估值不是优势；gt_60 分组入场资金收益率 1.57%，0_15 分组为 0.56%。",
+      "evidence_ref": "environment_fit.enriched.json single_factor_summaries entry.valuation.pe_ttm_bucket",
+      "sample_trade_indexes": [7, 23, 24, 25, 30],
+      "claim_boundary_zh": "PE_TTM 有 1174 笔缺失，估值结论需保留缺失 caveat。"
+    },
+    {
+      "finding_id": "baoma10y-industry-fit",
+      "claim_zh": "行业层面较强的分组包括电力设备、食品饮料、汽车、电子、计算机；非银金融、交通运输、环保偏弱。",
+      "evidence_ref": "environment_fit.enriched.json single_factor_summaries industry.sw_l1.code",
+      "sample_trade_indexes": [9, 19, 30, 35, 49],
+      "claim_boundary_zh": "行业映射存在 backfilled 样本，只能作为归因观察，不能直接作为行业黑白名单。"
+    },
+    {
+      "finding_id": "baoma10y-combo-ma60-industry",
+      "claim_zh": "MA60 上方超过 2ATR + 电力设备组合表现最强之一：271 笔，胜率 73.4%，入场资金收益率 4.85%，净 PnL 1.02 亿。",
+      "evidence_ref": "environment_fit.enriched.json combination_summaries entry.price_position.ma60_atr_multiple_bucket=above_ma60_gt_2atr + industry.sw_l1.code=801730.SI",
+      "sample_trade_indexes": [55, 103, 119, 178, 180],
+      "claim_boundary_zh": "组合结论仍需跨样本稳定性验证，不作为参数变更依据。"
+    },
+    {
+      "finding_id": "baoma10y-combo-nonbank-risk",
+      "claim_zh": "固定 5% 止盈对应 1-2ATR + 非银金融组合表现较弱：833 笔，胜率 42.0%，入场资金收益率 -1.08%，净 PnL -5720 万。",
+      "evidence_ref": "environment_fit.enriched.json combination_summaries entry.stop_fit.fixed_atr_multiple_bucket=1_2atr + industry.sw_l1.code=801790.SI",
+      "sample_trade_indexes": [60, 106, 126, 154, 155],
+      "claim_boundary_zh": "这是止盈适配和行业交互的风险线索，不是直接禁入规则。"
+    }
+  ],
+  "known_caveats": [
+    "reports/ 和 data/snapshots/ 是本地输出目录，通常被 Git ignore；本 baseline 只固化关键数字和路径。",
+    "data_preflight.status 为 error，原因是 800 只股票池中 129 只被排除且 587 只有 warning；本次证据链 evidence_validation.status 为 ok。",
+    "PE_TTM 缺失 1174 笔，利润质量字段缺失 715 笔。",
+    "行业相对波动字段有 7243 笔 industry_reference_low_count，行业映射有 2788 笔 industry_membership_backfilled。",
+    "entry.momentum.new_high_60d_bucket 全部落在 not_new_high，本次不能用于分层解释。",
+    "当前结果来自 671 只保留股票和 2015-2024 固定样本，不声明全 A 或其他周期稳定。",
+    "本封板不把后验归因观察转成交易规则，不做自动调参，不做自动策略切换。"
+  ],
+  "next_allowed_actions": [
+    {
+      "name_zh": "两年 vs 十年归因稳定性比较",
+      "direction_zh": "验证归因稳定性",
+      "purpose_zh": "比较 2023-2024 与 2015-2024 的强弱因子是否一致，避免只按十年排序或只按两年排序做结论。",
+      "recommended": true,
+      "reason_zh": "这是进入任何策略改动前最小且最关键的验证。"
+    },
+    {
+      "name_zh": "生成标准 run overview/dictionary/catalog",
+      "direction_zh": "证据入口补齐",
+      "purpose_zh": "让后续 AI review 使用标准 run_data_overview、run_data_dictionary 和 run_catalog 入口，而不是手工读取大文件。",
+      "recommended": false
+    },
+    {
+      "name_zh": "市场阶段归因接入",
+      "direction_zh": "行情阶段验证",
+      "purpose_zh": "把入场、出场所在市场阶段作为归因维度，检查强趋势因子是否只在特定市场阶段有效。",
+      "recommended": false
+    }
+  ]
+}

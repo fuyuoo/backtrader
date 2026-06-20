@@ -1,0 +1,86 @@
+draft_id: post_exit_stop_loss_rebound_groups
+status: draft_requires_manual_confirmation
+source_candidate_id: candidate.post_exit.stop_loss_rebound_groups
+title_zh: 止损后反弹分组验证
+purpose_zh: 按止损样本的退出证据分组，检查反弹是否集中在特定市场/行业/个股上下文。
+base_config_path: examples\run-tushare-expanded-add-on.yaml
+suggested_run_id: tushare-expanded-add-on-2023-2024__review__post_exit_stop_loss_rebound_groups
+candidate_direction: post_exit_framework
+candidate_type: grouping_probe
+suggested_change:
+  artifact_or_config: post_exit_analysis.factor_group_summaries
+  change_zh: 新增或检查退出证据分组，而不是直接改变止损参数。
+  not_allowed:
+  - 不要用后验反弹证明止损错误
+validation_plan_zh: 批量展开 top 止损反弹样本，比较 exit_checks 与 rebound threshold summaries。
+evidence_refs:
+- artifact: review_packet
+  section: stop_loss_rebound
+sample_refs:
+- kind: trade
+  trade_index: 75
+  symbol: 600276.SH
+  entry_date: '2024-01-30'
+  exit_date: '2024-02-02'
+- kind: trade
+  trade_index: 72
+  symbol: 300750.SZ
+  entry_date: '2024-01-08'
+  exit_date: '2024-01-30'
+- kind: trade
+  trade_index: 125
+  symbol: 002475.SZ
+  entry_date: '2024-11-15'
+  exit_date: '2024-11-25'
+- kind: trade
+  trade_index: 111
+  symbol: 000858.SZ
+  entry_date: '2024-08-27'
+  exit_date: '2024-09-13'
+- kind: trade
+  trade_index: 51
+  symbol: 300750.SZ
+  entry_date: '2023-10-17'
+  exit_date: '2023-10-25'
+- kind: trade
+  trade_index: 66
+  symbol: 300750.SZ
+  entry_date: '2023-12-15'
+  exit_date: '2023-12-18'
+- kind: trade
+  trade_index: 119
+  symbol: 600276.SH
+  entry_date: '2024-10-17'
+  exit_date: '2024-10-31'
+- kind: trade
+  trade_index: 104
+  symbol: 002475.SZ
+  entry_date: '2024-07-23'
+  exit_date: '2024-08-05'
+- kind: trade
+  trade_index: 23
+  symbol: 002475.SZ
+  entry_date: '2023-04-24'
+  exit_date: '2023-04-27'
+- kind: trade
+  trade_index: 26
+  symbol: 600036.SH
+  entry_date: '2023-04-26'
+  exit_date: '2023-06-01'
+manual_steps:
+- 读取 source_candidate_id 对应的 candidate 和 sample_refs。
+- 用 review_sample 或 review_sample_batch 核对证据是否完整。
+- 人工决定是否需要新增 evidence producer、分组维度或配置变体。
+- 确认后再把 run_plan_patch 转成合法 RunPlan YAML 并执行回测。
+run_plan_patch:
+  run:
+    id: tushare-expanded-add-on-2023-2024__review__post_exit_stop_loss_rebound_groups
+  review_candidate:
+    source_candidate_id: candidate.post_exit.stop_loss_rebound_groups
+    manual_confirmation_required: true
+    validation_plan_zh: 批量展开 top 止损反弹样本，比较 exit_checks 与 rebound threshold summaries。
+  analysis:
+    post_exit:
+      enabled: true
+      review_note: 人工确认是否新增退出证据分组；不要直接修改止损参数。
+not_runnable_until: 人工确认 run_plan_patch 并转成合法 RunPlan YAML

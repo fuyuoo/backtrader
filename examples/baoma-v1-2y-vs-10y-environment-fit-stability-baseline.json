@@ -1,0 +1,202 @@
+{
+  "schema": "attbacktrader.baoma_v1_environment_fit_stability_baseline.v1",
+  "generated_on": "2026-06-12",
+  "baseline_run_id": "baoma-v1-fixed-sample-2023-2024-maxhold800",
+  "comparison_run_id": "baoma-v1-fixed-sample-2015-2024-maxhold800",
+  "source_artifacts": {
+    "baseline_environment_fit": "reports/baoma-v1-fixed-sample-2023-2024-maxhold800/full_entry_scope_environment_fit_review/environment_fit.enriched.json",
+    "comparison_environment_fit": "reports/baoma-v1-fixed-sample-2015-2024-maxhold800/full_entry_scope_environment_fit_review/environment_fit.enriched.json",
+    "comparison_report": "reports/environment-fit-comparison-baoma-v1-fixed-sample-2023-2024-maxhold800__vs__baoma-v1-fixed-sample-2015-2024-maxhold800/environment_fit_comparison.json",
+    "factor_stability_report": "reports/environment-fit-comparison-baoma-v1-fixed-sample-2023-2024-maxhold800__vs__baoma-v1-fixed-sample-2015-2024-maxhold800/baoma_2y_vs_10y_factor_stability.json"
+  },
+  "method": {
+    "metric": "roe_lift = bucket_return_on_entry_value - run_overall_return_on_entry_value",
+    "lift_threshold": 0.002,
+    "single_factor_min_samples": {
+      "baseline_2y": 50,
+      "comparison_10y": 200
+    },
+    "combination_min_samples": {
+      "baseline_2y": 30,
+      "comparison_10y": 100
+    },
+    "purpose_zh": "使用相对本 run 整体资金收益率的 lift 比较方向，避免十年样本净 PnL 天然更大造成误判。"
+  },
+  "overall": {
+    "baseline_2y": {
+      "sample_count": 4610,
+      "win_rate": 0.45704989154013015,
+      "net_pnl": 155837965.0,
+      "return_on_entry_value": 0.004953393437004892
+    },
+    "comparison_10y": {
+      "sample_count": 18349,
+      "win_rate": 0.48324159354733226,
+      "net_pnl": 1285797727.0,
+      "return_on_entry_value": 0.011014285044171762
+    },
+    "shared_environment_count": 956,
+    "meaningful_shared_environment_count": 514,
+    "sample_risk_count": 442,
+    "stable_positive_count": 124,
+    "stable_negative_count": 135,
+    "changed_count": 224
+  },
+  "verdicts": [
+    {
+      "finding_id": "stability-ma60-gt-2atr",
+      "status": "stable_positive",
+      "claim_zh": "MA60 上方超过 2ATR 在两年和十年都稳定偏强。",
+      "baseline_2y": {
+        "sample_count": 1320,
+        "roe_lift": 0.0071,
+        "win_rate": 0.6061,
+        "trade_refs": [2, 3, 4]
+      },
+      "comparison_10y": {
+        "sample_count": 4234,
+        "roe_lift": 0.0082,
+        "win_rate": 0.6179,
+        "trade_refs": [1, 5, 10]
+      }
+    },
+    {
+      "finding_id": "stability-near-high-60d",
+      "status": "stable_positive",
+      "claim_zh": "接近 60 日高点在两年和十年都稳定偏强。",
+      "baseline_2y": {
+        "sample_count": 547,
+        "roe_lift": 0.0128,
+        "win_rate": 0.5667,
+        "trade_refs": [2, 3, 28]
+      },
+      "comparison_10y": {
+        "sample_count": 1602,
+        "roe_lift": 0.0096,
+        "win_rate": 0.5793,
+        "trade_refs": [1, 28, 33]
+      }
+    },
+    {
+      "finding_id": "stability-pe-ttm",
+      "status": "changed",
+      "claim_zh": "PE_TTM 高估值分组方向不稳定；gt_60 在两年偏弱、十年偏强，不能用十年结果直接得出高 PE 更优。",
+      "baseline_2y": {
+        "sample_count": 648,
+        "roe_lift": -0.0025,
+        "win_rate": 0.4522,
+        "trade_refs": [4, 5, 8]
+      },
+      "comparison_10y": {
+        "sample_count": 3302,
+        "roe_lift": 0.0047,
+        "win_rate": 0.4976,
+        "trade_refs": [7, 23, 24]
+      }
+    },
+    {
+      "finding_id": "stability-electronics-computer",
+      "status": "stable_positive",
+      "claim_zh": "电子和计算机行业在两年和十年都稳定偏强。",
+      "industry_refs": [
+        {
+          "industry_code": "801080.SI",
+          "industry_name": "电子",
+          "baseline_2y_roe_lift": 0.0082,
+          "comparison_10y_roe_lift": 0.0082
+        },
+        {
+          "industry_code": "801750.SI",
+          "industry_name": "计算机",
+          "baseline_2y_roe_lift": 0.0238,
+          "comparison_10y_roe_lift": 0.0082
+        }
+      ]
+    },
+    {
+      "finding_id": "stability-nonbank-transport",
+      "status": "stable_negative",
+      "claim_zh": "非银金融和交通运输在两年和十年都稳定偏弱。",
+      "industry_refs": [
+        {
+          "industry_code": "801790.SI",
+          "industry_name": "非银金融",
+          "baseline_2y_roe_lift": -0.0108,
+          "comparison_10y_roe_lift": -0.0162
+        },
+        {
+          "industry_code": "801170.SI",
+          "industry_name": "交通运输",
+          "baseline_2y_roe_lift": -0.0091,
+          "comparison_10y_roe_lift": -0.0123
+        }
+      ]
+    },
+    {
+      "finding_id": "stability-ma60-industry-combos",
+      "status": "stable_positive",
+      "claim_zh": "MA60 上方超过 2ATR 与电力设备、电子的组合在两年和十年都稳定偏强。",
+      "combination_refs": [
+        {
+          "label_zh": "MA60 上方超过 2ATR + 电力设备",
+          "baseline_2y_sample_count": 84,
+          "baseline_2y_roe_lift": 0.0267,
+          "comparison_10y_sample_count": 271,
+          "comparison_10y_roe_lift": 0.0375
+        },
+        {
+          "label_zh": "MA60 上方超过 2ATR + 电子",
+          "baseline_2y_sample_count": 178,
+          "baseline_2y_roe_lift": 0.0370,
+          "comparison_10y_sample_count": 394,
+          "comparison_10y_roe_lift": 0.0276
+        }
+      ]
+    },
+    {
+      "finding_id": "stability-nonbank-stop-fit",
+      "status": "stable_negative",
+      "claim_zh": "固定 5% 止盈对应 1-2ATR + 非银金融在两年和十年都稳定偏弱。",
+      "baseline_2y": {
+        "sample_count": 169,
+        "roe_lift": -0.0107,
+        "win_rate": 0.4438,
+        "trade_refs": [17, 52, 136]
+      },
+      "comparison_10y": {
+        "sample_count": 833,
+        "roe_lift": -0.0218,
+        "win_rate": 0.4202,
+        "trade_refs": [60, 106, 126]
+      }
+    }
+  ],
+  "known_caveats": [
+    "这是归因稳定性比较，不是策略调参或规则确认。",
+    "两年样本较短，双因子低样本组合多，低样本组合只作为线索。",
+    "2023-2024 与 2015-2024 的最佳环境第一名发生变化，不应只看第一名。",
+    "行业映射、PE_TTM 缺失、行业相对波动低样本等 caveat 沿用十年封板文档。",
+    "本 baseline 不把行业强弱转成黑白名单，不把止盈适配观察转成参数规则。"
+  ],
+  "next_allowed_actions": [
+    {
+      "name_zh": "补齐标准 AI 入口 artifact",
+      "direction_zh": "证据入口补齐",
+      "purpose_zh": "为 10 年 run 和比较结果生成或刷新 run_data_overview、run_data_dictionary、run_catalog，减少后续手工读大文件。",
+      "recommended": true,
+      "reason_zh": "稳定性比较已经完成，下一步需要让证据入口标准化，方便后续复盘和下钻。"
+    },
+    {
+      "name_zh": "市场阶段归因接入",
+      "direction_zh": "行情阶段验证",
+      "purpose_zh": "把入场和出场所在市场阶段作为归因维度，验证稳定偏强因子是否跨行情阶段成立。",
+      "recommended": false
+    },
+    {
+      "name_zh": "候选规则草案而非直接改策略",
+      "direction_zh": "实验设计",
+      "purpose_zh": "把 MA60 距离、near_high_60d、非银金融弱项整理成待人工确认的验证草案，而不是直接变成交易规则。",
+      "recommended": false
+    }
+  ]
+}

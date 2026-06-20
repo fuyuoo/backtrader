@@ -1,0 +1,81 @@
+{
+  "schema": "attbacktrader.experiment_decision_inputs.v1",
+  "decided_on": "2026-06-05",
+  "decided_by": "codex",
+  "scope_zh": "Backtest Workbench V1 策略变体生命周期决策",
+  "rules": [
+    "这些 decision 只关闭当前实验链路，不代表上线策略。",
+    "decision 来自已落盘 validation / attribution / lifecycle 证据，不由收益自动推断。",
+    "accepted 表示进入下一阶段实现或配置候选；rejected 表示不沿该实验方向继续；parked 表示证据保留但非当前优先方向。"
+  ],
+  "decisions": [
+    {
+      "chain_id": "strategy_variant:bull_market_let_winners_run",
+      "decision": "rejected",
+      "decided_on": "2026-06-05",
+      "decided_by": "codex",
+      "reason_zh": "牛市变体收益和胜率下降，且归因显示持仓期被压缩、同标的短期重入增多、平均盈利被切薄；不继续作为“让盈利奔跑”方向推进。",
+      "evidence_refs": [
+        {
+          "artifact": "experiment_lifecycle",
+          "path": "reports/experiment-lifecycle/experiment_lifecycle.json",
+          "chain_id": "strategy_variant:bull_market_let_winners_run"
+        },
+        {
+          "artifact": "strategy_variant_validation",
+          "path": "reports/strategy-variant-validation-tushare-market-type-add-on/strategy_variant_validation.json",
+          "market_type_id": "bull_market"
+        },
+        {
+          "artifact": "strategy_variant_attribution",
+          "path": "reports/strategy-variant-attribution-tushare-market-type-add-on-bull/strategy_variant_attribution.json",
+          "market_type_id": "bull_market"
+        }
+      ],
+      "next_allowed_action_zh": "不继续调这个变体；如要推进牛市方向，应另开新的实验候选，而不是围绕该失败变体继续细化。",
+      "notes_zh": "此 rejected 不等于 ma_macd_weakening_exit 在所有环境都错误。"
+    },
+    {
+      "chain_id": "strategy_variant:range_market_range_no_add_on_fast_review",
+      "decision": "parked",
+      "decided_on": "2026-06-05",
+      "decided_by": "codex",
+      "reason_zh": "震荡市变体相对基线基本持平略好，但变化幅度有限，不是当前最需要推进的工作台缺口。",
+      "evidence_refs": [
+        {
+          "artifact": "experiment_lifecycle",
+          "path": "reports/experiment-lifecycle/experiment_lifecycle.json",
+          "chain_id": "strategy_variant:range_market_range_no_add_on_fast_review"
+        },
+        {
+          "artifact": "strategy_variant_validation",
+          "path": "reports/strategy-variant-validation-tushare-market-type-add-on/strategy_variant_validation.json",
+          "market_type_id": "range_market"
+        }
+      ],
+      "next_allowed_action_zh": "保留为未来震荡市候选，不继续在当前 Workbench V1 closure 主线中扩展。",
+      "notes_zh": "parked 表示暂存，不表示变体失败或可上线。"
+    },
+    {
+      "chain_id": "strategy_variant:bear_market_defensive_sizing",
+      "decision": "parked",
+      "decided_on": "2026-06-05",
+      "decided_by": "codex",
+      "reason_zh": "熊市防守变体改善亏损和回撤，但尚不能直接接受为策略规则；需要未来单独的风险/仓位验证阶段。",
+      "evidence_refs": [
+        {
+          "artifact": "experiment_lifecycle",
+          "path": "reports/experiment-lifecycle/experiment_lifecycle.json",
+          "chain_id": "strategy_variant:bear_market_defensive_sizing"
+        },
+        {
+          "artifact": "strategy_variant_validation",
+          "path": "reports/strategy-variant-validation-tushare-market-type-add-on/strategy_variant_validation.json",
+          "market_type_id": "bear_market"
+        }
+      ],
+      "next_allowed_action_zh": "保留为未来熊市风控候选；当前不把它转成策略切换或默认仓位规则。",
+      "notes_zh": "parked 保留正向线索，但拒绝直接上线或自动切换。"
+    }
+  ]
+}

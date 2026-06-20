@@ -70,7 +70,13 @@ datas/*.py
 
 .idea/
 .pytest_cache/
+.codegraph/
+.secrets/
+.venv/
 .serena/
+data/snapshots/
+/reports/
+examples/generated-entry-factor-validation/
 /my_strategy/data
 /my_strategy/config.json
 /my_strategy/download_errors.log
