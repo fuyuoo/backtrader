@@ -29,6 +29,7 @@ from .parquet_store import (
     write_merged_daily_bars_parquet,
 )
 from .provenance import SnapshotProvenance
+from .read_cache import SnapshotReadCache, snapshot_path_cache_key
 from .tradability_store import (
     read_tradability_statuses_parquet,
     tradability_status_snapshot_path,
@@ -54,6 +55,7 @@ __all__ = [
     "DailyBarsSnapshotCandidate",
     "IndexBarsSnapshotCandidate",
     "SnapshotProvenance",
+    "SnapshotReadCache",
     "ATTRIBUTION_REFERENCE_FIELDS_VERSION",
     "DEFAULT_REFERENCE_UNIVERSE",
     "AttributionReferenceSnapshotCandidate",
@@ -66,6 +68,7 @@ __all__ = [
     "load_or_fetch_industry_memberships_for_symbols",
     "read_attribution_reference_values_parquet",
     "select_attribution_reference_snapshot_path",
+    "snapshot_path_cache_key",
     "daily_bars_snapshot_path",
     "discover_index_bars_snapshot_paths",
     "discover_industry_index_bars_snapshot_paths",

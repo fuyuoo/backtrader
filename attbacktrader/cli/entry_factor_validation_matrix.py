@@ -12,6 +12,7 @@ from typing import Any
 from attbacktrader.cli.entry_factor_validation_run import load_candidate_run_plan
 from attbacktrader.cli.tushare_options import add_tushare_rate_limit_args, tushare_rate_limit_config_from_args
 from attbacktrader.data.providers import TushareProvider, read_tushare_token
+from attbacktrader.data.snapshots import SnapshotReadCache
 from attbacktrader.reports import (
     build_entry_factor_validation_matrix,
     build_entry_factor_validation_run_record,
@@ -33,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     output_dir = Path(args.output_dir) if args.output_dir else _default_output_dir(manifest, args.output_root)
     output_dir.mkdir(parents=True, exist_ok=True)
     prepared_data_cache = PreparedRunDataCache()
+    snapshot_read_cache = SnapshotReadCache()
 
     batch_result = run_entry_factor_validation_batch(
         manifest=manifest,
@@ -52,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
                 token_file=args.token_file,
                 tushare_args=args,
                 prepared_data_cache=prepared_data_cache,
+                snapshot_read_cache=snapshot_read_cache,
         ),
     )
 
@@ -87,6 +90,7 @@ def _execute_candidate(
     token_file: str,
     tushare_args: argparse.Namespace,
     prepared_data_cache: PreparedRunDataCache | None = None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> dict[str, Any]:
     run_plan, run_plan_path = load_candidate_run_plan(candidate, manifest_path=manifest_path)
     provider = None
@@ -98,7 +102,12 @@ def _execute_candidate(
             rate_limit=tushare_rate_limit_config_from_args(tushare_args),
         )
 
-    result = execute_run_plan(run_plan, provider=provider, prepared_data_cache=prepared_data_cache)
+    result = execute_run_plan(
+        run_plan,
+        provider=provider,
+        prepared_data_cache=prepared_data_cache,
+        snapshot_read_cache=snapshot_read_cache,
+    )
     artifact_paths = None
     if run_plan.output.persist and not no_persist:
         artifact_paths = write_run_artifacts(

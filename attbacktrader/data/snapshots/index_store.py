@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from attbacktrader.data import IndexBar
+from attbacktrader.data.snapshots.read_cache import SnapshotReadCache, snapshot_path_cache_key
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,13 @@ def write_index_bars_parquet(bars: Sequence[IndexBar], path: str | Path) -> Path
     return parquet_path
 
 
-def read_index_bars_parquet(path: str | Path) -> tuple[IndexBar, ...]:
+def read_index_bars_parquet(path: str | Path, *, cache: SnapshotReadCache | None = None) -> tuple[IndexBar, ...]:
+    if cache is not None:
+        return cache.get_or_read(
+            snapshot_path_cache_key("index_bars_parquet", path),
+            lambda: read_index_bars_parquet(path),
+        )
+
     try:
         import pandas as pd
     except ImportError as exc:

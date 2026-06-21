@@ -17,6 +17,7 @@ from attbacktrader.data.snapshots.industry_store import (
     stock_industry_membership_snapshot_path,
     write_stock_industry_memberships_parquet,
 )
+from attbacktrader.data.snapshots.read_cache import SnapshotReadCache, snapshot_path_cache_key
 
 
 ATTRIBUTION_REFERENCE_FIELDS_VERSION = "attribution_reference_fields.v1"
@@ -166,11 +167,31 @@ def read_attribution_reference_values_parquet(
     field_keys: Sequence[str] | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    cache: SnapshotReadCache | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     path = Path(snapshot_path)
     values_path = path / "reference_values.parquet" if path.is_dir() else path
     if not values_path.exists():
         return ()
+
+    if cache is not None:
+        return cache.get_or_read(
+            snapshot_path_cache_key(
+                "attribution_reference_values_parquet",
+                values_path,
+                tuple(str(symbol) for symbol in symbols or ()),
+                tuple(str(field_key) for field_key in field_keys or ()),
+                start_date.isoformat() if start_date is not None else None,
+                end_date.isoformat() if end_date is not None else None,
+            ),
+            lambda: read_attribution_reference_values_parquet(
+                values_path,
+                symbols=symbols,
+                field_keys=field_keys,
+                start_date=start_date,
+                end_date=end_date,
+            ),
+        )
 
     frame = pd.read_parquet(values_path)
     if frame.empty:

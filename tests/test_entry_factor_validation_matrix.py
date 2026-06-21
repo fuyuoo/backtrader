@@ -46,7 +46,7 @@ def test_entry_factor_validation_matrix_cli_executes_manifest_candidates_and_res
     manifest_path, _, _ = write_entry_factor_validation_manifest(manifest, output_dir=tmp_path / "manifest")
     calls: list[str] = []
 
-    def fake_execute(run_plan, provider=None, prepared_data_cache=None):
+    def fake_execute(run_plan, provider=None, prepared_data_cache=None, snapshot_read_cache=None):
         calls.append(run_plan.run.id)
         return SimpleNamespace(run_id=run_plan.run.id)
 

@@ -9,6 +9,7 @@ from typing import Sequence
 
 from attbacktrader.data import DailyBar
 from attbacktrader.data.adjustments import DEFAULT_PRICE_ADJUSTMENT
+from attbacktrader.data.snapshots.read_cache import SnapshotReadCache, snapshot_path_cache_key
 
 
 @dataclass(frozen=True)
@@ -169,7 +170,13 @@ def merge_daily_bars(
     return tuple(sorted(merged, key=lambda bar: (bar.symbol, bar.trade_date)))
 
 
-def read_daily_bars_parquet(path: str | Path) -> tuple[DailyBar, ...]:
+def read_daily_bars_parquet(path: str | Path, *, cache: SnapshotReadCache | None = None) -> tuple[DailyBar, ...]:
+    if cache is not None:
+        return cache.get_or_read(
+            snapshot_path_cache_key("daily_bars_parquet", path),
+            lambda: read_daily_bars_parquet(path),
+        )
+
     try:
         import pandas as pd
     except ImportError as exc:

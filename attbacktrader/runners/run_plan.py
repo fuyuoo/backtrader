@@ -10,7 +10,7 @@ from attbacktrader.analysis import AnalysisEvidence, enrich_backtest_report
 from attbacktrader.config import RunPlan
 from attbacktrader.data.providers import RunDataProvider
 from attbacktrader.data.quality import DataQualityIssue
-from attbacktrader.data.snapshots import SnapshotProvenance
+from attbacktrader.data.snapshots import SnapshotProvenance, SnapshotReadCache
 from attbacktrader.engines.backtrader import (
     BacktraderAShareSettings,
     BacktraderBrokerSettings,
@@ -142,15 +142,24 @@ def execute_run_plan(
     *,
     provider: RunDataProvider | None = None,
     prepared_data_cache: PreparedRunDataCache | None = None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> RunPlanExecutionResult:
     execution_run_plan, data_preflight_report, stock_pool_filter = _run_plan_with_auto_stock_pool_filter(
         run_plan,
         provider=provider,
     )
     if prepared_data_cache is None:
-        prepared_data = prepare_run_data(execution_run_plan, provider=provider)
+        prepared_data = prepare_run_data(
+            execution_run_plan,
+            provider=provider,
+            snapshot_read_cache=snapshot_read_cache,
+        )
     else:
-        prepared_data = prepared_data_cache.get_or_prepare(execution_run_plan, provider=provider)
+        prepared_data = prepared_data_cache.get_or_prepare(
+            execution_run_plan,
+            provider=provider,
+            snapshot_read_cache=snapshot_read_cache,
+        )
     strategy_template = build_strategy_template(execution_run_plan.strategy)
 
     if execution_run_plan.execution.engine == "backtrader":

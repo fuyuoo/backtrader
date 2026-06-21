@@ -2,6 +2,7 @@ from datetime import date
 
 from attbacktrader.data import DailyBar, TradabilityStatus
 from attbacktrader.data.snapshots import (
+    SnapshotReadCache,
     daily_bars_snapshot_path,
     discover_tradable_bars_snapshot_paths,
     merge_daily_bars,
@@ -49,6 +50,28 @@ def test_daily_bars_parquet_round_trip(tmp_path) -> None:
     assert path.parent.name == "qfq"
     assert path.name == "000001_SZ_20240102_20240103.parquet"
     assert read_daily_bars_parquet(path) == bars
+
+
+def test_daily_bars_parquet_read_cache_reuses_by_path_and_isolates_new_cache(tmp_path) -> None:
+    path = daily_bars_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=date(2024, 1, 2),
+        end_date=date(2024, 1, 2),
+    )
+    original = (DailyBar("000001.SZ", date(2024, 1, 2), 9.0, 9.5, 8.8, 9.2),)
+    updated = (DailyBar("000001.SZ", date(2024, 1, 2), 10.0, 10.5, 9.8, 10.2),)
+    write_daily_bars_parquet(original, path)
+    cache = SnapshotReadCache()
+
+    first = read_daily_bars_parquet(path, cache=cache)
+    write_daily_bars_parquet(updated, path)
+    second = read_daily_bars_parquet(path, cache=cache)
+    fresh = read_daily_bars_parquet(path, cache=SnapshotReadCache())
+
+    assert first is second
+    assert first == original
+    assert fresh == updated
 
 
 def test_tradable_index_bars_path_is_asset_neutral(tmp_path) -> None:
