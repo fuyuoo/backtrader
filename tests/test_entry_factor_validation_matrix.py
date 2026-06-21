@@ -106,6 +106,7 @@ def test_entry_factor_validation_matrix_cli_executes_manifest_candidates_and_res
     assert stdout["record_count"] == 2
     assert Path(stdout["artifacts"]["matrix_json"]).exists()
     assert Path(stdout["artifacts"]["matrix_markdown_zh"]).exists()
+    assert Path(stdout["artifacts"]["batch_status"]).exists()
     assert len(stdout["artifacts"]["validation_records"]) == 2
 
     calls.clear()

@@ -22,7 +22,7 @@ from attbacktrader.reports import (
     write_entry_factor_validation_run_record,
     write_run_artifacts,
 )
-from attbacktrader.runners import execute_run_plan
+from attbacktrader.runners import execute_run_plan, run_entry_factor_validation_batch
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,21 +32,15 @@ def main(argv: list[str] | None = None) -> int:
     output_dir = Path(args.output_dir) if args.output_dir else _default_output_dir(manifest, args.output_root)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    records: list[dict[str, Any]] = []
-    record_paths: list[str] = []
-    for candidate in _selected_candidates(
-        manifest,
+    batch_result = run_entry_factor_validation_batch(
+        manifest=manifest,
+        manifest_path=manifest_path,
+        output_dir=output_dir,
         from_index=args.from_index,
         to_index=args.to_index,
         max_candidates=args.max_candidates,
-    ):
-        candidate_index = int(candidate.get("candidate_index"))
-        validation_output_dir = output_dir / f"candidate-{candidate_index:03d}"
-        validation_json_path = validation_output_dir / "entry_factor_validation_run.json"
-        if args.resume and validation_json_path.exists():
-            record = _load_json_mapping(validation_json_path)
-        else:
-            record = _execute_candidate(
+        resume=args.resume,
+        execute_candidate=lambda candidate, validation_output_dir: _execute_candidate(
                 manifest=manifest,
                 candidate=candidate,
                 manifest_path=manifest_path,
@@ -55,19 +49,19 @@ def main(argv: list[str] | None = None) -> int:
                 no_persist=args.no_persist,
                 token_file=args.token_file,
                 tushare_args=args,
-            )
-        records.append(record)
-        record_paths.append(str(validation_json_path))
+        ),
+    )
 
     baseline_run_id, baseline_metrics = _load_baseline(manifest, output_root=args.output_root, baseline_run_dir=args.baseline_run_dir)
     matrix = build_entry_factor_validation_matrix(
-        records,
+        batch_result.records,
         baseline_metrics=baseline_metrics,
         baseline_run_id=baseline_run_id,
         source_manifest=manifest_path,
     )
     matrix["artifacts"] = {
-        "validation_records": record_paths,
+        "validation_records": [str(path) for path in batch_result.record_paths],
+        "batch_status": str(batch_result.status_path),
     }
     _, _, payload = write_entry_factor_validation_matrix(matrix, output_dir=output_dir)
 
