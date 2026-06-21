@@ -10,6 +10,7 @@ from attbacktrader.features import (
     indicator_frame_from_snapshots,
 )
 from attbacktrader.strategies import (
+    EntryAttributionEvidenceDateIndex,
     EntryAttributionEvidence,
     EntryAttributionFilterCondition,
     EntryAttributionFilterRule,
@@ -311,6 +312,21 @@ def test_entry_attribution_context_merges_reference_snapshot_evidence() -> None:
     assert evidence is not None
     assert evidence.categories["entry.market_cap.total_mv_abs_bucket"] == "0_100yi"
     assert evidence.values == {}
+
+
+def test_entry_attribution_evidence_date_index_preserves_on_or_before_semantics() -> None:
+    first = EntryAttributionEvidence(categories={"entry.factor": "first"})
+    second = EntryAttributionEvidence(categories={"entry.factor": "second"})
+    index = EntryAttributionEvidenceDateIndex.from_mapping(
+        {
+            date(2024, 1, 2): first,
+            date(2024, 1, 5): second,
+        }
+    )
+
+    assert index.latest_on_or_before(date(2024, 1, 5)) is second
+    assert index.latest_on_or_before(date(2024, 1, 4)) is first
+    assert index.latest_on_or_before(date(2024, 1, 1)) is None
 
 
 def test_entry_attribution_context_builds_objective_market_index_components() -> None:

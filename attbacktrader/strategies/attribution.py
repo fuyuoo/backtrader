@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
@@ -127,6 +128,31 @@ class EntryAttributionEvidence:
             values=self.values,
             categories=self.categories,
         )
+
+
+@dataclass(frozen=True)
+class EntryAttributionEvidenceDateIndex:
+    evidence_by_date: Mapping[date, EntryAttributionEvidence]
+    dates: tuple[date, ...]
+
+    @classmethod
+    def from_mapping(
+        cls,
+        evidence_by_date: Mapping[date, EntryAttributionEvidence],
+    ) -> "EntryAttributionEvidenceDateIndex":
+        evidence = dict(evidence_by_date)
+        return cls(
+            evidence_by_date=MappingProxyType(evidence),
+            dates=tuple(sorted(evidence)),
+        )
+
+    def latest_on_or_before(self, trade_date: date) -> EntryAttributionEvidence | None:
+        if trade_date in self.evidence_by_date:
+            return self.evidence_by_date[trade_date]
+        index = bisect_right(self.dates, trade_date) - 1
+        if index < 0:
+            return None
+        return self.evidence_by_date[self.dates[index]]
 
 
 @dataclass(frozen=True)
@@ -1683,11 +1709,16 @@ def build_entry_attribution_context(
             market_evidence_by_date.get(evidence_date),
             evidence,
         )
+    market_evidence_index = EntryAttributionEvidenceDateIndex.from_mapping(market_evidence_by_date)
     industry_evidence_by_symbol = _industry_kdj_evidence_by_symbol(
         industry_index_bars_by_symbol,
         market_bars=benchmark_bars_by_symbol.get(market_symbol, ()),
         threshold=industry_kdj_threshold,
     )
+    industry_evidence_index_by_symbol = {
+        symbol: EntryAttributionEvidenceDateIndex.from_mapping(evidence_by_date)
+        for symbol, evidence_by_date in industry_evidence_by_symbol.items()
+    }
     symbol_cross_section_evidence_by_symbol = _symbol_cross_section_evidence_by_symbol(bars_by_symbol)
     symbol_industry_relative_evidence_by_symbol = _symbol_industry_relative_evidence_by_symbol(
         bars_by_symbol,
@@ -1706,12 +1737,22 @@ def build_entry_attribution_context(
         symbol_cross_section_evidence_by_date = symbol_cross_section_evidence_by_symbol.get(symbol, {})
         symbol_industry_relative_evidence_by_date = symbol_industry_relative_evidence_by_symbol.get(symbol, {})
         attribution_reference_evidence_by_date = attribution_reference_evidence_by_symbol_date.get(symbol, {})
+        symbol_derived_evidence_index = EntryAttributionEvidenceDateIndex.from_mapping(symbol_derived_evidence_by_date)
+        symbol_cross_section_evidence_index = EntryAttributionEvidenceDateIndex.from_mapping(
+            symbol_cross_section_evidence_by_date
+        )
+        symbol_industry_relative_evidence_index = EntryAttributionEvidenceDateIndex.from_mapping(
+            symbol_industry_relative_evidence_by_date
+        )
+        attribution_reference_evidence_index = EntryAttributionEvidenceDateIndex.from_mapping(
+            attribution_reference_evidence_by_date
+        )
         for bar in ordered_bars:
             evidence = _merge_evidence(
-                _latest_evidence_on_or_before(attribution_reference_evidence_by_date, bar.trade_date),
-                _latest_evidence_on_or_before(symbol_derived_evidence_by_date, bar.trade_date),
-                _latest_evidence_on_or_before(symbol_cross_section_evidence_by_date, bar.trade_date),
-                _latest_evidence_on_or_before(symbol_industry_relative_evidence_by_date, bar.trade_date),
+                _latest_evidence_on_or_before(attribution_reference_evidence_index, bar.trade_date),
+                _latest_evidence_on_or_before(symbol_derived_evidence_index, bar.trade_date),
+                _latest_evidence_on_or_before(symbol_cross_section_evidence_index, bar.trade_date),
+                _latest_evidence_on_or_before(symbol_industry_relative_evidence_index, bar.trade_date),
                 _symbol_evidence(
                     bar,
                     frame,
@@ -1722,12 +1763,12 @@ def build_entry_attribution_context(
                     },
                     kdj_threshold=symbol_kdj_threshold,
                 ),
-                _latest_evidence_on_or_before(market_evidence_by_date, bar.trade_date),
+                _latest_evidence_on_or_before(market_evidence_index, bar.trade_date),
                 _industry_evidence_for_symbol_date(
                     symbol,
                     bar.trade_date,
                     memberships_by_symbol=memberships_by_symbol,
-                    industry_evidence_by_symbol=industry_evidence_by_symbol,
+                    industry_evidence_by_symbol=industry_evidence_index_by_symbol,
                 ),
             )
             evidence = _filter_evidence(evidence, enabled_keys)
@@ -2942,7 +2983,10 @@ def _industry_evidence_for_symbol_date(
     trade_date: date,
     *,
     memberships_by_symbol: Mapping[str, Sequence[StockIndustryMembership]],
-    industry_evidence_by_symbol: Mapping[str, Mapping[date, EntryAttributionEvidence]],
+    industry_evidence_by_symbol: Mapping[
+        str,
+        Mapping[date, EntryAttributionEvidence] | EntryAttributionEvidenceDateIndex,
+    ],
 ) -> EntryAttributionEvidence | None:
     membership = _membership_on(symbol, trade_date, memberships_by_symbol=memberships_by_symbol)
     if membership is None:
@@ -2971,9 +3015,11 @@ def _membership_on(
 
 
 def _latest_evidence_on_or_before(
-    evidence_by_date: Mapping[date, EntryAttributionEvidence],
+    evidence_by_date: Mapping[date, EntryAttributionEvidence] | EntryAttributionEvidenceDateIndex,
     trade_date: date,
 ) -> EntryAttributionEvidence | None:
+    if isinstance(evidence_by_date, EntryAttributionEvidenceDateIndex):
+        return evidence_by_date.latest_on_or_before(trade_date)
     if trade_date in evidence_by_date:
         return evidence_by_date[trade_date]
     available_dates = [candidate_date for candidate_date in evidence_by_date if candidate_date <= trade_date]
