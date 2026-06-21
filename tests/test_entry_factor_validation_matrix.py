@@ -7,6 +7,7 @@ from attbacktrader.reports import (
     ENTRY_FACTOR_VALIDATION_MATRIX_SCHEMA,
     build_entry_factor_validation_manifest,
     build_entry_factor_validation_matrix,
+    compare_entry_factor_validation_matrix_parity,
     render_entry_factor_validation_matrix_markdown_zh,
     write_entry_factor_validation_manifest,
 )
@@ -128,6 +129,93 @@ def test_entry_factor_validation_matrix_cli_executes_manifest_candidates_and_res
     assert resumed["record_count"] == 2
 
 
+def test_entry_factor_validation_matrix_cli_resume_output_is_parity_equivalent_to_existing_records(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    output_dir = tmp_path / "matrix"
+    records = [
+        _validation_record(1, cumulative_return=0.02, max_drawdown=0.01),
+        _validation_record(2, cumulative_return=0.05, max_drawdown=0.02),
+    ]
+    for record in records:
+        candidate_index = record["candidate"]["candidate_index"]
+        record_dir = output_dir / f"candidate-{candidate_index:03d}"
+        record_dir.mkdir(parents=True, exist_ok=True)
+        (record_dir / "entry_factor_validation_run.json").write_text(
+            json.dumps(record, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    manifest = {
+        "schema": "attbacktrader.entry_factor_validation_manifest.v1",
+        "base_run_id": "baoma-baseline",
+        "candidates": [record["candidate"] for record in records],
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    reference = build_entry_factor_validation_matrix(
+        records,
+        baseline_run_id="baoma-baseline",
+        source_manifest=manifest_path,
+    )
+
+    exit_code = matrix_cli.main(
+        [
+            "--manifest",
+            str(manifest_path),
+            "--output-dir",
+            str(output_dir),
+            "--resume",
+        ]
+    )
+    optimized = json.loads(capsys.readouterr().out)
+    parity = compare_entry_factor_validation_matrix_parity(reference, optimized)
+
+    assert exit_code == 0
+    assert parity.equivalent is True
+
+
+def test_entry_factor_validation_matrix_cli_can_disable_batch_caches(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    manifest = build_entry_factor_validation_manifest(
+        _discovery_report_fixture(),
+        _baseline_run_plan_fixture(),
+        positive_limit=1,
+        negative_limit=0,
+        reuse_snapshots=True,
+    )
+    manifest_path, _, _ = write_entry_factor_validation_manifest(manifest, output_dir=tmp_path / "manifest")
+    cache_flags: list[tuple[bool, bool]] = []
+
+    def fake_execute(run_plan, provider=None, prepared_data_cache=None, snapshot_read_cache=None):
+        cache_flags.append((prepared_data_cache is not None, snapshot_read_cache is not None))
+        return SimpleNamespace(run_id=run_plan.run.id)
+
+    monkeypatch.setattr(matrix_cli, "execute_run_plan", fake_execute)
+    monkeypatch.setattr(matrix_cli, "write_run_artifacts", _fake_write_artifacts)
+    monkeypatch.setattr(matrix_cli, "build_run_execution_summary", _fake_summary)
+
+    exit_code = matrix_cli.main(
+        [
+            "--manifest",
+            str(manifest_path),
+            "--output-dir",
+            str(tmp_path / "matrix"),
+            "--output-root",
+            str(tmp_path / "reports"),
+            "--disable-prepared-data-cache",
+            "--disable-snapshot-read-cache",
+        ]
+    )
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["record_count"] == 1
+    assert cache_flags == [(False, False)]
+
+
 def _validation_record(candidate_index: int, *, cumulative_return: float, max_drawdown: float) -> dict:
     return {
         "schema": "attbacktrader.entry_factor_validation_run.v1",
@@ -156,6 +244,41 @@ def _validation_record(candidate_index: int, *, cumulative_return: float, max_dr
             "evidence": {"status": "ok"},
         },
         "artifacts": {"validation_json": f"candidate-{candidate_index}/entry_factor_validation_run.json"},
+    }
+
+
+def _fake_write_artifacts(run_plan, result, *, output_root):
+    output_dir = Path(output_root) / result.run_id
+    output_dir.mkdir(parents=True)
+    evidence_path = output_dir / "evidence_validation.json"
+    evidence_path.write_text(json.dumps({"status": "ok", "error_count": 0, "warning_count": 0}), encoding="utf-8")
+    return SimpleNamespace(
+        output_dir=output_dir,
+        report_chinese_markdown_path=output_dir / "report.zh.md",
+        report_path=output_dir / "report.json",
+        trades_path=output_dir / "trades.json",
+        environment_fit_path=output_dir / "environment_fit.json",
+        trade_review_path=output_dir / "trade_review.json",
+        trade_attribution_path=output_dir / "trade_attribution.json",
+        post_exit_analysis_path=output_dir / "post_exit_analysis.json",
+        evidence_validation_path=evidence_path,
+        attribution_factor_selection_path=output_dir / "attribution_factor_selection.json",
+    )
+
+
+def _fake_summary(run_plan, result, artifact_paths=None):
+    return {
+        "schema": "attbacktrader.run_execution_summary.v1",
+        "run": {"id": result.run_id, "from_date": "2023-01-01", "to_date": "2024-12-31"},
+        "metrics": {
+            "cumulative_return": 0.02,
+            "max_drawdown": 0.01,
+            "trade_count": 12,
+            "win_rate": 0.58,
+            "profit_loss_ratio": 1.3,
+        },
+        "benchmarks": [{"symbol": "000300.SH", "excess_return": 0.01}],
+        "evidence": {"status": "ok", "error_count": 0, "warning_count": 0},
     }
 
 

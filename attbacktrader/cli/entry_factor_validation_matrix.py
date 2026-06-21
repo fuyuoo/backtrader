@@ -33,8 +33,8 @@ def main(argv: list[str] | None = None) -> int:
     manifest = _load_json_mapping(manifest_path)
     output_dir = Path(args.output_dir) if args.output_dir else _default_output_dir(manifest, args.output_root)
     output_dir.mkdir(parents=True, exist_ok=True)
-    prepared_data_cache = PreparedRunDataCache()
-    snapshot_read_cache = SnapshotReadCache()
+    prepared_data_cache = None if args.disable_prepared_data_cache else PreparedRunDataCache()
+    snapshot_read_cache = None if args.disable_snapshot_read_cache else SnapshotReadCache()
 
     batch_result = run_entry_factor_validation_batch(
         manifest=manifest,
@@ -143,6 +143,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--max-candidates", type=int, default=None, help="Limit number of candidates for this invocation")
     parser.add_argument("--resume", action="store_true", help="Reuse existing candidate validation records")
     parser.add_argument("--no-persist", action="store_true", help="Run candidates without normal reports/{run_id} artifacts")
+    parser.add_argument("--disable-prepared-data-cache", action="store_true", help="Disable in-process Prepared Run Data reuse")
+    parser.add_argument("--disable-snapshot-read-cache", action="store_true", help="Disable in-process snapshot read reuse")
     parser.add_argument("--print-markdown", action="store_true", help="Print Chinese Markdown instead of JSON")
     return parser.parse_args(argv)
 

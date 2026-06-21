@@ -401,7 +401,7 @@ def _prepare_attribution_reference_evidence_by_symbol_date(
     run_plan: RunPlan,
     *,
     symbols: tuple[str, ...],
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> dict[str, dict[date, EntryAttributionEvidence]]:
     field_keys = _attribution_reference_factor_keys_for_run(run_plan)
     if not symbols or not field_keys:
@@ -725,7 +725,7 @@ def _prepare_symbol_data(
     provider: RunDataProvider | None,
     indicator_requirements: tuple[IndicatorRequirement, ...],
     trading_calendar: TradingCalendar | None,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> PreparedSymbolData:
     calculation_start_date = _symbol_calculation_start_date(
         run_plan,
@@ -821,7 +821,7 @@ def _load_or_fetch_bars(
     start_date: date,
     end_date: date,
     minimum_start_date: date,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> DailyBarsLoadResult:
     existing_bars, candidates = _load_discovered_tradable_bars(
         run_plan,
@@ -1004,7 +1004,7 @@ def _load_discovered_tradable_bars(
     series: TradableSeriesConfig,
     start_date: date,
     end_date: date,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> tuple[tuple[DailyBar, ...], tuple[DailyBarsSnapshotCandidate, ...]]:
     candidates = discover_tradable_bars_snapshot_paths(
         run_plan.data.snapshot_root,
@@ -1020,7 +1020,7 @@ def _load_discovered_tradable_bars(
 def _read_daily_bar_candidates(
     candidates: tuple[DailyBarsSnapshotCandidate, ...],
     *,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> tuple[DailyBar, ...]:
     bars: list[DailyBar] = []
     for candidate in candidates:
@@ -1777,7 +1777,7 @@ def _prepare_index_data_by_symbol(
     run_plan: RunPlan,
     *,
     provider: RunDataProvider | None,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> dict[str, PreparedIndexData]:
     index_symbols = tuple(
         dict.fromkeys(
@@ -1804,7 +1804,7 @@ def _prepare_index_data(
     *,
     symbol: str,
     provider: RunDataProvider | None,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> PreparedIndexData:
     calculation_start_date = _market_index_calculation_start_date(run_plan, symbol=symbol)
     snapshot_path = index_bars_snapshot_path(
@@ -1844,7 +1844,7 @@ def _load_or_fetch_index_bars(
     provider: RunDataProvider | None,
     start_date: date,
     end_date: date,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> IndexBarsLoadResult:
     if not run_plan.data.refresh_snapshots:
         existing_bars, candidates = _load_discovered_index_bars(
@@ -1912,7 +1912,7 @@ def _load_discovered_index_bars(
     symbol: str,
     start_date: date,
     end_date: date,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> tuple[tuple[IndexBar, ...], tuple[IndexBarsSnapshotCandidate, ...]]:
     candidates = discover_index_bars_snapshot_paths(
         run_plan.data.snapshot_root,
@@ -1927,7 +1927,7 @@ def _prepare_industry_index_data_by_symbol(
     run_plan: RunPlan,
     *,
     provider: RunDataProvider | None,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> dict[str, PreparedIndexData]:
     return {
         symbol: _prepare_industry_index_data(
@@ -1945,7 +1945,7 @@ def _prepare_industry_index_data(
     *,
     symbol: str,
     provider: RunDataProvider | None,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> PreparedIndexData:
     source = run_plan.data.industry_series.source
     calculation_start_date = _industry_index_calculation_start_date(run_plan)
@@ -1989,7 +1989,7 @@ def _load_or_fetch_industry_index_bars(
     provider: RunDataProvider | None,
     start_date: date,
     end_date: date,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> IndexBarsLoadResult:
     if not run_plan.data.refresh_snapshots:
         existing_bars, candidates = _load_discovered_industry_index_bars(
@@ -2059,7 +2059,7 @@ def _load_discovered_industry_index_bars(
     source: str,
     start_date: date,
     end_date: date,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> tuple[tuple[IndexBar, ...], tuple[IndexBarsSnapshotCandidate, ...]]:
     candidates = discover_industry_index_bars_snapshot_paths(
         run_plan.data.snapshot_root,
@@ -2074,7 +2074,7 @@ def _load_discovered_industry_index_bars(
 def _read_index_bar_candidates(
     candidates: tuple[IndexBarsSnapshotCandidate, ...],
     *,
-    snapshot_read_cache: SnapshotReadCache | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> tuple[IndexBar, ...]:
     bars: list[IndexBar] = []
     for candidate in candidates:
