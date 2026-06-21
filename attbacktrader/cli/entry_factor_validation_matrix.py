@@ -23,6 +23,7 @@ from attbacktrader.reports import (
     write_run_artifacts,
 )
 from attbacktrader.runners import execute_run_plan, run_entry_factor_validation_batch
+from attbacktrader.runners.prepared_data import PreparedRunDataCache
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest = _load_json_mapping(manifest_path)
     output_dir = Path(args.output_dir) if args.output_dir else _default_output_dir(manifest, args.output_root)
     output_dir.mkdir(parents=True, exist_ok=True)
+    prepared_data_cache = PreparedRunDataCache()
 
     batch_result = run_entry_factor_validation_batch(
         manifest=manifest,
@@ -49,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
                 no_persist=args.no_persist,
                 token_file=args.token_file,
                 tushare_args=args,
+                prepared_data_cache=prepared_data_cache,
         ),
     )
 
@@ -83,6 +86,7 @@ def _execute_candidate(
     no_persist: bool,
     token_file: str,
     tushare_args: argparse.Namespace,
+    prepared_data_cache: PreparedRunDataCache | None = None,
 ) -> dict[str, Any]:
     run_plan, run_plan_path = load_candidate_run_plan(candidate, manifest_path=manifest_path)
     provider = None
@@ -94,7 +98,7 @@ def _execute_candidate(
             rate_limit=tushare_rate_limit_config_from_args(tushare_args),
         )
 
-    result = execute_run_plan(run_plan, provider=provider)
+    result = execute_run_plan(run_plan, provider=provider, prepared_data_cache=prepared_data_cache)
     artifact_paths = None
     if run_plan.output.persist and not no_persist:
         artifact_paths = write_run_artifacts(

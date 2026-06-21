@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
@@ -256,6 +258,41 @@ class PreparedRunData:
             if membership is not None:
                 groups[symbol] = str(getattr(membership, field_name))
         return groups
+
+
+@dataclass(frozen=True)
+class PreparedRunDataCacheKey:
+    fingerprint: str
+
+
+class PreparedRunDataCache:
+    """Cache Prepared Run Data when run plans have identical data requirements."""
+
+    def __init__(self) -> None:
+        self._items: dict[PreparedRunDataCacheKey, Any] = {}
+
+    def get_or_prepare(
+        self,
+        run_plan: RunPlan,
+        *,
+        provider: RunDataProvider | None = None,
+        prepare: Callable[..., Any] | None = None,
+    ) -> Any:
+        key = prepared_run_data_cache_key(run_plan)
+        if key not in self._items:
+            prepare_func = prepare if prepare is not None else prepare_run_data
+            self._items[key] = prepare_func(run_plan, provider=provider)
+        return self._items[key]
+
+
+def prepared_run_data_cache_key(run_plan: RunPlan) -> PreparedRunDataCacheKey:
+    payload = run_plan.model_dump(mode="json")
+    run = dict(payload.get("run") or {})
+    run.pop("id", None)
+    payload["run"] = run
+    payload.pop("output", None)
+    fingerprint = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return PreparedRunDataCacheKey(fingerprint=fingerprint)
 
 
 def prepare_run_data(

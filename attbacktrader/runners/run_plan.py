@@ -44,6 +44,7 @@ from attbacktrader.runners.prepared_data import (
     IndustryClassificationResult,
     IndustryMembershipResult,
     PreparedSymbolData,
+    PreparedRunDataCache,
     prepare_run_data,
 )
 from attbacktrader.strategies import (
@@ -140,12 +141,16 @@ def execute_run_plan(
     run_plan: RunPlan,
     *,
     provider: RunDataProvider | None = None,
+    prepared_data_cache: PreparedRunDataCache | None = None,
 ) -> RunPlanExecutionResult:
     execution_run_plan, data_preflight_report, stock_pool_filter = _run_plan_with_auto_stock_pool_filter(
         run_plan,
         provider=provider,
     )
-    prepared_data = prepare_run_data(execution_run_plan, provider=provider)
+    if prepared_data_cache is None:
+        prepared_data = prepare_run_data(execution_run_plan, provider=provider)
+    else:
+        prepared_data = prepared_data_cache.get_or_prepare(execution_run_plan, provider=provider)
     strategy_template = build_strategy_template(execution_run_plan.strategy)
 
     if execution_run_plan.execution.engine == "backtrader":

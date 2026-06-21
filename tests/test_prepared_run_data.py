@@ -34,7 +34,7 @@ from attbacktrader.features import (
     write_indicator_snapshot_metadata,
     write_indicator_snapshots_parquet,
 )
-from attbacktrader.runners.prepared_data import prepare_run_data
+from attbacktrader.runners.prepared_data import PreparedRunDataCache, prepare_run_data
 
 
 class FakePreparedDataProvider:
@@ -151,6 +151,44 @@ def test_prepare_run_data_returns_one_interface_for_snapshots_features_and_analy
     assert prepared.industry_classification_result.snapshot_path.exists()
     assert prepared.industry_membership_results[0].snapshot_path.exists()
     assert prepared.risk_group_by_symbol(level=1) == {"000001.SZ": "801780.SI"}
+
+
+def test_prepared_run_data_cache_reuses_when_only_run_id_changes(tmp_path: Path) -> None:
+    cache = PreparedRunDataCache()
+    run_plan = _run_plan(tmp_path)
+    same_inputs = run_plan.model_copy(update={"run": run_plan.run.model_copy(update={"id": "same-inputs"})})
+    prepared = object()
+    calls: list[str] = []
+
+    def prepare(run_plan, *, provider=None):
+        calls.append(run_plan.run.id)
+        return prepared
+
+    first = cache.get_or_prepare(run_plan, prepare=prepare)
+    second = cache.get_or_prepare(same_inputs, prepare=prepare)
+
+    assert first is prepared
+    assert second is prepared
+    assert calls == ["prepared-data-test"]
+
+
+def test_prepared_run_data_cache_separates_date_ranges(tmp_path: Path) -> None:
+    cache = PreparedRunDataCache()
+    run_plan = _run_plan(tmp_path)
+    different_range = run_plan.model_copy(
+        update={"run": run_plan.run.model_copy(update={"to_date": date(2024, 1, 12)})}
+    )
+    calls: list[str] = []
+
+    def prepare(run_plan, *, provider=None):
+        calls.append(run_plan.run.to_date.isoformat())
+        return object()
+
+    first = cache.get_or_prepare(run_plan, prepare=prepare)
+    second = cache.get_or_prepare(different_range, prepare=prepare)
+
+    assert first is not second
+    assert calls == ["2024-01-11", "2024-01-12"]
 
 
 def test_prepare_run_data_loads_attribution_reference_snapshot_evidence(tmp_path: Path) -> None:

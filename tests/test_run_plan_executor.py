@@ -19,6 +19,7 @@ from attbacktrader.engines.business import BaomaBusinessRunResult, LifecycleClos
 from attbacktrader.reports.renderer import render_backtest_report_markdown_zh
 import attbacktrader.runners.run_plan as run_plan_module
 from attbacktrader.runners import execute_run_plan
+from attbacktrader.runners.prepared_data import PreparedRunDataCache
 from attbacktrader.strategies import TradeIntent, TradeIntentType
 
 
@@ -162,6 +163,31 @@ def test_execute_run_plan_fetches_snapshots_indicators_and_runs_portfolio(tmp_pa
     assert result.symbol_results[0].tradability_snapshot_path.exists()
     assert result.symbol_results[0].snapshot_path.parent.name == "qfq"
     assert result.symbol_results[0].indicator_snapshot_path.parent.name == "qfq"
+
+
+def test_execute_run_plan_can_reuse_prepared_run_data_cache_when_only_run_id_changes(tmp_path: Path) -> None:
+    first_symbol_bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    second_symbol_bars = tuple(replace(bar, symbol="000002.SZ") for bar in first_symbol_bars)
+    provider = FakeRunDataProvider(
+        {
+            "000001.SZ": first_symbol_bars,
+            "000002.SZ": second_symbol_bars,
+        }
+    )
+    cache = PreparedRunDataCache()
+    first_run_plan = _run_plan(tmp_path, refresh_snapshots=True)
+    second_run_plan = first_run_plan.model_copy(
+        update={"run": first_run_plan.run.model_copy(update={"id": "executor-test-second"})}
+    )
+
+    first = execute_run_plan(first_run_plan, provider=provider, prepared_data_cache=cache)
+    second = execute_run_plan(second_run_plan, provider=provider, prepared_data_cache=cache)
+
+    assert first.run_id == "executor-test"
+    assert second.run_id == "executor-test-second"
+    assert provider.calls == [("000001.SZ", "qfq"), ("000002.SZ", "qfq")]
+    assert provider.index_calls == ["000001.SH"]
+    assert provider.industry_index_calls == [("801780.SI", "SW2021")]
 
 
 def test_execute_run_plan_auto_filters_stock_pool_before_backtest(tmp_path: Path) -> None:
