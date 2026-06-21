@@ -147,12 +147,12 @@ def execute_run_plan(
     )
     prepared_data = prepare_run_data(execution_run_plan, provider=provider)
     strategy_template = build_strategy_template(execution_run_plan.strategy)
-    risk_group_by_symbol = prepared_data.risk_group_by_symbol(
-        level=getattr(strategy_template.sizing_method, "risk_group_level", 1)
-    )
-    entry_attribution_context = _entry_attribution_context(execution_run_plan, prepared_data)
 
     if execution_run_plan.execution.engine == "backtrader":
+        risk_group_by_symbol = prepared_data.risk_group_by_symbol(
+            level=getattr(strategy_template.sizing_method, "risk_group_level", 1)
+        )
+        entry_attribution_context = _entry_attribution_context(execution_run_plan, prepared_data)
         engine_result = run_trend_template_v1_portfolio_backtrader(
             prepared_data.bars_by_symbol,
             initial_cash=execution_run_plan.broker.initial_cash,
@@ -209,6 +209,10 @@ def execute_run_plan(
         lifecycle_events = engine_result.lifecycle_events
         lifecycle_snapshots = engine_result.lifecycle_snapshots
     else:
+        risk_group_by_symbol = prepared_data.risk_group_by_symbol(
+            level=getattr(strategy_template.sizing_method, "risk_group_level", 1)
+        )
+        entry_attribution_context = _entry_attribution_context(execution_run_plan, prepared_data)
         engine_result = run_trend_template_v1_portfolio_business(
             strategy_template,
             prepared_data.bars_by_symbol,

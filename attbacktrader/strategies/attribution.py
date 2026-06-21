@@ -2974,6 +2974,8 @@ def _latest_evidence_on_or_before(
     evidence_by_date: Mapping[date, EntryAttributionEvidence],
     trade_date: date,
 ) -> EntryAttributionEvidence | None:
+    if trade_date in evidence_by_date:
+        return evidence_by_date[trade_date]
     available_dates = [candidate_date for candidate_date in evidence_by_date if candidate_date <= trade_date]
     if not available_dates:
         return None

@@ -481,7 +481,11 @@ def test_execute_run_plan_can_route_to_baoma_dedicated_business_runner(tmp_path:
             open_positions=(),
         )
 
+    def fail_unused_entry_context(*args, **kwargs):
+        raise AssertionError("baoma_v1_business must not build the unused generic entry attribution context")
+
     monkeypatch.setattr(run_plan_module, "run_baoma_v1_business", fake_baoma_runner)
+    monkeypatch.setattr(run_plan_module, "_entry_attribution_context", fail_unused_entry_context)
 
     result = run_plan_module.execute_run_plan(_baoma_route_run_plan(tmp_path), provider=provider)
 
