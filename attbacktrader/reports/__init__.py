@@ -133,6 +133,11 @@ from .entry_factor_validation_matrix import (
     render_entry_factor_validation_matrix_markdown_zh,
     write_entry_factor_validation_matrix,
 )
+from .entry_factor_validation_parity import (
+    EntryFactorValidationParityMismatch,
+    EntryFactorValidationParityReport,
+    compare_entry_factor_validation_matrix_parity,
+)
 from .entry_factor_validation_classification import (
     ENTRY_FACTOR_VALIDATION_CLASSIFICATION_SCHEMA,
     build_entry_factor_validation_classification,
@@ -403,6 +408,8 @@ __all__ = [
     "ENTRY_FACTOR_VALIDATION_CLASSIFICATION_SCHEMA",
     "ENTRY_FACTOR_COMBINATION_MANIFEST_SCHEMA",
     "ENTRY_FACTOR_COMBINATION_VALIDATION_SCHEMA",
+    "EntryFactorValidationParityMismatch",
+    "EntryFactorValidationParityReport",
     "MARKET_TYPE_SUMMARY_SCHEMA",
     "STRATEGY_VARIANT_VALIDATION_SCHEMA",
     "EntryAttributionContrast",
@@ -511,6 +518,7 @@ __all__ = [
     "build_entry_factor_validation_manifest_from_screening",
     "build_entry_factor_validation_run_record",
     "build_entry_factor_validation_matrix",
+    "compare_entry_factor_validation_matrix_parity",
     "build_entry_factor_validation_classification",
     "build_entry_factor_combination_manifest",
     "build_entry_factor_combination_validation_report",
