@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from attbacktrader.reports import (
     STRATEGY_DECISION_EVENT_TABLE_SCHEMA,
     build_scored_entry_allocation_tuning_report,
     build_simulation_cache_identity,
+    build_strategy_decision_event_table_from_intents,
     build_stage_b_search_space_from_stage_a,
     build_strategy_decision_cache_identity,
     build_strategy_decision_event_table,
@@ -18,6 +20,7 @@ from attbacktrader.reports import (
     simulate_scored_portfolio,
     write_scored_entry_allocation_tuning_contract,
 )
+from attbacktrader.strategies import TradeIntent, TradeIntentType
 
 
 def test_scored_entry_allocation_tuning_dry_run_contract_lists_folds_and_defaults(tmp_path: Path) -> None:
@@ -114,6 +117,87 @@ def test_strategy_decision_event_table_cache_identity_excludes_trial_specific_pa
                 }
             ],
             cache_inputs=base_cache_inputs,
+        )
+
+
+def test_strategy_decision_event_table_can_be_built_from_trade_intents_without_result_state() -> None:
+    cache_inputs = _decision_cache_inputs()
+    intents = [
+        TradeIntent(
+            intent_type=TradeIntentType.ENTER,
+            symbol="000001.SZ",
+            trade_date=date(2020, 1, 2),
+            method_name="baoma_entry",
+            reason_code="BAOMA_ENTRY",
+            signal_values={
+                "attribution": {
+                    "values": {
+                        "symbol.ma.trend_state": "bullish",
+                        "symbol.macd.energy_zone": "red_bar_expanding",
+                    },
+                    "categories": {
+                        "market.stage": "warm",
+                    },
+                    "checks": {
+                        "close_above_ma60": True,
+                    },
+                },
+                "sizing": {"business_executable_quantity": 100},
+            },
+        ),
+        TradeIntent(
+            intent_type=TradeIntentType.EXIT_PROFIT,
+            symbol="000001.SZ",
+            trade_date=date(2020, 1, 8),
+            method_name="baoma_ma25_profit_exit",
+            reason_code="MA25_PROFIT_EXIT",
+            signal_values={"attribution": {"values": {"exit.ma25_state": "broken"}}},
+        ),
+        TradeIntent(
+            intent_type=TradeIntentType.HOLD,
+            symbol="000002.SZ",
+            trade_date=date(2020, 1, 2),
+            method_name="baoma_entry",
+            reason_code="NO_ENTRY",
+            signal_values={"attribution": {"values": {"symbol.ma.trend_state": "flat"}}},
+        ),
+    ]
+
+    table = build_strategy_decision_event_table_from_intents(
+        intents,
+        cache_inputs=cache_inputs,
+        market_context_by_key={
+            ("000001.SZ", "2020-01-02"): {
+                "price": 10.0,
+                "industry": "bank",
+                "stock_pool_order": 1,
+                "tradable": True,
+            },
+            ("000001.SZ", "2020-01-08"): {
+                "price": 12.0,
+                "industry": "bank",
+                "stock_pool_order": 1,
+                "tradable": True,
+            },
+        },
+    )
+
+    assert table["schema"] == STRATEGY_DECISION_EVENT_TABLE_SCHEMA
+    assert table["event_count"] == 2
+    assert [event["intent_type"] for event in table["events"]] == ["enter", "exit_profit"]
+    entry = table["events"][0]
+    assert entry["price"] == 10.0
+    assert entry["evidence"]["symbol.ma.trend_state"] == "bullish"
+    assert entry["evidence"]["market.stage"] == "warm"
+    assert entry["evidence"]["close_above_ma60"] is True
+    assert "business_executable_quantity" not in json.dumps(table["events"], ensure_ascii=False)
+    assert "completed_trade" not in json.dumps(table["events"], ensure_ascii=False)
+
+    with pytest.raises(ValueError, match="missing market context"):
+        build_strategy_decision_event_table_from_intents(
+            [intents[0]],
+            cache_inputs=cache_inputs,
+            market_context_by_key={},
         )
 
 
@@ -336,6 +420,17 @@ def _entry_event(
             "symbol.macd.energy_zone": macd,
             "raw_momentum": raw_momentum,
         },
+    }
+
+
+def _decision_cache_inputs() -> dict:
+    return {
+        "data_snapshot_identity": "snapshot-2015-2024-qfq",
+        "stock_pool_identity": "csi300-csi500-freeze-20250101",
+        "strategy_signal_parameters": {"template": "baoma_v1", "entry": "baoma_entry"},
+        "factor_field_set": ["symbol.ma.trend_state", "symbol.macd.energy_zone", "market.stage"],
+        "date_range": {"start": "2015-01-01", "end": "2024-12-31"},
+        "event_schema_version": 1,
     }
 
 

@@ -13,6 +13,16 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-23 — 补齐 Strategy Decision Event Table 的 TradeIntent 输入路径
+
+- 需求：继续推进 `#22 Minimal decision-event cache for actionable intents`，让决策事件缓存能消费策略实际输出的意图对象。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `build_strategy_decision_event_table_from_intents`，从 `TradeIntent` 与同日 market context 生成事件表，只抽取 `attribution.values/categories/checks` 等决策时证据。
+  - `attbacktrader/reports/__init__.py`：导出新的事件表构建入口。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增真实 `TradeIntent` fixture，验证 actionable intent 保留、`hold` 过滤、sizing/execution/completed-trade 状态不进入事件 rows、缺 market context 明确失败。
+  - `docs/FEATURES.md`：更新 Strategy Decision Event Table 能力说明。
+- 影响：为后续 scored portfolio simulation 消费真实策略决策输出提供缓存边界；不改变现有回测执行语义。
+
 ## 2026-06-23 — 新增 Scored Entry Allocation Tuning 本地纵切
 
 - 需求：按 PRD 将 Scored Entry Allocation Tuning 全部实现为可测试的本地纵切，并使用 TDD 推进。

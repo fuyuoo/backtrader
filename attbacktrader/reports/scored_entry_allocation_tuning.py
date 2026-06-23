@@ -302,6 +302,37 @@ def build_strategy_decision_event_table(
     }
 
 
+def build_strategy_decision_event_table_from_intents(
+    intents: Sequence[Any],
+    *,
+    cache_inputs: Mapping[str, Any],
+    market_context_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Build a Strategy Decision Event Table from strategy TradeIntent objects."""
+
+    events: list[dict[str, Any]] = []
+    for intent in intents:
+        intent_type = _intent_type_value(getattr(intent, "intent_type", ""))
+        if intent_type not in _ACTIONABLE_INTENTS:
+            continue
+        context = _market_context_for_intent(intent, market_context_by_key)
+        events.append(
+            {
+                "symbol": str(getattr(intent, "symbol")),
+                "trade_date": _date_value(getattr(intent, "trade_date")),
+                "intent_type": intent_type,
+                "price": context["price"],
+                "industry": context.get("industry"),
+                "stock_pool_order": context.get("stock_pool_order", 0),
+                "tradable": context.get("tradable", True),
+                "evidence": _decision_evidence_from_signal_values(
+                    _as_mapping(getattr(intent, "signal_values", {}))
+                ),
+            }
+        )
+    return build_strategy_decision_event_table(events, cache_inputs=cache_inputs)
+
+
 def score_entry_candidates(
     events: Sequence[Mapping[str, Any]],
     *,
@@ -715,6 +746,40 @@ def _normalize_decision_event(event: Mapping[str, Any]) -> dict[str, Any]:
         "tradable": bool(event.get("tradable", True)),
         "evidence": _jsonable(dict(evidence)),
     }
+
+
+def _intent_type_value(value: Any) -> str:
+    return str(getattr(value, "value", value))
+
+
+def _date_value(value: Any) -> str:
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def _market_context_for_intent(
+    intent: Any,
+    market_context_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> Mapping[str, Any]:
+    symbol = str(getattr(intent, "symbol"))
+    trade_date = _date_value(getattr(intent, "trade_date"))
+    context = market_context_by_key.get((symbol, trade_date))
+    if context is None:
+        raise ValueError(f"missing market context for {symbol} {trade_date}")
+    if "price" not in context:
+        raise ValueError(f"missing market context price for {symbol} {trade_date}")
+    return context
+
+
+def _decision_evidence_from_signal_values(signal_values: Mapping[str, Any]) -> dict[str, Any]:
+    evidence: dict[str, Any] = {}
+    attribution = _as_mapping(signal_values.get("attribution"))
+    for bucket in ("values", "categories", "checks"):
+        evidence.update(dict(_as_mapping(attribution.get(bucket))))
+    evidence.update(dict(_as_mapping(signal_values.get("evidence"))))
+    forbidden = sorted(field for field in _FORBIDDEN_DECISION_EVENT_FIELDS if field in evidence)
+    if forbidden:
+        raise ValueError(f"decision evidence contains forbidden portfolio result fields: {', '.join(forbidden)}")
+    return _jsonable(evidence)
 
 
 def _score_event(event: Mapping[str, Any], scorer_config: Mapping[str, Any]) -> dict[str, Any]:
