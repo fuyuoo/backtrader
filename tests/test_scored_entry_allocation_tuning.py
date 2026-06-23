@@ -8,6 +8,7 @@ from attbacktrader.cli import scored_entry_allocation_tuning as tuning_cli
 from attbacktrader.reports import (
     FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA,
     SCORED_ENTRY_ALLOCATION_TUNING_CONTRACT_SCHEMA,
+    SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA,
     STRATEGY_DECISION_EVENT_TABLE_SCHEMA,
     build_scored_entry_allocation_tuning_report,
     build_simulation_cache_identity,
@@ -18,9 +19,11 @@ from attbacktrader.reports import (
     build_scored_entry_allocation_tuning_contract,
     require_optuna_for_tuning,
     run_fixed_parameter_scored_portfolio_smoke,
+    run_scored_portfolio_baseline_comparison,
     score_entry_candidates,
     simulate_scored_portfolio,
     write_fixed_parameter_scored_portfolio_smoke_run,
+    write_scored_portfolio_baseline_comparison,
     write_scored_entry_allocation_tuning_contract,
 )
 from attbacktrader.strategies import TradeIntent, TradeIntentType
@@ -397,6 +400,121 @@ def test_fixed_parameter_scored_portfolio_smoke_run_consumes_decision_cache(tmp_
     assert json.loads(json_path.read_text(encoding="utf-8"))["schema"] == FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA
 
 
+def test_scored_portfolio_baseline_comparison_uses_stage_constraints_and_fixed_stock_pool_order(tmp_path: Path) -> None:
+    table = build_strategy_decision_event_table(
+        [
+            _rank_event("000002.SZ", rank_bucket="low", industry="bank", stock_pool_order=1),
+            _rank_event("000001.SZ", rank_bucket="top", industry="tech", stock_pool_order=2),
+            _rank_event("000003.SZ", rank_bucket="mid", industry="medicine", stock_pool_order=3),
+            _rank_event("000004.SZ", rank_bucket="top", industry="energy", stock_pool_order=4),
+            _exit_event("000001.SZ", trade_date="2020-01-03", price=12.0, industry="tech"),
+            _exit_event("000002.SZ", trade_date="2020-01-03", price=9.0, industry="bank"),
+            _exit_event("000003.SZ", trade_date="2020-01-03", price=11.0, industry="medicine"),
+            _exit_event("000004.SZ", trade_date="2020-01-03", price=14.0, industry="energy"),
+        ],
+        cache_inputs=_decision_cache_inputs(),
+    )
+    contract = build_scored_entry_allocation_tuning_contract(mode="dry-run")
+
+    comparison = run_scored_portfolio_baseline_comparison(
+        table,
+        contract=contract,
+        fold_id="train-2015-2019_test-2020",
+        scorer_config={"factor_weights": {"rank_bucket": {"top": 10.0, "mid": 2.0, "low": -1.0}}},
+        score_gate_by_stage={
+            "stage_a": {"minimum_score_z": -10.0, "minimum_score_quantile": 0.0},
+            "stage_b": {"minimum_score_z": -10.0, "minimum_score_quantile": 0.0},
+        },
+    )
+
+    assert comparison["schema"] == SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA
+    assert comparison["core_metric_keys"] == [
+        "cumulative_return",
+        "annualized_return",
+        "max_drawdown",
+        "sharpe_ratio",
+        "trade_count",
+        "win_rate",
+        "profit_loss_ratio",
+    ]
+    stage_a = comparison["stages"]["stage_a"]
+    assert stage_a["constraint_regime"] == "broad_high_capacity_unscored_candidate_filling"
+    assert stage_a["unscored_baseline"]["stage"] == "stage_a"
+    assert stage_a["unscored_baseline"]["result_type"] == "unscored_baseline"
+    assert stage_a["unscored_baseline"]["portfolio_controls"]["max_holding_count"] == 800
+    assert [entry["symbol"] for entry in stage_a["unscored_baseline"]["selected_entries"]] == [
+        "000002.SZ",
+        "000001.SZ",
+        "000003.SZ",
+        "000004.SZ",
+    ]
+
+    stage_b = comparison["stages"]["stage_b"]
+    assert stage_b["constraint_regime"] == "realistic_constraints_fixed_stock_pool_order"
+    assert stage_b["scored"]["stage"] == "stage_b"
+    assert stage_b["scored"]["result_type"] == "scored"
+    assert stage_b["portfolio_controls"]["max_holding_count"] == 20
+    assert stage_b["portfolio_controls"]["max_new_positions_per_day"] == 3
+    assert [entry["symbol"] for entry in stage_b["scored"]["selected_entries"]] == [
+        "000001.SZ",
+        "000004.SZ",
+        "000003.SZ",
+    ]
+    assert [entry["symbol"] for entry in stage_b["unscored_baseline"]["selected_entries"]] == [
+        "000002.SZ",
+        "000001.SZ",
+        "000003.SZ",
+    ]
+    assert stage_b["baseline_score_gate"] == {
+        "minimum_score_z": -1_000_000.0,
+        "minimum_score_quantile": 0.0,
+    }
+    assert stage_b["unscored_baseline"]["core_metrics"]["trade_count"] == 3
+    assert "profit_loss_ratio" in stage_b["core_metric_delta_vs_baseline"]
+
+    json_path, payload = write_scored_portfolio_baseline_comparison(comparison, output_dir=tmp_path)
+
+    assert json_path.exists()
+    assert payload["artifacts"]["baseline_comparison_json"] == str(json_path)
+    assert json.loads(json_path.read_text(encoding="utf-8"))["schema"] == SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA
+
+
+def test_fixed_parameter_smoke_run_exposes_core_metrics_for_deterministic_trade() -> None:
+    table = build_strategy_decision_event_table(
+        [
+            _rank_event("000001.SZ", rank_bucket="top", industry="bank", stock_pool_order=1, trade_date="2020-01-02", price=10.0),
+            _exit_event("000001.SZ", trade_date="2020-01-03", price=12.0, industry="bank"),
+        ],
+        cache_inputs=_decision_cache_inputs(),
+    )
+
+    smoke_run = run_fixed_parameter_scored_portfolio_smoke(
+        table,
+        fold_id="train-2015-2019_test-2020",
+        stage="stage_b",
+        scorer_config={"factor_weights": {"rank_bucket": {"top": 1.0}}},
+        score_gate={"minimum_score_z": -10.0, "minimum_score_quantile": 0.0},
+        portfolio_controls={
+            "initial_cash": 10_000,
+            "max_holding_count": 1,
+            "cash_reserve_ratio": 0.0,
+            "board_lot_size": 100,
+        },
+    )
+
+    assert smoke_run["stage"] == "stage_b"
+    assert smoke_run["result_type"] == "scored"
+    assert smoke_run["core_metrics"] == {
+        "cumulative_return": pytest.approx(0.2),
+        "annualized_return": pytest.approx(0.2),
+        "max_drawdown": 0.0,
+        "sharpe_ratio": 0.0,
+        "trade_count": 1,
+        "win_rate": 1.0,
+        "profit_loss_ratio": 0.0,
+    }
+
+
 def test_stage_a_narrows_stage_b_ranges_and_report_selects_recommendations() -> None:
     stage_a_trials = [
         _trial("a1", annualized_return=0.20, sharpe_ratio=1.4, excess=0.10, max_drawdown=0.12, weights={"f1": 1.0, "f2": -0.8, "f3": -0.2}),
@@ -549,6 +667,25 @@ def _rank_event(
         "stock_pool_order": stock_pool_order,
         "tradable": tradable,
         "evidence": {"rank_bucket": rank_bucket},
+    }
+
+
+def _exit_event(
+    symbol: str,
+    *,
+    trade_date: str,
+    price: float,
+    industry: str,
+) -> dict:
+    return {
+        "symbol": symbol,
+        "trade_date": trade_date,
+        "intent_type": "exit_profit",
+        "price": price,
+        "industry": industry,
+        "stock_pool_order": 0,
+        "tradable": True,
+        "evidence": {"exit": "profit"},
     }
 
 

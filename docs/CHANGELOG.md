@@ -13,6 +13,16 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-23 — 新增 scored/unscored baseline comparison
+
+- 需求：继续推进 `#24 Unscored baselines and core metrics`，为 scored portfolio smoke path 增加匹配的不打分基线和核心组合指标。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `run_scored_portfolio_baseline_comparison` 和写出函数，按 Stage A / Stage B 分别输出 scored 与 unscored baseline；baseline 使用固定股票池顺序，不使用分数排序。
+  - `attbacktrader/reports/__init__.py`：导出 baseline comparison schema、runner 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增确定性 fixture，验证 Stage A 高容量基线、Stage B 真实约束基线、固定股票池排序、核心指标字段与单笔交易指标计算。
+  - `docs/FEATURES.md`：更新 baseline comparison 能力说明。
+- 影响：后续 Stage A/B tuning 可用同一 artifact 对比 scored 与 unscored 口径，避免把容量约束或股票池顺序收益误判为打分器收益。
+
 ## 2026-06-23 — 新增固定参数 Scored Portfolio smoke run
 
 - 需求：继续推进 `#23 Fixed-parameter scored portfolio smoke run`，用缓存的决策事件跑通固定参数组合模拟闭环。

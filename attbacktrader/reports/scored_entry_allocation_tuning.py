@@ -14,6 +14,7 @@ from typing import Any
 SCORED_ENTRY_ALLOCATION_TUNING_CONTRACT_SCHEMA = "attbacktrader.scored_entry_allocation_tuning_contract.v1"
 SCORED_ENTRY_ALLOCATION_TUNING_REPORT_SCHEMA = "attbacktrader.scored_entry_allocation_tuning_report.v1"
 FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA = "attbacktrader.fixed_parameter_scored_portfolio_smoke_run.v1"
+SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA = "attbacktrader.scored_portfolio_baseline_comparison.v1"
 STRATEGY_DECISION_EVENT_TABLE_SCHEMA = "attbacktrader.strategy_decision_event_table.v1"
 
 _SUPPORTED_MODES = {"dry-run", "smoke", "standard", "sensitivity"}
@@ -40,6 +41,23 @@ _FORBIDDEN_DECISION_EVENT_FIELDS = {
     "selected_buy",
 }
 _ACTIONABLE_INTENTS = {"enter", "exit", "exit_profit", "exit_loss", "add_on"}
+_CORE_PORTFOLIO_METRICS = (
+    "cumulative_return",
+    "annualized_return",
+    "max_drawdown",
+    "sharpe_ratio",
+    "trade_count",
+    "win_rate",
+    "profit_loss_ratio",
+)
+_STAGE_BASELINE_REGIMES = {
+    "stage_a": "broad_high_capacity_unscored_candidate_filling",
+    "stage_b": "realistic_constraints_fixed_stock_pool_order",
+}
+_UNSCORED_BASELINE_SCORE_GATE = {
+    "minimum_score_z": -1_000_000.0,
+    "minimum_score_quantile": 0.0,
+}
 
 
 def build_scored_entry_allocation_tuning_contract(
@@ -441,6 +459,7 @@ def run_fixed_parameter_scored_portfolio_smoke(
     training_events: Sequence[Mapping[str, Any]] | None = None,
     simulator_version: str = "scored_portfolio_simulator.v1",
     unscored_baseline: bool = False,
+    stage: str | None = None,
 ) -> dict[str, Any]:
     """Run the fixed-parameter smoke path from a cached decision-event table."""
 
@@ -478,6 +497,8 @@ def run_fixed_parameter_scored_portfolio_smoke(
     return {
         "schema": FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA,
         "fold_id": fold_id,
+        "stage": stage,
+        "result_type": "unscored_baseline" if unscored_baseline else "scored",
         "decision_cache_identity": _jsonable(dict(cache_identity)),
         "simulation_cache_identity": simulation_cache_identity,
         "fixed_parameters": parameters,
@@ -489,8 +510,71 @@ def run_fixed_parameter_scored_portfolio_smoke(
         "blocked_entries": _jsonable(simulation["blocked_entries"]),
         "closed_trades": _jsonable(simulation["closed_trades"]),
         "funnel": _jsonable(simulation["funnel"]),
+        "core_metrics": _core_portfolio_metrics(_as_mapping(simulation["metrics"])),
         "metrics": _jsonable(simulation["metrics"]),
         "simulation": _jsonable(simulation),
+    }
+
+
+def run_scored_portfolio_baseline_comparison(
+    decision_event_table: Mapping[str, Any],
+    *,
+    contract: Mapping[str, Any],
+    fold_id: str,
+    scorer_config: Mapping[str, Any],
+    training_events: Sequence[Mapping[str, Any]] | None = None,
+    score_gate_by_stage: Mapping[str, Mapping[str, Any]] | None = None,
+    portfolio_controls_by_stage: Mapping[str, Mapping[str, Any]] | None = None,
+    simulator_version: str = "scored_portfolio_simulator.v1",
+) -> dict[str, Any]:
+    """Run Stage A/B scored smoke results and matching unscored baselines."""
+
+    stage_results: dict[str, Any] = {}
+    for stage in ("stage_a", "stage_b"):
+        default_score_gate, default_controls = _stage_score_gate_and_controls(contract, stage)
+        score_gate = _stage_override_or_default(score_gate_by_stage, stage, default_score_gate)
+        portfolio_controls = _stage_override_or_default(portfolio_controls_by_stage, stage, default_controls)
+        scored = run_fixed_parameter_scored_portfolio_smoke(
+            decision_event_table,
+            fold_id=fold_id,
+            scorer_config=scorer_config,
+            score_gate=score_gate,
+            portfolio_controls=portfolio_controls,
+            training_events=training_events,
+            simulator_version=simulator_version,
+            unscored_baseline=False,
+            stage=stage,
+        )
+        baseline = run_fixed_parameter_scored_portfolio_smoke(
+            decision_event_table,
+            fold_id=fold_id,
+            scorer_config=scorer_config,
+            score_gate=_UNSCORED_BASELINE_SCORE_GATE,
+            portfolio_controls=portfolio_controls,
+            training_events=training_events,
+            simulator_version=simulator_version,
+            unscored_baseline=True,
+            stage=stage,
+        )
+        stage_results[stage] = {
+            "stage": stage,
+            "constraint_regime": _STAGE_BASELINE_REGIMES[stage],
+            "portfolio_controls": _jsonable(dict(portfolio_controls)),
+            "score_gate": _jsonable(dict(score_gate)),
+            "baseline_score_gate": dict(_UNSCORED_BASELINE_SCORE_GATE),
+            "scored": scored,
+            "unscored_baseline": baseline,
+            "core_metric_delta_vs_baseline": _core_metric_delta(
+                _as_mapping(scored["core_metrics"]),
+                _as_mapping(baseline["core_metrics"]),
+            ),
+        }
+
+    return {
+        "schema": SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA,
+        "fold_id": fold_id,
+        "core_metric_keys": list(_CORE_PORTFOLIO_METRICS),
+        "stages": stage_results,
     }
 
 
@@ -505,6 +589,22 @@ def write_fixed_parameter_scored_portfolio_smoke_run(
     payload = _jsonable(dict(smoke_run))
     artifacts = dict(_as_mapping(payload.get("artifacts")))
     artifacts["smoke_run_json"] = str(json_path)
+    payload["artifacts"] = artifacts
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return json_path, payload
+
+
+def write_scored_portfolio_baseline_comparison(
+    comparison: Mapping[str, Any],
+    *,
+    output_dir: str | Path,
+) -> tuple[Path, dict[str, Any]]:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    json_path = output_path / "scored_portfolio_baseline_comparison.json"
+    payload = _jsonable(dict(comparison))
+    artifacts = dict(_as_mapping(payload.get("artifacts")))
+    artifacts["baseline_comparison_json"] = str(json_path)
     payload["artifacts"] = artifacts
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return json_path, payload
@@ -815,6 +915,43 @@ def build_simulation_cache_identity(
         "schema": "attbacktrader.scored_portfolio_simulation_cache_identity.v1",
         "inputs": inputs,
         "cache_key": _stable_hash(inputs),
+    }
+
+
+def _stage_score_gate_and_controls(contract: Mapping[str, Any], stage: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    stages = _as_mapping(contract.get("stages"))
+    stage_config = _as_mapping(stages.get(stage))
+    if not stage_config:
+        raise ValueError(f"contract missing stage config: {stage}")
+    score_gate = dict(_as_mapping(stage_config.get("score_gate")))
+    portfolio_controls = dict(_as_mapping(stage_config.get("portfolio_controls")))
+    if not score_gate:
+        raise ValueError(f"contract stage missing score_gate: {stage}")
+    if not portfolio_controls:
+        raise ValueError(f"contract stage missing portfolio_controls: {stage}")
+    return score_gate, portfolio_controls
+
+
+def _stage_override_or_default(
+    overrides: Mapping[str, Mapping[str, Any]] | None,
+    stage: str,
+    default: Mapping[str, Any],
+) -> dict[str, Any]:
+    stage_override = _as_mapping(_as_mapping(overrides).get(stage))
+    return dict(stage_override) if stage_override else dict(default)
+
+
+def _core_portfolio_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
+    missing = [key for key in _CORE_PORTFOLIO_METRICS if key not in metrics]
+    if missing:
+        raise ValueError(f"portfolio metrics missing core fields: {', '.join(missing)}")
+    return {key: _jsonable(metrics[key]) for key in _CORE_PORTFOLIO_METRICS}
+
+
+def _core_metric_delta(scored: Mapping[str, Any], baseline: Mapping[str, Any]) -> dict[str, float]:
+    return {
+        key: _number_or_zero(scored.get(key)) - _number_or_zero(baseline.get(key))
+        for key in _CORE_PORTFOLIO_METRICS
     }
 
 
