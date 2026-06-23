@@ -123,6 +123,7 @@ setuptools.setup(
     # $ pip install -e .[dev,test]
     extras_require={
         'plotting':  ['matplotlib'],
+        'tuning':  ['optuna>=3,<5'],
     },
 
     # If there are data files included in your packages that need to be
@@ -166,6 +167,7 @@ setuptools.setup(
         'att-run-entry-factor-validation=attbacktrader.cli.entry_factor_validation_run:main',
         'att-run-entry-factor-validation-matrix=attbacktrader.cli.entry_factor_validation_matrix:main',
         'att-classify-entry-factor-validation=attbacktrader.cli.entry_factor_validation_classification:main',
+        'att-scored-entry-allocation-tuning=attbacktrader.cli.scored_entry_allocation_tuning:main',
         'att-strategy-environment-profile=attbacktrader.cli.strategy_environment_profile:main',
         'att-review-brief=attbacktrader.cli.review_brief:main',
         'att-review-expand-samples=attbacktrader.cli.review_expand_samples:main',

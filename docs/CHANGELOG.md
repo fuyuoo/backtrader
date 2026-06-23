@@ -13,6 +13,17 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-23 — 新增 Scored Entry Allocation Tuning 本地纵切
+
+- 需求：按 PRD 将 Scored Entry Allocation Tuning 全部实现为可测试的本地纵切，并使用 TDD 推进。
+- 改动：
+  - 新增 `attbacktrader/reports/scored_entry_allocation_tuning.py`：tuning 合同、walk-forward fold、Strategy Decision Event Table、cache identity、entry scoring、scored portfolio simulation、Stage A 搜索空间收窄、Stage B 推荐报告、Optuna optional gate、合同写出。
+  - 新增 `attbacktrader/cli/scored_entry_allocation_tuning.py`：`att-scored-entry-allocation-tuning --mode dry-run` 生成合同 JSON/Markdown。
+  - 更新 `setup.py`：新增 `tuning` extra（Optuna）和 console script。
+  - 新增 `tests/test_scored_entry_allocation_tuning.py`：覆盖 dry-run 合同、cache identity、禁存字段、评分器、组合模拟、Stage A/B 报告、simulation cache、Optuna gate 和 CLI 写出。
+  - 更新 `docs/FEATURES.md`：记录当前 attbacktrader tuning 能力与命令入口。
+- 影响：新增能力不触发真实 2015-2024 标准研究；默认测试使用合成数据，不依赖 Tushare 或长回测。
+
 ## 2026-05-09 — 新增 3 个可选入场过滤开关（个股均线多头 + 周线/月线 MACD 区间）
 
 - 需求：探索个股均线多空、周/月线 MACD 区间对入场质量的影响，需将这些条件参数化以便对比回测。

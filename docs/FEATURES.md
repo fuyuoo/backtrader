@@ -4,6 +4,34 @@
 > 仓库内 `backtrader/`（框架源码）与 `learn_backtrader/`（教程）不在本文档范围内。
 > 维护规则见 `CLAUDE.md` 的「文档维护规则」章节。
 
+## 0. 当前 attbacktrader 研究能力：Scored Entry Allocation Tuning
+
+`attbacktrader` 已新增 Scored Entry Allocation Tuning 的第一版本地可验证纵切，用于把入场因子验证证据推进到“候选同日竞争资金和持仓容量”的组合层研究。
+
+### 命令入口
+
+```bash
+att-scored-entry-allocation-tuning --mode dry-run --output-dir reports/scored-entry-allocation-tuning
+```
+
+dry-run 会写出：
+
+- `scored_entry_allocation_tuning_contract.json`
+- `scored_entry_allocation_tuning_contract.md`
+
+### 已覆盖能力
+
+- 生成 tuning 合同：列出 2015-2019→2020 至 2019-2023→2024 的 5 个 walk-forward fold。
+- 声明 Stage A / Stage B 默认 trial budget、score gate、组合约束和证据用途。
+- Strategy Decision Event Table：只缓存 actionable decision intents 和 decision-time evidence；禁止缓存 completed trades、cash、positions、equity curve、trial score、selected buys。
+- Signal cache identity：包含数据快照、股票池、策略信号参数、因子字段集、日期区间和事件 schema；明确排除 scorer weights 与 trial id。
+- Outcome-Calibrated Entry Score：支持单因子 bucket 权重、负向软惩罚、双因子 interaction 权重、训练窗口 z-score 与 quantile score gate；未声明为 bucket 的原始数值字段不直接参与打分。
+- Scored Portfolio Simulation：每个 trial 重新计算分数、排名、现金、持仓、equity curve、交易指标和 scored entry funnel；支持持仓上限、每日新开仓上限、行业每日新开仓上限、现金保留、board-lot、tradability 等约束。
+- Stage A elite 试验用于缩小 Stage B 搜索空间，不作为最终组合收益证据。
+- Stage B 报告输出 Pareto frontier，并选择 `balanced` / `aggressive` / `defensive` 推荐参数，同时记录低交易数拒绝原因。
+- Simulation cache identity 包含 signal cache identity、fold id、parameter hash、portfolio-control hash 和 simulator version。
+- Optuna 是可选 tuning 依赖；非 dry-run 模式缺失 Optuna 时明确提示 `pip install -e .[tuning]`，不静默降级。
+
 ## 1. 项目目标
 
 基于 backtrader 框架，构建一套面向 A 股的端到端量化回测流水线：
