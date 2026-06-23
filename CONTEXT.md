@@ -200,9 +200,37 @@ _Avoid_: Testing group
 A strategy run that can hold, enter, exit, and evaluate multiple stocks in one portfolio.
 _Avoid_: Multi-stock demo
 
+**Scored Portfolio Backtest**:
+A portfolio backtest that scores eligible same-day entry candidates using pre-entry evidence, orders them before sizing, and lets ranked candidates compete for cash and holding capacity.
+_Avoid_: Trade-sample backtest, offline trade deletion, post-trade factor ranking
+
+**Scored Portfolio Objective**:
+An evaluation lens for comparing scored portfolio backtest variants using portfolio return, drawdown risk, benchmark excess return, risk-adjusted return, trade quality, turnover, exposure, concentration, and cross-period stability together.
+_Avoid_: Total-return-only ranking, trade-sample factor score, in-sample leaderboard
+
+**Scored Portfolio Parameter Tuning**:
+A walk-forward parameter tuning process that searches scored portfolio backtest weights and portfolio controls on tuning windows, then evaluates the selected parameters on later test windows without retuning on test evidence.
+_Avoid_: Full-sample best parameter mining, trade-sample optimization, live rule promotion
+
+**Scored Entry Allocation Tuning**:
+The first scored portfolio tuning scope that optimizes entry-candidate scoring weights and portfolio allocation controls while keeping exit, add-on, scale-out, and lifecycle rules fixed.
+_Avoid_: Exit tuning, lifecycle optimization, all-parameter optimization
+
+**Trade-Sample Parameter Pre-Tuning**:
+A preliminary tuning pass that uses broad trade-sample style candidate coverage to estimate factor directions and narrow scoring-weight ranges before the parameters are validated under scored portfolio constraints.
+_Avoid_: Final portfolio validation, capital-realistic result, live parameter approval
+
 **Holding Count Cap**:
 The maximum number of different symbols that may be open at the same time in a strategy run. It can also be used as the denominator for deriving a per-symbol full position target.
 _Avoid_: Cash limit, fixed stock universe size, trade count
+
+**Scored Entry Minimum Score**:
+The score gate an otherwise eligible candidate must pass before it can compete for portfolio cash and holding capacity, usually combining an absolute score floor with a threshold derived from the tuning window's score distribution.
+_Avoid_: Exit condition, post-trade quality label, implicit buy threshold
+
+**Outcome-Calibrated Entry Score**:
+An entry candidate score whose factor contributions come from tuning-window portfolio or validation outcomes for factor buckets and combinations, not from the raw magnitude of an indicator value.
+_Avoid_: Raw indicator score, larger-value-is-better score, post-trade return label
 
 **Trade-Sample Backtest**:
 A backtest run configured to capture as many valid executed trade samples as possible, often with intentionally large notional capital so capital scarcity does not block entries. Its portfolio-level starting value, ending value, total return, and equity curve are not the primary evidence.
@@ -289,6 +317,10 @@ _Avoid_: Add-on opportunity, immediate full exit
 **Trade Intent**:
 A standardized decision emitted by an entry, profit-taking, or stop-loss method before sizing and execution, such as enter, exit profit, exit loss, hold, or avoid. It includes explanatory evidence such as the method name, reason code, signal values, risk price, target price, confidence, and any blocking constraint.
 _Avoid_: Order, buy/sell command
+
+**Strategy Decision Event Table**:
+A cached table of strategy decision intents and decision-time evidence for symbol-date rows, used as reusable simulation input before scoring, sizing, execution, and portfolio state determine actual trades.
+_Avoid_: Completed trade table, portfolio result cache, post-trade attribution table
 
 **Entry Attribution**:
 A post-run explanation that links a completed trade back to its entry date and the entry decision evidence that was visible on that date.
@@ -657,6 +689,14 @@ _Avoid_: Ranking model, signal-strength selector, portfolio optimizer
 **Entry Candidate Ordering**:
 A run-level rule for ordering same-day eligible entry candidates when the remaining holding-count capacity is smaller than the candidate set.
 _Avoid_: Hidden sort, implicit alpha model, nondeterministic candidate order
+
+**Soft Entry Factor Penalty**:
+A scoring treatment where an unfavorable pre-entry factor lowers an entry candidate's rank without automatically blocking the candidate from portfolio entry.
+_Avoid_: Entry filter, hard exclusion, post-trade risk label
+
+**Scored Entry Funnel**:
+A scored portfolio report view that counts eligible entry candidates through scoring, score gates, ranking capacity, cash checks, concentration limits, tradability checks, and actual execution so tuning thresholds can be adjusted from observed blockage reasons.
+_Avoid_: Completed trade count only, hidden rejection summary, post-trade attribution grouping
 
 **Net Trade View**:
 A primary trade-sample result view that includes configured fees, taxes, slippage, and execution costs.
