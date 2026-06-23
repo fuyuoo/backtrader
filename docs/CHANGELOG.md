@@ -13,6 +13,16 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-23 — 新增固定参数 Scored Portfolio smoke run
+
+- 需求：继续推进 `#23 Fixed-parameter scored portfolio smoke run`，用缓存的决策事件跑通固定参数组合模拟闭环。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `run_fixed_parameter_scored_portfolio_smoke` 和写出函数，消费 Strategy Decision Event Table，产出 selected entries、cash movements、position snapshots、equity curve、blocked entries、funnel 和 metrics。
+  - `attbacktrader/reports/__init__.py`：导出 smoke run schema、runner 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增离线 fixture，覆盖同日 score 排序、确定性 tie-break、score/capacity/holding/cash/tradability 阻塞、现金流水、持仓快照和 JSON artifact 写出。
+  - `docs/FEATURES.md`：更新 Scored Portfolio Simulation 能力说明。
+- 影响：为后续 Stage A/B tuning 提供固定参数下的组合级 smoke evidence；不访问实时数据，不改变策略执行逻辑。
+
 ## 2026-06-23 — 补齐 Strategy Decision Event Table 的 TradeIntent 输入路径
 
 - 需求：继续推进 `#22 Minimal decision-event cache for actionable intents`，让决策事件缓存能消费策略实际输出的意图对象。

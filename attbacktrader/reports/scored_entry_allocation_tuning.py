@@ -13,6 +13,7 @@ from typing import Any
 
 SCORED_ENTRY_ALLOCATION_TUNING_CONTRACT_SCHEMA = "attbacktrader.scored_entry_allocation_tuning_contract.v1"
 SCORED_ENTRY_ALLOCATION_TUNING_REPORT_SCHEMA = "attbacktrader.scored_entry_allocation_tuning_report.v1"
+FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA = "attbacktrader.fixed_parameter_scored_portfolio_smoke_run.v1"
 STRATEGY_DECISION_EVENT_TABLE_SCHEMA = "attbacktrader.strategy_decision_event_table.v1"
 
 _SUPPORTED_MODES = {"dry-run", "smoke", "standard", "sensitivity"}
@@ -430,6 +431,85 @@ def simulate_scored_portfolio(
     )
 
 
+def run_fixed_parameter_scored_portfolio_smoke(
+    decision_event_table: Mapping[str, Any],
+    *,
+    fold_id: str,
+    scorer_config: Mapping[str, Any],
+    score_gate: Mapping[str, Any],
+    portfolio_controls: Mapping[str, Any],
+    training_events: Sequence[Mapping[str, Any]] | None = None,
+    simulator_version: str = "scored_portfolio_simulator.v1",
+    unscored_baseline: bool = False,
+) -> dict[str, Any]:
+    """Run the fixed-parameter smoke path from a cached decision-event table."""
+
+    if decision_event_table.get("schema") != STRATEGY_DECISION_EVENT_TABLE_SCHEMA:
+        raise ValueError("decision_event_table must use the Strategy Decision Event Table schema")
+    cache_identity = _as_mapping(decision_event_table.get("cache_identity"))
+    signal_cache_key = cache_identity.get("cache_key")
+    if not signal_cache_key:
+        raise ValueError("decision_event_table.cache_identity.cache_key is required")
+
+    events = [_normalize_decision_event(event) for event in _as_sequence(decision_event_table.get("events"))]
+    if not events:
+        raise ValueError("decision_event_table.events cannot be empty for smoke simulation")
+    training = list(training_events) if training_events is not None else events
+    simulation = simulate_scored_portfolio(
+        events,
+        scorer_config=scorer_config,
+        training_events=training,
+        score_gate=score_gate,
+        portfolio_controls=portfolio_controls,
+        unscored_baseline=unscored_baseline,
+    )
+    parameters = {
+        "scorer_config": _jsonable(dict(scorer_config)),
+        "score_gate": _jsonable(dict(score_gate)),
+        "unscored_baseline": unscored_baseline,
+    }
+    simulation_cache_identity = build_simulation_cache_identity(
+        signal_cache_identity=str(signal_cache_key),
+        fold_id=fold_id,
+        parameters=parameters,
+        portfolio_controls=portfolio_controls,
+        simulator_version=simulator_version,
+    )
+    return {
+        "schema": FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA,
+        "fold_id": fold_id,
+        "decision_cache_identity": _jsonable(dict(cache_identity)),
+        "simulation_cache_identity": simulation_cache_identity,
+        "fixed_parameters": parameters,
+        "portfolio_controls": _jsonable(dict(portfolio_controls)),
+        "selected_entries": _jsonable(simulation["executed_entries"]),
+        "cash_movements": _jsonable(simulation["cash_movements"]),
+        "position_snapshots": _jsonable(simulation["position_snapshots"]),
+        "equity_curve": _jsonable(simulation["equity_curve"]),
+        "blocked_entries": _jsonable(simulation["blocked_entries"]),
+        "closed_trades": _jsonable(simulation["closed_trades"]),
+        "funnel": _jsonable(simulation["funnel"]),
+        "metrics": _jsonable(simulation["metrics"]),
+        "simulation": _jsonable(simulation),
+    }
+
+
+def write_fixed_parameter_scored_portfolio_smoke_run(
+    smoke_run: Mapping[str, Any],
+    *,
+    output_dir: str | Path,
+) -> tuple[Path, dict[str, Any]]:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    json_path = output_path / "fixed_parameter_scored_portfolio_smoke_run.json"
+    payload = _jsonable(dict(smoke_run))
+    artifacts = dict(_as_mapping(payload.get("artifacts")))
+    artifacts["smoke_run_json"] = str(json_path)
+    payload["artifacts"] = artifacts
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return json_path, payload
+
+
 def _simulate_scored_portfolio_from_normalized(
     *,
     normalized_events: Sequence[Mapping[str, Any]],
@@ -450,6 +530,8 @@ def _simulate_scored_portfolio_from_normalized(
     executed_entries: list[dict[str, Any]] = []
     blocked_entries: list[dict[str, Any]] = []
     closed_trades: list[dict[str, Any]] = []
+    cash_movements: list[dict[str, Any]] = []
+    position_snapshots: list[dict[str, Any]] = []
     equity_curve: list[dict[str, Any]] = []
     peak_value = float(initial_cash)
     total_buy_value = 0.0
@@ -472,6 +554,15 @@ def _simulate_scored_portfolio_from_normalized(
                 continue
             proceeds = position["quantity"] * float(event["price"])
             cash += proceeds
+            cash_movements.append(
+                {
+                    "trade_date": trade_date,
+                    "symbol": event["symbol"],
+                    "action": "sell",
+                    "amount": proceeds,
+                    "cash_after": cash,
+                }
+            )
             closed_trades.append(
                 {
                     "symbol": event["symbol"],
@@ -550,6 +641,15 @@ def _simulate_scored_portfolio_from_normalized(
 
             cash -= cost
             total_buy_value += cost
+            cash_movements.append(
+                {
+                    "trade_date": trade_date,
+                    "symbol": event["symbol"],
+                    "action": "buy",
+                    "amount": -cost,
+                    "cash_after": cash,
+                }
+            )
             positions[str(event["symbol"])] = {
                 "symbol": event["symbol"],
                 "entry_date": trade_date,
@@ -570,6 +670,7 @@ def _simulate_scored_portfolio_from_normalized(
             )
 
         snapshot = _equity_snapshot(trade_date, cash, positions, latest_prices, peak_value)
+        position_snapshots.append(_position_snapshot(trade_date, positions, latest_prices))
         peak_value = max(peak_value, snapshot["total_value"])
         equity_curve.append(snapshot)
 
@@ -588,6 +689,8 @@ def _simulate_scored_portfolio_from_normalized(
         "executed_entries": executed_entries,
         "blocked_entries": blocked_entries,
         "closed_trades": closed_trades,
+        "cash_movements": cash_movements,
+        "position_snapshots": position_snapshots,
         "equity_curve": equity_curve,
         "funnel": funnel,
         "metrics": _portfolio_metrics(
@@ -995,6 +1098,33 @@ def _equity_snapshot(
         "holding_count": len(positions),
         "exposure": position_value / total_value if total_value > 0 else 0.0,
         "cash_ratio": cash / total_value if total_value > 0 else 0.0,
+    }
+
+
+def _position_snapshot(
+    trade_date: str,
+    positions: Mapping[str, Mapping[str, Any]],
+    latest_prices: Mapping[str, float],
+) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for symbol, position in sorted(positions.items()):
+        market_price = float(latest_prices.get(symbol, position["entry_price"]))
+        quantity = int(position["quantity"])
+        rows.append(
+            {
+                "symbol": symbol,
+                "entry_date": position["entry_date"],
+                "entry_price": position["entry_price"],
+                "quantity": quantity,
+                "industry": position.get("industry"),
+                "market_price": market_price,
+                "market_value": quantity * market_price,
+            }
+        )
+    return {
+        "trade_date": trade_date,
+        "holding_count": len(rows),
+        "positions": rows,
     }
 
 

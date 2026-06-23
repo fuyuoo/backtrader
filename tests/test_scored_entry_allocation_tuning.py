@@ -6,6 +6,7 @@ import pytest
 
 from attbacktrader.cli import scored_entry_allocation_tuning as tuning_cli
 from attbacktrader.reports import (
+    FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA,
     SCORED_ENTRY_ALLOCATION_TUNING_CONTRACT_SCHEMA,
     STRATEGY_DECISION_EVENT_TABLE_SCHEMA,
     build_scored_entry_allocation_tuning_report,
@@ -16,8 +17,10 @@ from attbacktrader.reports import (
     build_strategy_decision_event_table,
     build_scored_entry_allocation_tuning_contract,
     require_optuna_for_tuning,
+    run_fixed_parameter_scored_portfolio_smoke,
     score_entry_candidates,
     simulate_scored_portfolio,
+    write_fixed_parameter_scored_portfolio_smoke_run,
     write_scored_entry_allocation_tuning_contract,
 )
 from attbacktrader.strategies import TradeIntent, TradeIntentType
@@ -301,6 +304,99 @@ def test_scored_portfolio_simulation_ranks_candidates_and_records_blockage_funne
     assert result["equity_curve"][-1]["holding_count"] == 2
 
 
+def test_fixed_parameter_scored_portfolio_smoke_run_consumes_decision_cache(tmp_path: Path) -> None:
+    table = build_strategy_decision_event_table(
+        [
+            _rank_event("000001.SZ", rank_bucket="top", industry="bank", stock_pool_order=1),
+            _rank_event("000002.SZ", rank_bucket="top", industry="tech", stock_pool_order=2),
+            _rank_event("000003.SZ", rank_bucket="top", industry="medicine", stock_pool_order=3),
+            _rank_event("000004.SZ", rank_bucket="low", industry="retail", stock_pool_order=4),
+            _rank_event("000005.SZ", rank_bucket="top", industry="energy", stock_pool_order=1, trade_date="2020-01-03"),
+            _rank_event("000006.SZ", rank_bucket="top", industry="auto", stock_pool_order=2, trade_date="2020-01-03"),
+            {
+                "symbol": "000002.SZ",
+                "trade_date": "2020-01-04",
+                "intent_type": "exit_profit",
+                "price": 10.0,
+                "industry": "tech",
+                "stock_pool_order": 0,
+                "tradable": True,
+                "evidence": {"exit": "profit"},
+            },
+            _rank_event("000001.SZ", rank_bucket="top", industry="bank", stock_pool_order=1, trade_date="2020-01-04", price=50.0),
+            _rank_event(
+                "000007.SZ",
+                rank_bucket="top",
+                industry="utility",
+                stock_pool_order=2,
+                trade_date="2020-01-04",
+                tradable=False,
+            ),
+            _rank_event("000008.SZ", rank_bucket="top", industry="broker", stock_pool_order=3, trade_date="2020-01-04"),
+        ],
+        cache_inputs=_decision_cache_inputs(),
+    )
+
+    smoke_run = run_fixed_parameter_scored_portfolio_smoke(
+        table,
+        fold_id="train-2015-2019_test-2020",
+        scorer_config={"factor_weights": {"rank_bucket": {"top": 5.0, "low": -5.0}}},
+        score_gate={"minimum_score_z": 0.0, "minimum_score_quantile": 0.50},
+        portfolio_controls={
+            "initial_cash": 10_000,
+            "max_holding_count": 3,
+            "max_new_positions_per_day": 2,
+            "cash_reserve_ratio": 0.10,
+            "board_lot_size": 100,
+        },
+    )
+
+    assert smoke_run["schema"] == FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA
+    assert smoke_run["decision_cache_identity"] == table["cache_identity"]
+    assert smoke_run["simulation_cache_identity"]["inputs"]["fold_id"] == "train-2015-2019_test-2020"
+    assert [entry["symbol"] for entry in smoke_run["selected_entries"]] == [
+        "000001.SZ",
+        "000002.SZ",
+        "000005.SZ",
+    ]
+    assert [entry["cost"] for entry in smoke_run["selected_entries"]] == [3_000.0, 3_000.0, 3_000.0]
+    assert [movement["action"] for movement in smoke_run["cash_movements"]] == ["buy", "buy", "buy", "sell"]
+    assert smoke_run["cash_movements"][-1] == {
+        "trade_date": "2020-01-04",
+        "symbol": "000002.SZ",
+        "action": "sell",
+        "amount": 3_000.0,
+        "cash_after": 4_000.0,
+    }
+    assert smoke_run["equity_curve"][-1]["total_value"] == pytest.approx(22_000)
+    assert smoke_run["position_snapshots"][-1]["holding_count"] == 2
+    assert {position["symbol"] for position in smoke_run["position_snapshots"][-1]["positions"]} == {
+        "000001.SZ",
+        "000005.SZ",
+    }
+    assert smoke_run["funnel"]["raw_entry_candidates"] == 9
+    assert smoke_run["funnel"]["score_gate_blocked_candidates"] == 1
+    assert smoke_run["funnel"]["max_new_position_blocked_candidates"] == 1
+    assert smoke_run["funnel"]["holding_cap_blocked_candidates"] == 1
+    assert smoke_run["funnel"]["tradability_blocked_candidates"] == 1
+    assert smoke_run["funnel"]["cash_blocked_candidates"] == 1
+    assert smoke_run["funnel"]["executed_entries"] == 3
+    assert [(entry["symbol"], entry["blocked_by"]) for entry in smoke_run["blocked_entries"]] == [
+        ("000003.SZ", "MAX_NEW_POSITIONS_PER_DAY"),
+        ("000004.SZ", "SCORE_GATE"),
+        ("000006.SZ", "MAX_HOLDING_COUNT"),
+        ("000001.SZ", "ALREADY_HELD"),
+        ("000007.SZ", "NOT_TRADABLE"),
+        ("000008.SZ", "INSUFFICIENT_CASH"),
+    ]
+
+    json_path, payload = write_fixed_parameter_scored_portfolio_smoke_run(smoke_run, output_dir=tmp_path)
+
+    assert json_path.exists()
+    assert payload["artifacts"]["smoke_run_json"] == str(json_path)
+    assert json.loads(json_path.read_text(encoding="utf-8"))["schema"] == FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA
+
+
 def test_stage_a_narrows_stage_b_ranges_and_report_selects_recommendations() -> None:
     stage_a_trials = [
         _trial("a1", annualized_return=0.20, sharpe_ratio=1.4, excess=0.10, max_drawdown=0.12, weights={"f1": 1.0, "f2": -0.8, "f3": -0.2}),
@@ -442,6 +538,7 @@ def _rank_event(
     stock_pool_order: int,
     trade_date: str = "2020-01-02",
     price: float = 10.0,
+    tradable: bool = True,
 ) -> dict:
     return {
         "symbol": symbol,
@@ -450,7 +547,7 @@ def _rank_event(
         "price": price,
         "industry": industry,
         "stock_pool_order": stock_pool_order,
-        "tradable": True,
+        "tradable": tradable,
         "evidence": {"rank_bucket": rank_bucket},
     }
 

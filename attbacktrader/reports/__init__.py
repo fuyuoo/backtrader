@@ -164,6 +164,7 @@ from .entry_factor_pairwise_combination_manifest import (
     write_entry_factor_pairwise_combination_manifest,
 )
 from .scored_entry_allocation_tuning import (
+    FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA,
     SCORED_ENTRY_ALLOCATION_TUNING_CONTRACT_SCHEMA,
     SCORED_ENTRY_ALLOCATION_TUNING_REPORT_SCHEMA,
     STRATEGY_DECISION_EVENT_TABLE_SCHEMA,
@@ -177,8 +178,10 @@ from .scored_entry_allocation_tuning import (
     build_walk_forward_folds,
     require_optuna_for_tuning,
     render_scored_entry_allocation_tuning_contract_markdown,
+    run_fixed_parameter_scored_portfolio_smoke,
     score_entry_candidates,
     simulate_scored_portfolio,
+    write_fixed_parameter_scored_portfolio_smoke_run,
     write_scored_entry_allocation_tuning_contract,
 )
 from .attribution_wide_samples import (
@@ -552,6 +555,7 @@ __all__ = [
     "build_entry_factor_combination_manifest",
     "build_entry_factor_combination_validation_report",
     "build_entry_factor_pairwise_combination_manifest",
+    "FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA",
     "build_scored_entry_allocation_tuning_report",
     "build_simulation_cache_identity",
     "build_stage_b_search_space_from_stage_a",
@@ -562,8 +566,10 @@ __all__ = [
     "build_walk_forward_folds",
     "require_optuna_for_tuning",
     "render_scored_entry_allocation_tuning_contract_markdown",
+    "run_fixed_parameter_scored_portfolio_smoke",
     "score_entry_candidates",
     "simulate_scored_portfolio",
+    "write_fixed_parameter_scored_portfolio_smoke_run",
     "write_scored_entry_allocation_tuning_contract",
     "build_ai_review_brief",
     "build_ai_review_findings",

@@ -27,6 +27,7 @@ dry-run 会写出：
 - Signal cache identity：包含数据快照、股票池、策略信号参数、因子字段集、日期区间和事件 schema；明确排除 scorer weights 与 trial id。
 - Outcome-Calibrated Entry Score：支持单因子 bucket 权重、负向软惩罚、双因子 interaction 权重、训练窗口 z-score 与 quantile score gate；未声明为 bucket 的原始数值字段不直接参与打分。
 - Scored Portfolio Simulation：每个 trial 重新计算分数、排名、现金、持仓、equity curve、交易指标和 scored entry funnel；支持持仓上限、每日新开仓上限、行业每日新开仓上限、现金保留、board-lot、tradability 等约束。
+- Fixed-parameter Scored Portfolio smoke run：可直接消费 Strategy Decision Event Table，使用固定 scorer 与 portfolio controls 产出 selected entries、cash movements、position snapshots、equity curve、blocked entries、funnel 和 metrics。
 - Stage A elite 试验用于缩小 Stage B 搜索空间，不作为最终组合收益证据。
 - Stage B 报告输出 Pareto frontier，并选择 `balanced` / `aggressive` / `defensive` 推荐参数，同时记录低交易数拒绝原因。
 - Simulation cache identity 包含 signal cache identity、fold id、parameter hash、portfolio-control hash 和 simulator version。
