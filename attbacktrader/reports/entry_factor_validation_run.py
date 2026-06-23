@@ -35,8 +35,10 @@ def build_entry_factor_validation_run_record(
         "schema": ENTRY_FACTOR_VALIDATION_RUN_SCHEMA,
         "manifest": {
             "base_run_id": manifest.get("base_run_id"),
+            "source_mode": manifest.get("source_mode"),
             "source_discovery_run_id": manifest.get("source_discovery_run_id"),
             "source_bayesian_factor_discovery": manifest.get("source_bayesian_factor_discovery"),
+            "source_screening_layers": manifest.get("source_screening_layers"),
             "source_baseline_run_plan": manifest.get("source_baseline_run_plan"),
         },
         "candidate": _candidate_summary(candidate),
@@ -50,11 +52,7 @@ def build_entry_factor_validation_run_record(
         "run_summary": compact_summary,
         "artifacts": _artifact_summary(artifact_paths),
         "validation_output_dir": str(validation_output_dir),
-        "rules": [
-            "该记录只代表一个入场候选因子的真实 RunPlan 验证，不代表多因子组合优化结果。",
-            "候选来自 manifest 的 tradable_pre_entry 排名；positive 使用 keep，negative 使用 exclude。",
-            "执行层复用普通 RunPlan artifact，验证记录只保存候选、过滤条件、摘要指标和路径索引。",
-        ],
+        "rules": _validation_rules(candidate, entry_filter),
     }
 
 
@@ -67,10 +65,11 @@ def render_entry_factor_validation_run_markdown_zh(record: Mapping[str, Any]) ->
     artifacts = _as_mapping(record.get("artifacts"))
     entry_filter = _as_mapping(record.get("entry_filter"))
     conditions = _as_sequence(entry_filter.get("conditions"))
-    first_condition = _as_mapping(conditions[0]) if conditions else {}
 
+    is_combination = _is_combination_candidate(candidate, entry_filter)
+    title = "入场因子组合真实验证" if is_combination else "入场单因子真实验证"
     lines = [
-        "# 入场单因子真实验证",
+        f"# {title}",
         "",
         f"- schema: `{record.get('schema')}`",
         f"- run_id: `{run.get('id')}`",
@@ -85,27 +84,35 @@ def render_entry_factor_validation_run_markdown_zh(record: Mapping[str, Any]) ->
         "",
         "| field | operator | value | action | missing_policy |",
         "|---|---|---|---|---|",
-        (
-            "| "
-            f"`{_escape_cell(first_condition.get('field'))}` | "
-            f"`{_escape_cell(first_condition.get('operator'))}` | "
-            f"{_escape_cell(first_condition.get('value'))} | "
-            f"`{_escape_cell(first_condition.get('action'))}` | "
-            f"`{_escape_cell(entry_filter.get('missing_policy'))}` |"
-        ),
-        "",
-        "## 结果摘要",
-        "",
-        f"- 累计收益: {_format_percent(metrics.get('cumulative_return'))}",
-        f"- 最大回撤: {_format_percent(metrics.get('max_drawdown'))}",
-        f"- 交易数: {_format_int(metrics.get('trade_count'))}",
-        f"- 胜率: {_format_percent(metrics.get('win_rate'))}",
-        f"- 盈亏比: {_format_number(metrics.get('profit_loss_ratio'))}",
-        "",
-        "## 路径",
-        "",
-        f"- run_plan: `{record.get('run_plan_path')}`",
     ]
+    for condition in conditions:
+        condition_map = _as_mapping(condition)
+        lines.append(
+            "| "
+            f"`{_escape_cell(condition_map.get('field'))}` | "
+            f"`{_escape_cell(condition_map.get('operator'))}` | "
+            f"{_escape_cell(condition_map.get('value'))} | "
+            f"`{_escape_cell(condition_map.get('action'))}` | "
+            f"`{_escape_cell(entry_filter.get('missing_policy'))}` |"
+        )
+    if not conditions:
+        lines.append("|  |  |  |  |  |")
+    lines.extend(
+        [
+            "",
+            "## 结果摘要",
+            "",
+            f"- 累计收益: {_format_percent(metrics.get('cumulative_return'))}",
+            f"- 最大回撤: {_format_percent(metrics.get('max_drawdown'))}",
+            f"- 交易数: {_format_int(metrics.get('trade_count'))}",
+            f"- 胜率: {_format_percent(metrics.get('win_rate'))}",
+            f"- 盈亏比: {_format_number(metrics.get('profit_loss_ratio'))}",
+            "",
+            "## 路径",
+            "",
+            f"- run_plan: `{record.get('run_plan_path')}`",
+        ]
+    )
     for label in (
         "output_dir",
         "report_zh",
@@ -149,6 +156,9 @@ def _candidate_summary(candidate: Mapping[str, Any]) -> dict[str, Any]:
         "candidate_index",
         "candidate_rank",
         "view",
+        "combo_kind",
+        "anchor_layer",
+        "screening_layers",
         "direction",
         "action",
         "field_key",
@@ -159,10 +169,32 @@ def _candidate_summary(candidate: Mapping[str, Any]) -> dict[str, Any]:
         "sample_count",
         "flags",
         "filter_condition",
+        "filter_conditions",
+        "conditions",
+        "source_factors",
         "run_id",
         "run_plan_path",
     )
     return {key: _jsonable(candidate.get(key)) for key in keys if key in candidate}
+
+
+def _validation_rules(candidate: Mapping[str, Any], entry_filter: Mapping[str, Any]) -> list[str]:
+    if _is_combination_candidate(candidate, entry_filter):
+        return [
+            "该记录代表一个入场因子组合的真实 RunPlan 验证，不代表永久策略规则。",
+            "候选来自 manifest 的组合条件；每个条件沿用来源因子的 keep/exclude 动作。",
+            "执行层复用普通 RunPlan artifact，验证记录只保存候选、过滤条件、摘要指标和路径索引。",
+        ]
+    return [
+        "该记录只代表一个入场候选因子的真实 RunPlan 验证，不代表多因子组合优化结果。",
+        "候选来自 manifest 的 tradable_pre_entry 排名；positive 使用 keep，negative 使用 exclude。",
+        "执行层复用普通 RunPlan artifact，验证记录只保存候选、过滤条件、摘要指标和路径索引。",
+    ]
+
+
+def _is_combination_candidate(candidate: Mapping[str, Any], entry_filter: Mapping[str, Any]) -> bool:
+    conditions = _as_sequence(entry_filter.get("conditions"))
+    return candidate.get("action") in {"entry_filter_combo", "entry_filter_pair"} or len(conditions) > 1
 
 
 def _artifact_summary(artifact_paths: Any | None) -> dict[str, str]:

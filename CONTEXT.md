@@ -471,8 +471,12 @@ A validation matrix that tests each candidate tradable pre-entry factor as its o
 _Avoid_: Sequential lock-in, offline-only screening, multi-factor search
 
 **Stable Entry Factor Combination Validation**:
-A second-stage validation that combines only factors that survived single-factor real validation and re-runs the strategy after each added filter. It checks whether individually useful entry factors still improve the strategy when combined.
+A second-stage validation that combines only factors that survived single-factor real validation and re-runs the strategy after each added filter in a stepwise sequence. It checks whether individually useful entry factors still improve the strategy when added to the existing prefix.
 _Avoid_: Exhaustive combination search, unvalidated factor stacking, permanent default rule
+
+**A-Anchored Pairwise Entry Factor Combination Validation**:
+A second-stage validation that builds independent two-factor entry-filter combinations from the A/B/C screening layers, where every tested pair must include at least one A-layer core factor. It is used to screen candidate entry-factor interactions without turning the result into a permanent strategy rule.
+_Avoid_: Stepwise prefix validation, exhaustive multi-factor search, unanchored factor stacking, permanent default rule
 
 **Full-Lifecycle Attribution Diagnosis**:
 A comprehensive Bayesian attribution view that may include entry, exit, holding-path, post-exit, and scale-out evidence to explain where a strategy works or fails across the trade lifecycle. It is diagnostic evidence and must not be treated as an entry signal when it uses information unavailable at entry time.

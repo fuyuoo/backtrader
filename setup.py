@@ -162,6 +162,7 @@ setuptools.setup(
         'att-single-factor-attribution=attbacktrader.cli.single_factor_attribution:main',
         'att-bayesian-factor-discovery=attbacktrader.cli.bayesian_factor_discovery:main',
         'att-generate-entry-factor-validation-manifest=attbacktrader.cli.entry_factor_validation_manifest:main',
+        'att-generate-entry-factor-pairwise-combination-manifest=attbacktrader.cli.entry_factor_pairwise_combination_manifest:main',
         'att-run-entry-factor-validation=attbacktrader.cli.entry_factor_validation_run:main',
         'att-run-entry-factor-validation-matrix=attbacktrader.cli.entry_factor_validation_matrix:main',
         'att-classify-entry-factor-validation=attbacktrader.cli.entry_factor_validation_classification:main',

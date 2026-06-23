@@ -156,6 +156,13 @@ from .entry_factor_combination_validation import (
     write_entry_factor_combination_manifest,
     write_entry_factor_combination_validation_report,
 )
+from .entry_factor_pairwise_combination_manifest import (
+    ENTRY_FACTOR_PAIRWISE_COMBINATION_MANIFEST_SCHEMA,
+    build_entry_factor_pairwise_combination_manifest,
+    render_entry_factor_pairwise_combination_manifest_markdown_zh,
+    safe_entry_factor_pairwise_combination_manifest_dir_name,
+    write_entry_factor_pairwise_combination_manifest,
+)
 from .attribution_wide_samples import (
     ATTRIBUTION_FIELD_INDEX_SCHEMA,
     ATTRIBUTION_WIDE_SAMPLES_SCHEMA,
@@ -408,6 +415,7 @@ __all__ = [
     "ENTRY_FACTOR_VALIDATION_CLASSIFICATION_SCHEMA",
     "ENTRY_FACTOR_COMBINATION_MANIFEST_SCHEMA",
     "ENTRY_FACTOR_COMBINATION_VALIDATION_SCHEMA",
+    "ENTRY_FACTOR_PAIRWISE_COMBINATION_MANIFEST_SCHEMA",
     "EntryFactorValidationParityMismatch",
     "EntryFactorValidationParityReport",
     "MARKET_TYPE_SUMMARY_SCHEMA",
@@ -522,6 +530,7 @@ __all__ = [
     "build_entry_factor_validation_classification",
     "build_entry_factor_combination_manifest",
     "build_entry_factor_combination_validation_report",
+    "build_entry_factor_pairwise_combination_manifest",
     "build_ai_review_brief",
     "build_ai_review_findings",
     "build_ai_review_golden_check",
@@ -586,6 +595,7 @@ __all__ = [
     "render_entry_factor_validation_classification_markdown_zh",
     "render_entry_factor_combination_manifest_markdown_zh",
     "render_entry_factor_combination_validation_markdown_zh",
+    "render_entry_factor_pairwise_combination_manifest_markdown_zh",
     "render_attribution_summary_markdown_zh",
     "render_environment_fit_markdown_zh",
     "render_environment_fit_comparison_markdown_zh",
@@ -645,6 +655,7 @@ __all__ = [
     "safe_entry_factor_validation_manifest_dir_name",
     "safe_entry_factor_validation_classification_dir_name",
     "safe_entry_factor_combination_validation_dir_name",
+    "safe_entry_factor_pairwise_combination_manifest_dir_name",
     "to_jsonable",
     "write_ai_review_brief",
     "write_ai_review_findings",
@@ -661,6 +672,7 @@ __all__ = [
     "write_entry_factor_validation_classification",
     "write_entry_factor_combination_manifest",
     "write_entry_factor_combination_validation_report",
+    "write_entry_factor_pairwise_combination_manifest",
     "write_attribution_summary",
     "write_environment_fit_report",
     "write_environment_fit_comparison",
