@@ -13,6 +13,16 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-24 — 补齐 score gate 训练窗泄漏护栏
+
+- 需求：继续推进 `#25 Scored entry gates and cache leakage guards`，确保 score gate 阈值只由训练窗拟合，测试窗不能影响阈值、权重或缓存构造。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `fit_training_score_gate_statistics` 与 `apply_fitted_score_gate_to_candidates`，将训练窗阈值拟合和候选打分应用拆开；拟合入口会拒绝带 `test/oos/out_of_sample/validation` 窗口标记的事件。
+  - `attbacktrader/reports/__init__.py`：导出训练窗 score gate 拟合与应用入口。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增确定性测试，验证训练窗 mean/std/quantile/z-threshold 被复用于测试窗，并捕获使用测试窗候选拟合阈值的错误；扩展 decision cache identity 测试，确认 scorer weights、trial id、score gate 和 score thresholds 不进入决策缓存 key。
+  - `docs/FEATURES.md`：更新 score gate 与缓存泄漏护栏说明。
+- 影响：后续 Stage A/B tuning 可复用已拟合训练窗阈值，降低样本外测试窗泄漏和参数过拟合风险。
+
 ## 2026-06-23 — 新增 scored/unscored baseline comparison
 
 - 需求：继续推进 `#24 Unscored baselines and core metrics`，为 scored portfolio smoke path 增加匹配的不打分基线和核心组合指标。

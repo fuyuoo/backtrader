@@ -17,6 +17,8 @@ from attbacktrader.reports import (
     build_strategy_decision_cache_identity,
     build_strategy_decision_event_table,
     build_scored_entry_allocation_tuning_contract,
+    apply_fitted_score_gate_to_candidates,
+    fit_training_score_gate_statistics,
     require_optuna_for_tuning,
     run_fixed_parameter_scored_portfolio_smoke,
     run_scored_portfolio_baseline_comparison,
@@ -74,10 +76,14 @@ def test_strategy_decision_event_table_cache_identity_excludes_trial_specific_pa
         "event_schema_version": 1,
         "scorer_weights": {"symbol.ma.trend_state=bullish": 2.0},
         "trial_id": "stage-b-001",
+        "score_gate": {"minimum_score_z": 0.75, "minimum_score_quantile": 0.70},
+        "score_thresholds": {"threshold": 1.5},
     }
     changed_trial_inputs = dict(base_cache_inputs)
     changed_trial_inputs["scorer_weights"] = {"symbol.ma.trend_state=bullish": -7.0}
     changed_trial_inputs["trial_id"] = "stage-b-999"
+    changed_trial_inputs["score_gate"] = {"minimum_score_z": 9.99, "minimum_score_quantile": 0.99}
+    changed_trial_inputs["score_thresholds"] = {"threshold": 99.0}
 
     identity = build_strategy_decision_cache_identity(base_cache_inputs)
     changed_identity = build_strategy_decision_cache_identity(changed_trial_inputs)
@@ -85,6 +91,9 @@ def test_strategy_decision_event_table_cache_identity_excludes_trial_specific_pa
     assert identity == changed_identity
     assert "scorer_weights" not in identity["inputs"]
     assert "trial_id" not in identity["inputs"]
+    assert "score_gate" not in identity["inputs"]
+    assert "score_thresholds" not in identity["inputs"]
+    assert {"scorer_weights", "trial_id", "score_gate", "score_thresholds"} <= set(identity["excluded_fields"])
 
     table = build_strategy_decision_event_table(
         [
@@ -266,7 +275,50 @@ def test_score_entry_candidates_uses_bucket_weights_interactions_and_training_ga
     assert rows_by_symbol["000003.SZ"]["score"] == pytest.approx(0.0)
     assert rows_by_symbol["000003.SZ"]["score_gate_passed"] is False
     assert "raw_momentum" not in rows_by_symbol["000001.SZ"]["contributions"]["factor_weights"]
-    assert scored["score_gate"]["derived_from"] == "training_events"
+    assert scored["score_gate"]["derived_from"] == "training_window"
+
+
+def test_score_gate_statistics_are_fitted_from_training_window_and_reused_for_test_candidates() -> None:
+    scorer_config = {"factor_weights": {"rank_bucket": {"weak": 0.0, "mid": 2.0, "strong": 4.0}}}
+    training_events = [
+        _rank_event("000001.SZ", rank_bucket="weak", industry="bank", stock_pool_order=1, window="training"),
+        _rank_event("000002.SZ", rank_bucket="mid", industry="bank", stock_pool_order=2, window="training"),
+        _rank_event("000003.SZ", rank_bucket="strong", industry="bank", stock_pool_order=3, window="training"),
+    ]
+    test_events = [
+        _rank_event("000004.SZ", rank_bucket="weak", industry="tech", stock_pool_order=1, trade_date="2020-02-03", window="test"),
+        _rank_event("000005.SZ", rank_bucket="strong", industry="tech", stock_pool_order=2, trade_date="2020-02-03", window="test"),
+    ]
+
+    fitted_gate = fit_training_score_gate_statistics(
+        training_events,
+        scorer_config=scorer_config,
+        score_gate={"minimum_score_z": 0.75, "minimum_score_quantile": 0.70},
+    )
+    scored = apply_fitted_score_gate_to_candidates(
+        test_events,
+        scorer_config=scorer_config,
+        fitted_score_gate=fitted_gate,
+    )
+
+    assert fitted_gate["source_window"] == "training"
+    assert fitted_gate["source_event_count"] == 3
+    assert fitted_gate["mean"] == pytest.approx(2.0)
+    assert fitted_gate["std"] == pytest.approx((8 / 3) ** 0.5)
+    assert fitted_gate["quantile_threshold"] == pytest.approx(2.8)
+    assert fitted_gate["z_threshold"] == pytest.approx(2.0 + 0.75 * ((8 / 3) ** 0.5))
+    assert scored["score_gate"] == fitted_gate
+    assert {row["symbol"]: row["score_gate_passed"] for row in scored["rows"]} == {
+        "000004.SZ": False,
+        "000005.SZ": True,
+    }
+
+    with pytest.raises(ValueError, match="test-window candidates cannot be used to fit score gate thresholds"):
+        fit_training_score_gate_statistics(
+            test_events,
+            scorer_config=scorer_config,
+            score_gate={"minimum_score_z": 0.75, "minimum_score_quantile": 0.70},
+        )
 
 
 def test_scored_portfolio_simulation_ranks_candidates_and_records_blockage_funnel() -> None:
@@ -657,8 +709,9 @@ def _rank_event(
     trade_date: str = "2020-01-02",
     price: float = 10.0,
     tradable: bool = True,
+    window: str | None = None,
 ) -> dict:
-    return {
+    event = {
         "symbol": symbol,
         "trade_date": trade_date,
         "intent_type": "enter",
@@ -668,6 +721,9 @@ def _rank_event(
         "tradable": tradable,
         "evidence": {"rank_bucket": rank_bucket},
     }
+    if window is not None:
+        event["window"] = window
+    return event
 
 
 def _exit_event(

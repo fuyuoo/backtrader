@@ -27,7 +27,14 @@ _DECISION_CACHE_KEY_FIELDS = (
     "date_range",
     "event_schema_version",
 )
-_TRIAL_SPECIFIC_CACHE_FIELDS = {"scorer_weights", "trial_id"}
+_TRIAL_SPECIFIC_CACHE_FIELDS = {
+    "scorer_weights",
+    "trial_id",
+    "score_gate",
+    "score_thresholds",
+    "minimum_score_z",
+    "minimum_score_quantile",
+}
 _FORBIDDEN_DECISION_EVENT_FIELDS = {
     "completed_trade_id",
     "completed_trade",
@@ -58,6 +65,8 @@ _UNSCORED_BASELINE_SCORE_GATE = {
     "minimum_score_z": -1_000_000.0,
     "minimum_score_quantile": 0.0,
 }
+_WINDOW_ROLE_FIELDS = ("window", "fold_role", "sample_role", "fold_window")
+_TEST_WINDOW_ROLE_VALUES = {"test", "oos", "out_of_sample", "validation"}
 
 
 def build_scored_entry_allocation_tuning_contract(
@@ -361,9 +370,29 @@ def score_entry_candidates(
 ) -> dict[str, Any]:
     """Score entry candidates and apply training-window z-score/quantile gates."""
 
+    fitted_gate = fit_training_score_gate_statistics(
+        training_events,
+        scorer_config=scorer_config,
+        score_gate=score_gate,
+    )
+    return apply_fitted_score_gate_to_candidates(
+        events,
+        scorer_config=scorer_config,
+        fitted_score_gate=fitted_gate,
+    )
+
+
+def fit_training_score_gate_statistics(
+    training_events: Sequence[Mapping[str, Any]],
+    *,
+    scorer_config: Mapping[str, Any],
+    score_gate: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Fit score-gate statistics from training-window events only."""
+
     if not training_events:
         raise ValueError("training_events cannot be empty")
-
+    _assert_no_test_window_threshold_source(training_events)
     training_scores = [_score_event(event, scorer_config)["score"] for event in training_events]
     stats = _score_distribution(training_scores)
     z_floor = _float_required(score_gate, "minimum_score_z")
@@ -374,6 +403,29 @@ def score_entry_candidates(
     z_threshold = stats["mean"] + z_floor * stats["std"]
     threshold = max(z_threshold, quantile_threshold)
 
+    return {
+        "minimum_score_z": z_floor,
+        "minimum_score_quantile": quantile,
+        "mean": stats["mean"],
+        "std": stats["std"],
+        "z_threshold": z_threshold,
+        "quantile_threshold": quantile_threshold,
+        "threshold": threshold,
+        "derived_from": "training_window",
+        "source_event_count": len(training_events),
+        "source_window": "training",
+    }
+
+
+def apply_fitted_score_gate_to_candidates(
+    events: Sequence[Mapping[str, Any]],
+    *,
+    scorer_config: Mapping[str, Any],
+    fitted_score_gate: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Score candidate events using pre-fitted training-window score-gate statistics."""
+
+    threshold = _float_required(fitted_score_gate, "threshold")
     rows: list[dict[str, Any]] = []
     for event in events:
         scored = _score_event(event, scorer_config)
@@ -387,16 +439,7 @@ def score_entry_candidates(
         )
     rows.sort(key=lambda row: (-float(row["score"]), str(row["trade_date"]), int(row["stock_pool_order"]), str(row["symbol"])))
     return {
-        "score_gate": {
-            "minimum_score_z": z_floor,
-            "minimum_score_quantile": quantile,
-            "mean": stats["mean"],
-            "std": stats["std"],
-            "z_threshold": z_threshold,
-            "quantile_threshold": quantile_threshold,
-            "threshold": threshold,
-            "derived_from": "training_events",
-        },
+        "score_gate": _jsonable(dict(fitted_score_gate)),
         "rows": rows,
     }
 
@@ -939,6 +982,21 @@ def _stage_override_or_default(
 ) -> dict[str, Any]:
     stage_override = _as_mapping(_as_mapping(overrides).get(stage))
     return dict(stage_override) if stage_override else dict(default)
+
+
+def _assert_no_test_window_threshold_source(training_events: Sequence[Mapping[str, Any]]) -> None:
+    leaking: list[str] = []
+    for event in training_events:
+        item = _as_mapping(event)
+        for field in _WINDOW_ROLE_FIELDS:
+            role = item.get(field)
+            if role is not None and str(role).lower() in _TEST_WINDOW_ROLE_VALUES:
+                leaking.append(f"{item.get('symbol', '<unknown>')} {item.get('trade_date', '<unknown>')} {field}={role}")
+    if leaking:
+        raise ValueError(
+            "test-window candidates cannot be used to fit score gate thresholds: "
+            + "; ".join(leaking)
+        )
 
 
 def _core_portfolio_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
