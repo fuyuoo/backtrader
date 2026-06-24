@@ -19,6 +19,16 @@ dry-run 会写出：
 - `scored_entry_allocation_tuning_contract.json`
 - `scored_entry_allocation_tuning_contract.md`
 
+已有 Strategy Decision Event Table 和 trial 参数 JSON 时，可运行完整 study 入口并写出 full walk-forward run 与报告包：
+
+```bash
+att-scored-entry-allocation-tuning --mode smoke --run-full-study \
+  --decision-event-table reports/scored-entry-allocation-tuning/decision_event_table.json \
+  --stage-a-trials reports/scored-entry-allocation-tuning/stage_a_trials.json \
+  --stage-b-trials reports/scored-entry-allocation-tuning/stage_b_trials.json \
+  --output-dir reports/scored-entry-allocation-tuning
+```
+
 ### 已覆盖能力
 
 - 生成 tuning 合同：列出 2015-2019→2020 至 2019-2023→2024 的 5 个 walk-forward fold。
@@ -32,6 +42,7 @@ dry-run 会写出：
 - Single-fold Stage A pre-tuning：可在一个训练 fold 内用 Stage A 宽 gate 与高容量约束执行小 trial study，输出四目标、trial metrics、Pareto、balanced top 20%、elite trial、factor/interaction 方向稳定性和 Stage B 搜索空间收窄建议；该证据仅用于预调优。
 - Single-fold Stage B tuning：可在一个训练 fold 内用 Stage B strict gate、真实组合约束和 Stage A narrowed search space 执行 scored portfolio trial study，对照 Stage B unscored baseline，并输出 Pareto、balanced/aggressive/defensive 推荐和交易数门槛诊断。
 - Full walk-forward runner：按 5Y train / 1Y test / 1Y step 调度 2020-2024 五个 fold，支持 smoke / standard trial schedule、decision cache identity 复用、completed artifact resume/skip，并显式记录 test window 只做样本外评估，不调参、不重拟合 score gate、不更新 Stage A search-space。
+- Full study CLI：`--run-full-study` 可从已缓存的 Strategy Decision Event Table 与 Stage A / Stage B trial 参数 JSON 运行 full walk-forward，并写出 full run JSON、完整报告包、Pareto frontier 和 balanced/aggressive/defensive 参数文件。
 - Complete scored allocation report package：可从 full walk-forward run 生成机器可读 JSON、中文 Markdown、Pareto frontier artifact，以及 balanced/aggressive/defensive 参数文件；报告分离 Stage A 预调优、Stage B 训练与样本外评估边界，并显式列出缺失的 market-stage / factor-combination 切片原因。
 - Stage A elite 试验用于缩小 Stage B 搜索空间，不作为最终组合收益证据。
 - Stage B 报告输出 Pareto frontier，并选择 `balanced` / `aggressive` / `defensive` 推荐参数，同时记录低交易数拒绝原因。

@@ -931,6 +931,53 @@ def test_scored_entry_allocation_tuning_contract_writer_and_cli_dry_run(tmp_path
     assert (tmp_path / "cli-contract" / "scored_entry_allocation_tuning_contract.json").exists()
 
 
+def test_scored_entry_allocation_tuning_cli_runs_full_study_and_writes_report_package(
+    tmp_path: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    table = build_strategy_decision_event_table(
+        _walk_forward_decision_events(),
+        cache_inputs=_decision_cache_inputs(),
+    )
+    decision_table_path = tmp_path / "decision_event_table.json"
+    stage_a_trials_path = tmp_path / "stage_a_trials.json"
+    stage_b_trials_path = tmp_path / "stage_b_trials.json"
+    decision_table_path.write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
+    stage_a_trials_path.write_text(json.dumps(_stage_a_trial_parameter_sets(), ensure_ascii=False), encoding="utf-8")
+    stage_b_trials_path.write_text(json.dumps(_stage_b_walk_forward_trial_parameter_sets(), ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(tuning_cli, "require_optuna_for_tuning", lambda: object())
+
+    exit_code = tuning_cli.main(
+        [
+            "--mode",
+            "smoke",
+            "--run-full-study",
+            "--decision-event-table",
+            str(decision_table_path),
+            "--stage-a-trials",
+            str(stage_a_trials_path),
+            "--stage-b-trials",
+            str(stage_b_trials_path),
+            "--minimum-train-trades-per-year",
+            "0",
+            "--output-dir",
+            str(tmp_path / "full-study"),
+        ]
+    )
+    stdout = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert stdout["mode"] == "smoke"
+    assert stdout["full_walk_forward_run"]["schema"] == FULL_WALK_FORWARD_TUNING_RUN_SCHEMA
+    assert stdout["report_package"]["schema"] == SCORED_ALLOCATION_REPORT_PACKAGE_SCHEMA
+    assert stdout["report_package"]["recommended_parameter_sets"]["balanced"]
+    assert (tmp_path / "full-study" / "full_walk_forward_tuning_run.json").exists()
+    assert (tmp_path / "full-study" / "scored_allocation_report_package.json").exists()
+    assert (tmp_path / "full-study" / "scored_allocation_report_package.zh.md").exists()
+    assert (tmp_path / "full-study" / "balanced_parameters.json").exists()
+
+
 def _entry_event(
     symbol: str,
     *,

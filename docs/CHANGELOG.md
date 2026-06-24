@@ -13,6 +13,15 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-24 — 新增 Scored Allocation full study CLI 入口
+
+- 需求：继续推进 #30 前置证据缺口，让已实现的 full walk-forward runner 和报告包可以从本地 artifact 直接生成标准研究包。
+- 改动：
+  - `attbacktrader/cli/scored_entry_allocation_tuning.py`：新增 `--run-full-study`、`--decision-event-table`、`--stage-a-trials`、`--stage-b-trials`、`--completed-artifacts` 和 `--minimum-train-trades-per-year` 参数，串联 contract、full walk-forward run 与 scored allocation report package 写出。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增 CLI full-study 测试，使用 deterministic decision event table 和 Stage A / Stage B trial 参数 JSON 验证 full run、报告包和推荐参数文件落盘。
+  - `docs/FEATURES.md`：补充 full study CLI 示例和能力说明。
+- 影响：#30 仍需要真实标准研究输入数据；新入口解决的是从已缓存决策事件和 trial 参数生成可审报告包的问题，不把 contract 输出误当研究结论。
+
 ## 2026-06-24 — 新增 Scored Allocation 完整报告包
 
 - 需求：继续推进 `#29 Complete scored allocation report package`，生成机器可读 JSON 与中文 Markdown 报告包，汇总 Stage A、Stage B、样本外边界、Pareto、推荐参数、baseline、稳定性和漏斗诊断。
