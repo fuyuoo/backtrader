@@ -19,6 +19,15 @@ dry-run 会写出：
 - `scored_entry_allocation_tuning_contract.json`
 - `scored_entry_allocation_tuning_contract.md`
 
+已有 full `signal_audit.json`、对应 `run_plan.json` 和股票池文件时，可先构建 Strategy Decision Event Table：
+
+```bash
+att-scored-entry-allocation-tuning --build-decision-event-table \
+  --signal-audit reports/baoma-v1-full-source/signal_audit.json \
+  --run-plan reports/baoma-v1-full-source/run_plan.json \
+  --output-dir reports/scored-entry-allocation-tuning
+```
+
 已有 Strategy Decision Event Table 和 trial 参数 JSON 时，可运行完整 study 入口并写出 full walk-forward run 与报告包：
 
 ```bash
@@ -34,6 +43,7 @@ att-scored-entry-allocation-tuning --mode smoke --run-full-study \
 - 生成 tuning 合同：列出 2015-2019→2020 至 2019-2023→2024 的 5 个 walk-forward fold。
 - 声明 Stage A / Stage B 默认 trial budget、score gate、组合约束和证据用途。
 - Strategy Decision Event Table：可从策略输出的 `TradeIntent` 生成，只缓存 actionable decision intents 和 decision-time evidence；禁止缓存 completed trades、cash、positions、equity curve、trial score、selected buys。
+- Decision Event Table artifact builder：可从 full `signal_audit.json`、`run_plan.json` 和股票池顺序生成 `decision_event_table.json`；compact signal audit 会明确失败，因为它只保留样本，不能还原完整候选漏斗。
 - Signal cache identity：包含数据快照、股票池、策略信号参数、因子字段集、日期区间和事件 schema；明确排除 scorer weights、trial id、score gate 与 score thresholds。
 - Outcome-Calibrated Entry Score：支持单因子 bucket 权重、负向软惩罚、双因子 interaction 权重、训练窗口 z-score 与 quantile score gate；Stage A 默认 `minimum_score_z=0.0` / `minimum_score_quantile=0.50`，Stage B 默认 `minimum_score_z=0.75` / `minimum_score_quantile=0.70`；阈值统计由训练窗拟合并复用于测试窗，测试窗候选不能参与阈值拟合；未声明为 bucket 的原始数值字段不直接参与打分。
 - Scored Portfolio Simulation：每个 trial 重新计算分数、排名、现金、持仓、equity curve、交易指标和 scored entry funnel；支持持仓上限、每日新开仓上限、行业每日新开仓上限、现金保留、board-lot、tradability 等约束。

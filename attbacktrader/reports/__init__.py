@@ -180,6 +180,7 @@ from .scored_entry_allocation_tuning import (
     build_strategy_decision_cache_identity,
     build_strategy_decision_event_table,
     build_strategy_decision_event_table_from_intents,
+    build_strategy_decision_event_table_from_signal_audit,
     build_scored_entry_allocation_tuning_contract,
     build_walk_forward_folds,
     apply_fitted_score_gate_to_candidates,

@@ -392,6 +392,44 @@ def build_strategy_decision_event_table_from_intents(
     return build_strategy_decision_event_table(events, cache_inputs=cache_inputs)
 
 
+def build_strategy_decision_event_table_from_signal_audit(
+    signal_audit: Any,
+    *,
+    cache_inputs: Mapping[str, Any],
+    stock_pool_order_by_symbol: Mapping[str, int],
+) -> dict[str, Any]:
+    """Build a Strategy Decision Event Table from a persisted full signal_audit JSON payload."""
+
+    rows = _full_signal_audit_rows(signal_audit)
+    events: list[dict[str, Any]] = []
+    for row in rows:
+        item = _as_mapping(row)
+        intent_type = _intent_type_value(item.get("intent_type", ""))
+        if intent_type not in _ACTIONABLE_INTENTS:
+            continue
+        symbol = str(item.get("symbol") or "")
+        trade_date = str(item.get("trade_date") or "")
+        if not symbol or not trade_date:
+            raise ValueError("signal_audit actionable rows must include symbol and trade_date")
+        stock_pool_order = stock_pool_order_by_symbol.get(symbol)
+        if stock_pool_order is None:
+            raise ValueError(f"missing stock pool order for signal_audit symbol: {symbol}")
+        evidence = _decision_evidence_from_signal_values(_as_mapping(item.get("signal_values")))
+        events.append(
+            {
+                "symbol": symbol,
+                "trade_date": trade_date,
+                "intent_type": intent_type,
+                "price": _signal_audit_row_price(item, evidence),
+                "industry": evidence.get("industry.sw_l1.code") or evidence.get("industry"),
+                "stock_pool_order": stock_pool_order,
+                "tradable": item.get("tradable", True),
+                "evidence": evidence,
+            }
+        )
+    return build_strategy_decision_event_table(events, cache_inputs=cache_inputs)
+
+
 def score_entry_candidates(
     events: Sequence[Mapping[str, Any]],
     *,
@@ -2019,6 +2057,19 @@ def _market_context_for_intent(
     return context
 
 
+def _full_signal_audit_rows(signal_audit: Any) -> Sequence[Any]:
+    if isinstance(signal_audit, Mapping):
+        if signal_audit.get("schema") == "attbacktrader.compact_signal_audit.v1":
+            raise ValueError("Strategy Decision Event Table requires full signal_audit; compact signal_audit cannot be used")
+        raise ValueError("full signal_audit must be a JSON array of intent rows")
+    if isinstance(signal_audit, (str, bytes)) or not isinstance(signal_audit, Sequence):
+        raise ValueError("full signal_audit must be a JSON array of intent rows")
+    invalid_count = sum(1 for row in signal_audit if not isinstance(row, Mapping))
+    if invalid_count:
+        raise ValueError("full signal_audit rows must be JSON objects")
+    return signal_audit
+
+
 def _decision_evidence_from_signal_values(signal_values: Mapping[str, Any]) -> dict[str, Any]:
     evidence: dict[str, Any] = {}
     attribution = _as_mapping(signal_values.get("attribution"))
@@ -2029,6 +2080,16 @@ def _decision_evidence_from_signal_values(signal_values: Mapping[str, Any]) -> d
     if forbidden:
         raise ValueError(f"decision evidence contains forbidden portfolio result fields: {', '.join(forbidden)}")
     return _jsonable(evidence)
+
+
+def _signal_audit_row_price(row: Mapping[str, Any], evidence: Mapping[str, Any]) -> Any:
+    for value in (row.get("price"), evidence.get("symbol.close"), _as_mapping(row.get("signal_values")).get("close")):
+        if value is not None:
+            return value
+    raise ValueError(
+        "signal_audit actionable row missing decision price: "
+        f"{row.get('symbol', '<unknown>')} {row.get('trade_date', '<unknown>')}"
+    )
 
 
 def _score_event(event: Mapping[str, Any], scorer_config: Mapping[str, Any]) -> dict[str, Any]:
