@@ -13,6 +13,15 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-24 — 新增 Decision Event Table artifact 构建入口
+
+- 需求：继续推进真实 standard study 输入链路，让 `--run-full-study` 不再只能依赖手工准备的 `decision_event_table.json`。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `build_strategy_decision_event_table_from_signal_audit`，可从 full `signal_audit.json` 生成 Strategy Decision Event Table；compact signal audit 会明确失败。
+  - `attbacktrader/cli/scored_entry_allocation_tuning.py`：新增 `--build-decision-event-table`、`--signal-audit`、`--run-plan` 和 `--stock-pool-file`，从 run artifacts 写出 `decision_event_table.json`。
+  - `tests/test_scored_entry_allocation_tuning.py`：覆盖 full signal audit JSON、compact 拒绝、CLI artifact 写出和 stock pool 顺序。
+- 影响：仍需先用 `output.artifact_detail=full` 的 RunPlan 生成真实 full `signal_audit.json`；compact artifact 不能还原完整候选漏斗。
+
 ## 2026-06-24 — 补齐 Stage B 样本外组合评估输出
 
 - 需求：继续推进真实 standard study 前的证据纠偏，避免 full walk-forward 报告只记录测试窗边界，却没有真正用测试窗事件评估 Stage B 推荐参数。

@@ -21,6 +21,7 @@ from attbacktrader.reports import (
     build_stage_b_search_space_from_stage_a,
     build_strategy_decision_cache_identity,
     build_strategy_decision_event_table,
+    build_strategy_decision_event_table_from_signal_audit,
     build_scored_entry_allocation_tuning_contract,
     apply_fitted_score_gate_to_candidates,
     fit_training_score_gate_statistics,
@@ -226,6 +227,58 @@ def test_strategy_decision_event_table_can_be_built_from_trade_intents_without_r
             [intents[0]],
             cache_inputs=cache_inputs,
             market_context_by_key={},
+        )
+
+
+def test_strategy_decision_event_table_can_be_built_from_full_signal_audit_json() -> None:
+    rows = [
+        _signal_audit_row("hold", "000001.SZ", "2020-01-02", price=10.0),
+        _signal_audit_row(
+            "enter",
+            "000001.SZ",
+            "2020-01-03",
+            price=10.5,
+            industry="801010.SI",
+            evidence={"symbol.ma.trend_state": "bullish"},
+        ),
+        _signal_audit_row(
+            "exit_profit",
+            "000001.SZ",
+            "2020-01-06",
+            price=11.2,
+            industry="801010.SI",
+            evidence={"exit.reason": "profit"},
+        ),
+    ]
+
+    table = build_strategy_decision_event_table_from_signal_audit(
+        rows,
+        cache_inputs=_decision_cache_inputs(),
+        stock_pool_order_by_symbol={"000001.SZ": 7},
+    )
+
+    assert table["schema"] == STRATEGY_DECISION_EVENT_TABLE_SCHEMA
+    assert table["event_count"] == 2
+    assert [event["intent_type"] for event in table["events"]] == ["enter", "exit_profit"]
+    assert table["events"][0]["price"] == 10.5
+    assert table["events"][0]["industry"] == "801010.SI"
+    assert table["events"][0]["stock_pool_order"] == 7
+    assert table["events"][0]["evidence"]["symbol.ma.trend_state"] == "bullish"
+    assert "completed_trade_id" not in table["events"][0]
+
+
+def test_strategy_decision_event_table_rejects_compact_signal_audit() -> None:
+    compact = {
+        "schema": "attbacktrader.compact_signal_audit.v1",
+        "raw_signal_audit_persisted": False,
+        "samples": [],
+    }
+
+    with pytest.raises(ValueError, match="requires full signal_audit"):
+        build_strategy_decision_event_table_from_signal_audit(
+            compact,
+            cache_inputs=_decision_cache_inputs(),
+            stock_pool_order_by_symbol={"000001.SZ": 1},
         )
 
 
@@ -972,6 +1025,82 @@ def test_scored_entry_allocation_tuning_contract_writer_and_cli_dry_run(tmp_path
     assert (tmp_path / "cli-contract" / "scored_entry_allocation_tuning_contract.json").exists()
 
 
+def test_scored_entry_allocation_tuning_cli_builds_decision_event_table_from_run_artifacts(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    stock_pool_path = tmp_path / "stock_pool.csv"
+    stock_pool_path.write_text("ts_code,name\n000001.SZ,one\n000002.SZ,two\n", encoding="utf-8")
+    run_plan_path = tmp_path / "run_plan.json"
+    run_plan_path.write_text(
+        json.dumps(
+            {
+                "run": {"id": "baoma-source", "from_date": "2020-01-01", "to_date": "2020-12-31"},
+                "data": {
+                    "snapshot_root": "data/snapshots",
+                    "provider": "tushare",
+                    "price_adjustment": "qfq",
+                    "stock_pool_file": str(stock_pool_path),
+                },
+                "strategy": {
+                    "template": "trend_template_v1",
+                    "entry_method": "baoma_entry",
+                    "entry_params": {"dea_max_age_trading_days": 14},
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    signal_audit_path = tmp_path / "signal_audit.json"
+    signal_audit_path.write_text(
+        json.dumps(
+            [
+                _signal_audit_row(
+                    "enter",
+                    "000001.SZ",
+                    "2020-01-03",
+                    price=10.5,
+                    industry="801010.SI",
+                    evidence={"symbol.ma.trend_state": "bullish"},
+                ),
+                _signal_audit_row(
+                    "exit_profit",
+                    "000001.SZ",
+                    "2020-01-06",
+                    price=11.2,
+                    industry="801010.SI",
+                    evidence={"exit.reason": "profit"},
+                ),
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = tuning_cli.main(
+        [
+            "--build-decision-event-table",
+            "--signal-audit",
+            str(signal_audit_path),
+            "--run-plan",
+            str(run_plan_path),
+            "--output-dir",
+            str(tmp_path / "decision-table"),
+        ]
+    )
+    stdout = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert stdout["decision_event_table"]["event_count"] == 2
+    assert stdout["decision_event_table"]["events"][0]["stock_pool_order"] == 1
+    assert stdout["decision_event_table"]["cache_identity"]["inputs"]["date_range"] == {
+        "start": "2020-01-01",
+        "end": "2020-12-31",
+    }
+    assert (tmp_path / "decision-table" / "decision_event_table.json").exists()
+
+
 def test_scored_entry_allocation_tuning_cli_runs_full_study_and_writes_report_package(
     tmp_path: Path,
     capsys,
@@ -1055,6 +1184,35 @@ def _decision_cache_inputs() -> dict:
         "factor_field_set": ["symbol.ma.trend_state", "symbol.macd.energy_zone", "market.stage"],
         "date_range": {"start": "2015-01-01", "end": "2024-12-31"},
         "event_schema_version": 1,
+    }
+
+
+def _signal_audit_row(
+    intent_type: str,
+    symbol: str,
+    trade_date: str,
+    *,
+    price: float,
+    industry: str | None = None,
+    evidence: dict | None = None,
+) -> dict:
+    categories = {}
+    if industry is not None:
+        categories["industry.sw_l1.code"] = industry
+    return {
+        "intent_type": intent_type,
+        "symbol": symbol,
+        "trade_date": trade_date,
+        "method_name": "baoma_entry",
+        "reason_code": "TEST",
+        "completed_trade_id": "must-not-survive",
+        "signal_values": {
+            "attribution": {
+                "values": {"symbol.close": price, **(evidence or {})},
+                "categories": categories,
+                "checks": {},
+            },
+        },
     }
 
 
