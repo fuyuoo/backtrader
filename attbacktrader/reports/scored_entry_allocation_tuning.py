@@ -756,6 +756,9 @@ def run_single_fold_stage_b_tuning(
     training_events = _decision_events_for_fold_window(decision_event_table, fold, window="train")
     if not training_events:
         raise ValueError(f"fold {fold_id} has no training decision events")
+    test_events = _decision_events_for_fold_window(decision_event_table, fold, window="test")
+    if not test_events:
+        raise ValueError(f"fold {fold_id} has no test decision events")
     baseline_simulation = simulate_scored_portfolio(
         training_events,
         scorer_config=_baseline_scorer_config(training_events),
@@ -810,6 +813,14 @@ def run_single_fold_stage_b_tuning(
     eligible, rejected = _eligible_trials(trials, min_trade_count=gate_config["minimum_train_trade_count"])
     recommendations = _select_recommendations(eligible)
     recommendations["rejected"] = _jsonable(rejected)
+    out_of_sample = _evaluate_stage_b_out_of_sample(
+        fold=fold,
+        training_events=training_events,
+        test_events=test_events,
+        recommendations=recommendations,
+        portfolio_controls=portfolio_controls,
+        score_gate=score_gate,
+    )
     return {
         "schema": SINGLE_FOLD_STAGE_B_TUNING_SCHEMA,
         "fold_id": fold_id,
@@ -835,6 +846,75 @@ def run_single_fold_stage_b_tuning(
         "rejected_trials": _jsonable(rejected),
         "pareto_frontier": _pareto_frontier(eligible),
         "recommendations": recommendations,
+        "out_of_sample": out_of_sample,
+    }
+
+
+def _evaluate_stage_b_out_of_sample(
+    *,
+    fold: Mapping[str, Any],
+    training_events: Sequence[Mapping[str, Any]],
+    test_events: Sequence[Mapping[str, Any]],
+    recommendations: Mapping[str, Any],
+    portfolio_controls: Mapping[str, Any],
+    score_gate: Mapping[str, Any],
+) -> dict[str, Any]:
+    test_window = _test_window_boundary(_as_mapping(fold.get("test")))
+    baseline_simulation = simulate_scored_portfolio(
+        test_events,
+        scorer_config=_baseline_scorer_config(training_events),
+        training_events=training_events,
+        score_gate=_UNSCORED_BASELINE_SCORE_GATE,
+        portfolio_controls=portfolio_controls,
+        unscored_baseline=True,
+    )
+    baseline_metrics = _as_mapping(baseline_simulation.get("metrics"))
+    baseline_core = _core_portfolio_metrics(baseline_metrics)
+    evaluated: dict[str, Any] = {}
+
+    for name in ("balanced", "aggressive", "defensive"):
+        recommendation = recommendations.get(name)
+        if not recommendation:
+            evaluated[name] = None
+            continue
+        item = _as_mapping(recommendation)
+        parameters = _as_mapping(item.get("parameters"))
+        scorer_config = _as_mapping(parameters.get("scorer_config"))
+        simulation = simulate_scored_portfolio(
+            test_events,
+            scorer_config=scorer_config,
+            training_events=training_events,
+            score_gate=score_gate,
+            portfolio_controls=portfolio_controls,
+        )
+        metrics = dict(_as_mapping(simulation.get("metrics")))
+        metrics["funnel_counts"] = _jsonable(simulation.get("funnel") or {})
+        core_metrics = _core_portfolio_metrics(_as_mapping(metrics))
+        metrics["core_metric_delta_vs_unscored_baseline"] = _core_metric_delta(core_metrics, baseline_core)
+        evaluated[name] = {
+            "trial_id": item.get("trial_id"),
+            "parameters": _jsonable(dict(parameters)),
+            "test_window": test_window,
+            "score_gate": _jsonable(simulation.get("score_gate") or {}),
+            "portfolio_controls": _jsonable(simulation.get("portfolio_controls") or {}),
+            "metrics": _jsonable(metrics),
+            "core_metrics": core_metrics,
+            "funnel": _jsonable(simulation.get("funnel") or {}),
+            "selected_entry_count": len(_as_sequence(simulation.get("executed_entries"))),
+        }
+
+    return {
+        "evidence_use": "out_of_sample_portfolio_evaluation",
+        "test_window": test_window,
+        "baseline": {
+            "result_type": "unscored_baseline",
+            "portfolio_controls": _jsonable(dict(portfolio_controls)),
+            "score_gate": _jsonable(baseline_simulation.get("score_gate") or {}),
+            "metrics": _jsonable(baseline_metrics),
+            "funnel": _jsonable(baseline_simulation.get("funnel") or {}),
+            "core_metrics": baseline_core,
+        },
+        "recommendations": evaluated,
     }
 
 
@@ -952,7 +1032,10 @@ def build_scored_allocation_report_package(run_result: Mapping[str, Any]) -> dic
     stage_b_pareto: dict[str, Any] = {}
     stage_b_training_metrics: dict[str, Any] = {}
     baseline_metrics: dict[str, Any] = {}
+    stage_b_oos_metrics = {"balanced": {}, "aggressive": {}, "defensive": {}}
+    oos_baseline_metrics: dict[str, Any] = {}
     funnel_by_fold: dict[str, Any] = {}
+    oos_funnel_by_fold: dict[str, Any] = {}
     yearly_stability: dict[str, Any] = {}
     for fold in _as_sequence(run_result.get("folds")):
         item = _as_mapping(fold)
@@ -984,14 +1067,31 @@ def build_scored_allocation_report_package(run_result: Mapping[str, Any]) -> dic
         scored_metrics = _as_mapping(balanced.get("metrics"))
         baseline = _as_mapping(stage_b_result.get("baseline"))
         baseline_metric_values = _as_mapping(baseline.get("metrics"))
+        out_of_sample = _as_mapping(stage_b_result.get("out_of_sample"))
+        if not out_of_sample:
+            raise ValueError(f"fold {fold_id} missing Stage B out_of_sample portfolio evaluation")
+        oos_recommendations = _as_mapping(out_of_sample.get("recommendations"))
+        oos_baseline = _as_mapping(out_of_sample.get("baseline"))
+        if not oos_baseline:
+            raise ValueError(f"fold {fold_id} missing Stage B out_of_sample unscored baseline")
+        if not _as_mapping(oos_recommendations.get("balanced")):
+            raise ValueError(f"fold {fold_id} missing Stage B out_of_sample balanced recommendation")
+        oos_baseline_metric_values = _as_mapping(oos_baseline.get("metrics"))
         stage_b_training_metrics[fold_id] = _metric_snapshot(scored_metrics)
         baseline_metrics[fold_id] = _metric_snapshot(baseline_metric_values)
+        oos_baseline_metrics[fold_id] = _metric_snapshot(oos_baseline_metric_values)
+        for name in ("balanced", "aggressive", "defensive"):
+            oos_item = _as_mapping(oos_recommendations.get(name))
+            stage_b_oos_metrics[name][fold_id] = _metric_snapshot(_as_mapping(oos_item.get("metrics")))
         funnel_by_fold[fold_id] = _aggregate_funnels(_as_sequence(stage_b_result.get("trials")))
+        oos_balanced = _as_mapping(oos_recommendations.get("balanced"))
+        oos_funnel_by_fold[fold_id] = _jsonable(_as_mapping(oos_balanced.get("funnel")))
         year = str(test_window.get("year"))
         yearly_stability[year] = {
             "fold_id": fold_id,
-            "scored": stage_b_training_metrics[fold_id],
-            "unscored_baseline": baseline_metrics[fold_id],
+            "source": "out_of_sample_balanced",
+            "scored": stage_b_oos_metrics["balanced"][fold_id],
+            "unscored_baseline": oos_baseline_metrics[fold_id],
         }
         fold_reports.append(
             {
@@ -1015,11 +1115,17 @@ def build_scored_allocation_report_package(run_result: Mapping[str, Any]) -> dic
                     "baseline": _jsonable(baseline),
                 },
                 "out_of_sample": {
-                    "test_window": _jsonable(dict(test_window)),
-                    "evidence_status": "evaluation_boundary_recorded",
+                    "evidence_use": out_of_sample.get("evidence_use"),
+                    "test_window": _jsonable(dict(_as_mapping(out_of_sample.get("test_window")) or test_window)),
+                    "evidence_status": "evaluated",
                     "retunes_parameters": False,
                     "refits_score_gate": False,
                     "updates_stage_a_search_space": False,
+                    "recommendations": {
+                        name: _jsonable(_as_mapping(oos_recommendations.get(name)))
+                        for name in ("balanced", "aggressive", "defensive")
+                    },
+                    "baseline": _jsonable(oos_baseline),
                 },
             }
         )
@@ -1039,6 +1145,9 @@ def build_scored_allocation_report_package(run_result: Mapping[str, Any]) -> dic
         "metrics": {
             "stage_b_training_scored": stage_b_training_metrics,
             "stage_b_unscored_baseline": baseline_metrics,
+            "stage_b_training_unscored_baseline": baseline_metrics,
+            "stage_b_oos_scored": stage_b_oos_metrics,
+            "stage_b_oos_unscored_baseline": oos_baseline_metrics,
         },
         "stability": {
             "yearly": yearly_stability,
@@ -1048,10 +1157,11 @@ def build_scored_allocation_report_package(run_result: Mapping[str, Any]) -> dic
             },
         },
         "scored_entry_funnel": {
-            "global": _aggregate_funnel_dicts(funnel_by_fold.values()),
-            "by_fold": funnel_by_fold,
+            "global": _aggregate_funnel_dicts(oos_funnel_by_fold.values()),
+            "by_fold": oos_funnel_by_fold,
+            "training_by_fold": funnel_by_fold,
             "by_year": {
-                str(_as_mapping(fold.get("test_window")).get("year")): funnel_by_fold.get(str(fold.get("fold_id")), {})
+                str(_as_mapping(fold.get("test_window")).get("year")): oos_funnel_by_fold.get(str(fold.get("fold_id")), {})
                 for fold in _as_sequence(run_result.get("folds"))
             },
             "by_market_stage": {
@@ -1064,6 +1174,18 @@ def build_scored_allocation_report_package(run_result: Mapping[str, Any]) -> dic
             },
         },
     }
+
+
+def _format_report_metric(value: Any) -> str:
+    if value is None:
+        return "NA"
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
 
 
 def render_scored_allocation_report_package_markdown_zh(package: Mapping[str, Any]) -> str:
@@ -1104,15 +1226,26 @@ def render_scored_allocation_report_package_markdown_zh(package: Mapping[str, An
                 f"aggressive=`{_as_mapping(recs.get('aggressive')).get('trial_id')}`, "
                 f"defensive=`{_as_mapping(recs.get('defensive')).get('trial_id')}`"
             )
-    lines.extend(["", "## 样本外评估边界", ""])
+    lines.extend(["", "## Stage B 样本外组合评估", ""])
     for fold in _as_sequence(package.get("folds")):
         item = _as_mapping(fold)
         oos = _as_mapping(item.get("out_of_sample"))
         test = _as_mapping(oos.get("test_window"))
         if oos:
+            recommendations = _as_mapping(oos.get("recommendations"))
+            balanced = _as_mapping(recommendations.get("balanced"))
+            balanced_core = _as_mapping(balanced.get("core_metrics"))
+            baseline = _as_mapping(oos.get("baseline"))
+            baseline_core = _as_mapping(baseline.get("core_metrics"))
             lines.append(
                 f"- `{item.get('fold_id')}`: test={test.get('start')} to {test.get('end')}, "
-                f"retune={oos.get('retunes_parameters')}, refit_gate={oos.get('refits_score_gate')}"
+                f"status={oos.get('evidence_status')}, retune={oos.get('retunes_parameters')}, "
+                f"refit_gate={oos.get('refits_score_gate')}, balanced=`{balanced.get('trial_id')}`, "
+                f"ann={_format_report_metric(balanced_core.get('annualized_return'))}, "
+                f"sharpe={_format_report_metric(balanced_core.get('sharpe_ratio'))}, "
+                f"mdd={_format_report_metric(balanced_core.get('max_drawdown'))}, "
+                f"baseline_ann={_format_report_metric(baseline_core.get('annualized_return'))}, "
+                f"baseline_sharpe={_format_report_metric(baseline_core.get('sharpe_ratio'))}"
             )
     lines.extend(["", "## 漏斗诊断", ""])
     global_funnel = _as_mapping(_as_mapping(package.get("scored_entry_funnel")).get("global"))

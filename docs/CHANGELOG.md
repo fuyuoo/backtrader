@@ -13,6 +13,15 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-24 — 补齐 Stage B 样本外组合评估输出
+
+- 需求：继续推进真实 standard study 前的证据纠偏，避免 full walk-forward 报告只记录测试窗边界，却没有真正用测试窗事件评估 Stage B 推荐参数。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：Stage B 单 fold tuning 在训练窗选出 balanced/aggressive/defensive 后，新增测试窗 scored portfolio OOS evaluation；score gate 阈值仍由训练窗拟合，测试窗只做评估；报告包新增 `stage_b_oos_scored`、`stage_b_oos_unscored_baseline`、OOS recommendation/baseline 详情和 OOS funnel。
+  - `tests/test_scored_entry_allocation_tuning.py`：补充 OOS evaluation、报告包 schema、Markdown 和训练窗阈值复用断言。
+  - `docs/FEATURES.md`：更新 scored allocation report package 说明。
+- 影响：#30 真实 standard study 仍需要真实 `decision_event_table.json` 和 trial 参数输入；本改动解决的是已有 full-study runner 的样本外组合收益证据口径问题。
+
 ## 2026-06-24 — 新增 Scored Allocation full study CLI 入口
 
 - 需求：继续推进 #30 前置证据缺口，让已实现的 full walk-forward runner 和报告包可以从本地 artifact 直接生成标准研究包。

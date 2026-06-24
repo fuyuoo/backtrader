@@ -652,6 +652,12 @@ def test_single_fold_stage_b_tuning_uses_strict_gate_baseline_and_recommendation
             _exit_event("000001.SZ", trade_date="2019-01-04", price=14.0, industry="bank"),
             _exit_event("000002.SZ", trade_date="2019-01-04", price=11.0, industry="tech"),
             _exit_event("000003.SZ", trade_date="2019-01-04", price=8.0, industry="energy"),
+            _rank_event("200001.SZ", rank_bucket="top", industry="bank", stock_pool_order=1, trade_date="2020-01-02", price=10.0),
+            _rank_event("200002.SZ", rank_bucket="mid", industry="tech", stock_pool_order=2, trade_date="2020-01-02", price=10.0),
+            _rank_event("200003.SZ", rank_bucket="low", industry="energy", stock_pool_order=3, trade_date="2020-01-02", price=10.0),
+            _exit_event("200001.SZ", trade_date="2020-01-04", price=13.0, industry="bank"),
+            _exit_event("200002.SZ", trade_date="2020-01-04", price=11.0, industry="tech"),
+            _exit_event("200003.SZ", trade_date="2020-01-04", price=8.0, industry="energy"),
         ],
         cache_inputs=_decision_cache_inputs(),
     )
@@ -702,6 +708,9 @@ def test_single_fold_stage_b_tuning_uses_strict_gate_baseline_and_recommendation
     assert result["recommendations"]["aggressive"]["trial_id"] in {"balanced", "aggressive", "defensive"}
     assert result["recommendations"]["defensive"]["trial_id"] in {"balanced", "aggressive", "defensive"}
     assert all("core_metric_delta_vs_unscored_baseline" in trial["metrics"] for trial in result["trials"])
+    assert result["out_of_sample"]["evidence_use"] == "out_of_sample_portfolio_evaluation"
+    assert result["out_of_sample"]["recommendations"]["balanced"]["test_window"]["year"] == 2020
+    assert result["out_of_sample"]["recommendations"]["balanced"]["score_gate"]["derived_from"] == "training_window"
 
     with pytest.raises(ValueError, match="outside Stage B narrowed search space"):
         run_single_fold_stage_b_tuning(
@@ -751,6 +760,22 @@ def test_full_walk_forward_runner_schedules_folds_reuses_cache_and_skips_complet
     assert all(fold["test_window"]["retunes_parameters"] is False for fold in run["folds"])
     assert all(fold["test_window"]["refits_score_gate"] is False for fold in run["folds"])
     assert all(fold["test_window"]["updates_stage_a_search_space"] is False for fold in run["folds"])
+    assert all(
+        fold["stage_b"]["result"]["out_of_sample"]["evidence_use"] == "out_of_sample_portfolio_evaluation"
+        for fold in run["folds"]
+    )
+    assert all(
+        fold["stage_b"]["result"]["out_of_sample"]["baseline"]["result_type"] == "unscored_baseline"
+        for fold in run["folds"]
+    )
+    assert all(
+        fold["stage_b"]["result"]["out_of_sample"]["recommendations"]["balanced"]["score_gate"]["derived_from"] == "training_window"
+        for fold in run["folds"]
+    )
+    assert all(
+        fold["stage_b"]["result"]["out_of_sample"]["recommendations"]["balanced"]["test_window"]["retunes_parameters"] is False
+        for fold in run["folds"]
+    )
 
     resumed = run_full_walk_forward_tuning(
         table,
@@ -813,16 +838,32 @@ def test_scored_allocation_report_package_schema_markdown_and_artifacts(tmp_path
     assert "yearly_returns" in package["metric_keys"]
     first_fold = run["folds"][0]["fold_id"]
     assert "monthly_returns" in package["metrics"]["stage_b_training_scored"][first_fold]["missing_metric_fields"]
+    assert "balanced" in package["metrics"]["stage_b_oos_scored"]
+    assert first_fold in package["metrics"]["stage_b_oos_scored"]["balanced"]
+    assert first_fold in package["metrics"]["stage_b_oos_unscored_baseline"]
+    assert package["folds"][0]["out_of_sample"]["evidence_status"] == "evaluated"
+    assert package["folds"][0]["out_of_sample"]["recommendations"]["balanced"]["test_window"]["retunes_parameters"] is False
     assert "yearly" in package["stability"]
+    first_year = str(run["test_years"][0])
+    assert package["stability"]["yearly"][first_year]["source"] == "out_of_sample_balanced"
     assert "market_stage" in package["stability"]
     assert "by_fold" in package["scored_entry_funnel"]
+    assert "training_by_fold" in package["scored_entry_funnel"]
     assert "by_year" in package["scored_entry_funnel"]
     assert "by_market_stage" in package["scored_entry_funnel"]
     assert "by_factor_combination_hit_status" in package["scored_entry_funnel"]
     assert "Stage A 只用于预调优" in markdown
     assert "最终结论必须来自样本外 scored portfolio 结果" in markdown
     assert "## Stage B 训练" in markdown
+    assert "## Stage B 样本外组合评估" in markdown
+    assert "status=evaluated" in markdown
+    assert "baseline_ann=" in markdown
     assert "## 漏斗诊断" in markdown
+
+    legacy_run = json.loads(json.dumps(run))
+    del legacy_run["folds"][0]["stage_b"]["result"]["out_of_sample"]
+    with pytest.raises(ValueError, match="missing Stage B out_of_sample portfolio evaluation"):
+        build_scored_allocation_report_package(legacy_run)
 
     paths, payload = write_scored_allocation_report_package(package, output_dir=tmp_path)
 
