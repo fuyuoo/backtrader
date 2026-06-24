@@ -9,6 +9,7 @@ from attbacktrader.reports import (
     FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA,
     SCORED_ENTRY_ALLOCATION_TUNING_CONTRACT_SCHEMA,
     SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA,
+    SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA,
     STRATEGY_DECISION_EVENT_TABLE_SCHEMA,
     build_scored_entry_allocation_tuning_report,
     build_simulation_cache_identity,
@@ -22,10 +23,12 @@ from attbacktrader.reports import (
     require_optuna_for_tuning,
     run_fixed_parameter_scored_portfolio_smoke,
     run_scored_portfolio_baseline_comparison,
+    run_single_fold_stage_a_pre_tuning,
     score_entry_candidates,
     simulate_scored_portfolio,
     write_fixed_parameter_scored_portfolio_smoke_run,
     write_scored_portfolio_baseline_comparison,
+    write_single_fold_stage_a_pre_tuning,
     write_scored_entry_allocation_tuning_contract,
 )
 from attbacktrader.strategies import TradeIntent, TradeIntentType
@@ -567,6 +570,67 @@ def test_fixed_parameter_smoke_run_exposes_core_metrics_for_deterministic_trade(
     }
 
 
+def test_single_fold_stage_a_pre_tuning_runs_broad_gate_and_emits_elite_search_space(tmp_path: Path) -> None:
+    contract = build_scored_entry_allocation_tuning_contract(mode="dry-run")
+    fold = contract["folds"][0]
+    table = build_strategy_decision_event_table(
+        [
+            _rank_event("000001.SZ", rank_bucket="top", industry="bank", stock_pool_order=1, trade_date="2019-01-02", price=10.0),
+            _rank_event("000002.SZ", rank_bucket="mid", industry="tech", stock_pool_order=2, trade_date="2019-01-02", price=10.0),
+            _rank_event("000003.SZ", rank_bucket="low", industry="energy", stock_pool_order=3, trade_date="2019-01-02", price=10.0),
+            _exit_event("000001.SZ", trade_date="2019-01-04", price=13.0, industry="bank"),
+            _exit_event("000002.SZ", trade_date="2019-01-04", price=11.0, industry="tech"),
+            _exit_event("000003.SZ", trade_date="2019-01-04", price=8.0, industry="energy"),
+            _rank_event("000004.SZ", rank_bucket="top", industry="bank", stock_pool_order=4, trade_date="2020-01-02", price=10.0),
+        ],
+        cache_inputs=_decision_cache_inputs(),
+    )
+
+    result = run_single_fold_stage_a_pre_tuning(
+        table,
+        contract=contract,
+        fold=fold,
+        trial_parameter_sets=_stage_a_trial_parameter_sets(),
+    )
+
+    assert result["schema"] == SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA
+    assert result["fold_id"] == "train-2015-2019_test-2020"
+    assert result["stage"] == "stage_a"
+    assert result["evidence_use"] == "pre_tuning_only"
+    assert result["score_gate"] == {"minimum_score_z": 0.0, "minimum_score_quantile": 0.5}
+    assert result["portfolio_controls"]["initial_cash"] == 1_000_000_000
+    assert result["portfolio_controls"]["max_holding_count"] == 800
+    assert result["portfolio_controls"]["max_new_positions_per_day"] is None
+    assert result["objective_keys"] == [
+        "annualized_return",
+        "sharpe_ratio",
+        "benchmark_excess_return",
+        "max_drawdown",
+    ]
+    assert result["trial_count"] == 4
+    assert result["optimizer"]["executed_trial_count"] == 4
+    assert all(set(trial["objectives"]) == set(result["objective_keys"]) for trial in result["trials"])
+    assert all("funnel_counts" in trial["metrics"] for trial in result["trials"])
+
+    expected_elite_ids = {
+        trial["trial_id"]
+        for trial in [*result["pareto_frontier"], *result["balanced_top_20_percent"]]
+    }
+    assert set(result["elite_trial_ids"]) == expected_elite_ids
+    assert result["direction_stability"]["factor:rank_bucket=top"]["classification"] == "stable_positive"
+    assert result["direction_stability"]["factor:rank_bucket=low"]["classification"] == "stable_negative"
+    assert result["direction_stability"]["interaction:top_bonus"]["kind"] == "interaction"
+    assert result["direction_stability"]["interaction:top_bonus"]["classification"] == "stable_positive"
+    assert result["stage_b_search_space"]["evidence_use"] == "narrows_stage_b_search_space_only"
+    assert "factor:rank_bucket=top" in result["stage_b_search_space"]["weights"]
+
+    json_path, payload = write_single_fold_stage_a_pre_tuning(result, output_dir=tmp_path)
+
+    assert json_path.exists()
+    assert payload["artifacts"]["stage_a_pre_tuning_json"] == str(json_path)
+    assert json.loads(json_path.read_text(encoding="utf-8"))["schema"] == SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA
+
+
 def test_stage_a_narrows_stage_b_ranges_and_report_selects_recommendations() -> None:
     stage_a_trials = [
         _trial("a1", annualized_return=0.20, sharpe_ratio=1.4, excess=0.10, max_drawdown=0.12, weights={"f1": 1.0, "f2": -0.8, "f3": -0.2}),
@@ -743,6 +807,47 @@ def _exit_event(
         "tradable": True,
         "evidence": {"exit": "profit"},
     }
+
+
+def _stage_a_trial_parameter_sets() -> list[dict]:
+    return [
+        {
+            "trial_id": "a1",
+            "scorer_config": {
+                "factor_weights": {"rank_bucket": {"top": 3.0, "mid": 1.0, "low": -1.0}},
+                "interaction_weights": [
+                    {"name": "top_bonus", "fields": {"rank_bucket": "top"}, "weight": 1.0}
+                ],
+            },
+        },
+        {
+            "trial_id": "a2",
+            "scorer_config": {
+                "factor_weights": {"rank_bucket": {"top": 2.5, "mid": 0.5, "low": -0.8}},
+                "interaction_weights": [
+                    {"name": "top_bonus", "fields": {"rank_bucket": "top"}, "weight": 0.6}
+                ],
+            },
+        },
+        {
+            "trial_id": "a3",
+            "scorer_config": {
+                "factor_weights": {"rank_bucket": {"top": 2.0, "mid": 0.2, "low": -1.2}},
+                "interaction_weights": [
+                    {"name": "top_bonus", "fields": {"rank_bucket": "top"}, "weight": 0.4}
+                ],
+            },
+        },
+        {
+            "trial_id": "a4",
+            "scorer_config": {
+                "factor_weights": {"rank_bucket": {"top": 0.5, "mid": -0.1, "low": -0.2}},
+                "interaction_weights": [
+                    {"name": "top_bonus", "fields": {"rank_bucket": "top"}, "weight": 0.0}
+                ],
+            },
+        },
+    ]
 
 
 def _trial(

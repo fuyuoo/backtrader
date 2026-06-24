@@ -15,6 +15,7 @@ SCORED_ENTRY_ALLOCATION_TUNING_CONTRACT_SCHEMA = "attbacktrader.scored_entry_all
 SCORED_ENTRY_ALLOCATION_TUNING_REPORT_SCHEMA = "attbacktrader.scored_entry_allocation_tuning_report.v1"
 FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA = "attbacktrader.fixed_parameter_scored_portfolio_smoke_run.v1"
 SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA = "attbacktrader.scored_portfolio_baseline_comparison.v1"
+SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA = "attbacktrader.single_fold_stage_a_pre_tuning.v1"
 STRATEGY_DECISION_EVENT_TABLE_SCHEMA = "attbacktrader.strategy_decision_event_table.v1"
 
 _SUPPORTED_MODES = {"dry-run", "smoke", "standard", "sensitivity"}
@@ -621,6 +622,90 @@ def run_scored_portfolio_baseline_comparison(
     }
 
 
+def run_single_fold_stage_a_pre_tuning(
+    decision_event_table: Mapping[str, Any],
+    *,
+    contract: Mapping[str, Any],
+    fold: Mapping[str, Any],
+    trial_parameter_sets: Sequence[Mapping[str, Any]],
+    weight_keys: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Run one-fold Stage A pre-tuning under broad trade-sample constraints."""
+
+    if not trial_parameter_sets:
+        raise ValueError("trial_parameter_sets cannot be empty")
+    fold_id = str(fold.get("fold_id") or "")
+    if not fold_id:
+        raise ValueError("fold.fold_id is required")
+    score_gate, portfolio_controls = _stage_score_gate_and_controls(contract, "stage_a")
+    training_events = _decision_events_for_fold_window(decision_event_table, fold, window="train")
+    if not training_events:
+        raise ValueError(f"fold {fold_id} has no training decision events")
+
+    trials: list[dict[str, Any]] = []
+    for index, trial_parameters in enumerate(trial_parameter_sets, start=1):
+        item = _as_mapping(trial_parameters)
+        trial_id = str(item.get("trial_id") or f"stage-a-{index:03d}")
+        scorer_config = _trial_scorer_config(item)
+        simulation = simulate_scored_portfolio(
+            training_events,
+            scorer_config=scorer_config,
+            training_events=training_events,
+            score_gate=score_gate,
+            portfolio_controls=portfolio_controls,
+        )
+        weights = _flatten_scorer_weights(scorer_config)
+        metrics = dict(_as_mapping(simulation.get("metrics")))
+        metrics["funnel_counts"] = _jsonable(simulation.get("funnel") or {})
+        objectives = {key: metrics.get(key, 0.0) for key in _OBJECTIVES}
+        trials.append(
+            {
+                "trial_id": trial_id,
+                "fold_id": fold_id,
+                "stage": "stage_a",
+                "parameters": {
+                    "weights": weights,
+                    "scorer_config": _jsonable(dict(scorer_config)),
+                },
+                "objectives": _jsonable(objectives),
+                "metrics": _jsonable(metrics),
+                "funnel": _jsonable(simulation.get("funnel") or {}),
+                "selected_entry_count": len(_as_sequence(simulation.get("executed_entries"))),
+            }
+        )
+
+    inferred_weight_keys = list(weight_keys or _infer_weight_keys(trials))
+    if not inferred_weight_keys:
+        raise ValueError("Stage A pre-tuning requires at least one scorer weight")
+    pareto_frontier = _pareto_frontier(trials)
+    balanced_top = _balanced_top_trials(trials)
+    elite_by_id = {str(trial["trial_id"]): trial for trial in [*pareto_frontier, *balanced_top]}
+    elite_trials = list(elite_by_id.values())
+    return {
+        "schema": SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA,
+        "fold_id": fold_id,
+        "stage": "stage_a",
+        "evidence_use": "pre_tuning_only",
+        "optimizer": {
+            "engine": "trial_parameter_sets",
+            "optuna_objectives": list(_OBJECTIVES),
+            "standard_trials_per_fold": _as_mapping(_as_mapping(contract.get("stages")).get("stage_a")).get("standard_trials_per_fold"),
+            "executed_trial_count": len(trials),
+        },
+        "score_gate": _jsonable(dict(score_gate)),
+        "portfolio_controls": _jsonable(dict(portfolio_controls)),
+        "objective_keys": list(_OBJECTIVES),
+        "trial_count": len(trials),
+        "trials": _jsonable(trials),
+        "pareto_frontier": _jsonable(pareto_frontier),
+        "balanced_top_20_percent": _jsonable(balanced_top),
+        "elite_trial_ids": sorted(elite_by_id),
+        "elite_trials": _jsonable(elite_trials),
+        "direction_stability": _direction_stability(trials, weight_keys=inferred_weight_keys),
+        "stage_b_search_space": build_stage_b_search_space_from_stage_a(trials, weight_keys=inferred_weight_keys),
+    }
+
+
 def write_fixed_parameter_scored_portfolio_smoke_run(
     smoke_run: Mapping[str, Any],
     *,
@@ -648,6 +733,22 @@ def write_scored_portfolio_baseline_comparison(
     payload = _jsonable(dict(comparison))
     artifacts = dict(_as_mapping(payload.get("artifacts")))
     artifacts["baseline_comparison_json"] = str(json_path)
+    payload["artifacts"] = artifacts
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return json_path, payload
+
+
+def write_single_fold_stage_a_pre_tuning(
+    stage_a_result: Mapping[str, Any],
+    *,
+    output_dir: str | Path,
+) -> tuple[Path, dict[str, Any]]:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    json_path = output_path / "single_fold_stage_a_pre_tuning.json"
+    payload = _jsonable(dict(stage_a_result))
+    artifacts = dict(_as_mapping(payload.get("artifacts")))
+    artifacts["stage_a_pre_tuning_json"] = str(json_path)
     payload["artifacts"] = artifacts
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return json_path, payload
@@ -982,6 +1083,104 @@ def _stage_override_or_default(
 ) -> dict[str, Any]:
     stage_override = _as_mapping(_as_mapping(overrides).get(stage))
     return dict(stage_override) if stage_override else dict(default)
+
+
+def _decision_events_for_fold_window(
+    decision_event_table: Mapping[str, Any],
+    fold: Mapping[str, Any],
+    *,
+    window: str,
+) -> list[dict[str, Any]]:
+    if decision_event_table.get("schema") != STRATEGY_DECISION_EVENT_TABLE_SCHEMA:
+        raise ValueError("decision_event_table must use the Strategy Decision Event Table schema")
+    window_config = _as_mapping(fold.get(window))
+    start = str(window_config.get("start") or "")
+    end = str(window_config.get("end") or "")
+    if not start or not end:
+        raise ValueError(f"fold.{window}.start and fold.{window}.end are required")
+    events = [_normalize_decision_event(event) for event in _as_sequence(decision_event_table.get("events"))]
+    return [
+        {**event, "window": "training" if window == "train" else window}
+        for event in events
+        if start <= str(event["trade_date"]) <= end
+    ]
+
+
+def _trial_scorer_config(trial_parameters: Mapping[str, Any]) -> Mapping[str, Any]:
+    scorer_config = _as_mapping(trial_parameters.get("scorer_config"))
+    if not scorer_config:
+        raise ValueError("trial parameter set missing scorer_config")
+    if not _as_mapping(scorer_config.get("factor_weights")) and not _as_sequence(scorer_config.get("interaction_weights")):
+        raise ValueError("trial scorer_config must define factor_weights or interaction_weights")
+    return scorer_config
+
+
+def _flatten_scorer_weights(scorer_config: Mapping[str, Any]) -> dict[str, float]:
+    weights: dict[str, float] = {}
+    for field, bucket_weights in _as_mapping(scorer_config.get("factor_weights")).items():
+        for bucket, weight in _as_mapping(bucket_weights).items():
+            weights[f"factor:{field}={bucket}"] = _number_or_zero(weight)
+    for interaction in _as_sequence(scorer_config.get("interaction_weights")):
+        item = _as_mapping(interaction)
+        name = item.get("name") or item.get("key")
+        if name:
+            key = f"interaction:{name}"
+        else:
+            fields = _as_mapping(item.get("fields"))
+            pairs = "&".join(f"{field}={fields[field]}" for field in sorted(fields))
+            key = f"interaction:{pairs}"
+        weights[key] = _number_or_zero(item.get("weight"))
+    return weights
+
+
+def _infer_weight_keys(trials: Sequence[Mapping[str, Any]]) -> list[str]:
+    keys: set[str] = set()
+    for trial in trials:
+        keys.update(str(key) for key in _as_mapping(_as_mapping(trial.get("parameters")).get("weights")))
+    return sorted(keys)
+
+
+def _balanced_top_trials(trials: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    if not trials:
+        return []
+    top_count = max(1, math.ceil(len(trials) * 0.2))
+    return [_jsonable(dict(trial)) for trial in sorted(trials, key=_balanced_score, reverse=True)[:top_count]]
+
+
+def _direction_stability(
+    trials: Sequence[Mapping[str, Any]],
+    *,
+    weight_keys: Sequence[str],
+) -> dict[str, Any]:
+    stability: dict[str, Any] = {}
+    for key in weight_keys:
+        values = [
+            _number_or_zero(_as_mapping(_as_mapping(trial.get("parameters")).get("weights")).get(key))
+            for trial in trials
+        ]
+        positive_count = sum(1 for value in values if value > 0)
+        negative_count = sum(1 for value in values if value < 0)
+        zero_count = sum(1 for value in values if value == 0)
+        total = len(values)
+        positive_probability = positive_count / total if total else 0.0
+        negative_probability = negative_count / total if total else 0.0
+        if positive_probability >= 0.75:
+            classification = "stable_positive"
+        elif negative_probability >= 0.75:
+            classification = "stable_negative"
+        else:
+            classification = "unstable"
+        stability[str(key)] = {
+            "kind": "interaction" if str(key).startswith("interaction:") else "factor",
+            "classification": classification,
+            "values": values,
+            "positive_count": positive_count,
+            "negative_count": negative_count,
+            "zero_count": zero_count,
+            "positive_probability": positive_probability,
+            "negative_probability": negative_probability,
+        }
+    return stability
 
 
 def _assert_no_test_window_threshold_source(training_events: Sequence[Mapping[str, Any]]) -> None:

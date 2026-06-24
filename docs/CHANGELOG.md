@@ -13,6 +13,16 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-24 — 新增单 fold Stage A pre-tuning
+
+- 需求：继续推进 `#26 Single-fold Stage A pre-tuning`，用宽 score gate 与高容量约束跑通单训练窗的 Stage A 参数预调优。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `run_single_fold_stage_a_pre_tuning` 和写出函数，按 fold 训练窗过滤决策事件，执行小 trial study，记录四目标、trial metrics、Pareto、balanced top 20%、elite trial、方向稳定性和 Stage B 搜索空间收窄建议。
+  - `attbacktrader/reports/__init__.py`：导出 Stage A pre-tuning schema、runner 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增离线 fixture，验证 Stage A 宽 gate、高容量约束、四目标记录、elite 规则、factor/interaction 方向稳定性与 JSON artifact 写出。
+  - `docs/FEATURES.md`：更新 Stage A pre-tuning 能力说明。
+- 影响：Stage A 结果只用于预调优与收窄 Stage B 搜索空间，不作为最终组合收益证据。
+
 ## 2026-06-24 — 补齐 score gate 训练窗泄漏护栏
 
 - 需求：继续推进 `#25 Scored entry gates and cache leakage guards`，确保 score gate 阈值只由训练窗拟合，测试窗不能影响阈值、权重或缓存构造。
