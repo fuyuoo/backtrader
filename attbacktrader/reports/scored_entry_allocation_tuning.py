@@ -17,6 +17,7 @@ FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA = "attbacktrader.fixed_paramet
 SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA = "attbacktrader.scored_portfolio_baseline_comparison.v1"
 SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA = "attbacktrader.single_fold_stage_a_pre_tuning.v1"
 SINGLE_FOLD_STAGE_B_TUNING_SCHEMA = "attbacktrader.single_fold_stage_b_tuning.v1"
+FULL_WALK_FORWARD_TUNING_RUN_SCHEMA = "attbacktrader.full_walk_forward_tuning_run.v1"
 STRATEGY_DECISION_EVENT_TABLE_SCHEMA = "attbacktrader.strategy_decision_event_table.v1"
 
 _SUPPORTED_MODES = {"dry-run", "smoke", "standard", "sensitivity"}
@@ -809,6 +810,109 @@ def run_single_fold_stage_b_tuning(
     }
 
 
+def run_full_walk_forward_tuning(
+    decision_event_table: Mapping[str, Any],
+    *,
+    contract: Mapping[str, Any],
+    mode: str,
+    stage_a_trial_parameter_sets: Sequence[Mapping[str, Any]],
+    stage_b_trial_parameter_sets: Sequence[Mapping[str, Any]],
+    completed_artifacts: Mapping[str, str] | None = None,
+    minimum_train_trades_per_year: int | None = None,
+) -> dict[str, Any]:
+    """Run or schedule the full 5Y/1Y walk-forward scored allocation flow."""
+
+    if mode not in {"smoke", "standard"}:
+        raise ValueError("mode must be smoke or standard")
+    cache_identity = _as_mapping(decision_event_table.get("cache_identity"))
+    signal_cache_key = str(cache_identity.get("cache_key") or "")
+    if not signal_cache_key:
+        raise ValueError("decision_event_table.cache_identity.cache_key is required")
+    folds = list(_as_sequence(contract.get("folds")))
+    stage_a_scheduled = _scheduled_trials(contract, "stage_a", mode)
+    stage_b_scheduled = _scheduled_trials(contract, "stage_b", mode)
+    completed = _as_mapping(completed_artifacts)
+    fold_results: list[dict[str, Any]] = []
+    for fold in folds:
+        fold_item = _as_mapping(fold)
+        fold_id = str(fold_item.get("fold_id") or "")
+        artifact_identity = _fold_artifact_identity(
+            signal_cache_key=signal_cache_key,
+            fold_id=fold_id,
+            mode=mode,
+            stage_a_scheduled=stage_a_scheduled,
+            stage_b_scheduled=stage_b_scheduled,
+        )
+        test = _as_mapping(fold_item.get("test"))
+        if completed.get(fold_id) == artifact_identity:
+            fold_results.append(
+                {
+                    "fold_id": fold_id,
+                    "status": "skipped_completed",
+                    "artifact_identity": artifact_identity,
+                    "decision_cache_key": signal_cache_key,
+                    "stage_a": {"status": "skipped_completed", "scheduled_trial_count": stage_a_scheduled},
+                    "stage_b": {"status": "skipped_completed", "scheduled_trial_count": stage_b_scheduled},
+                    "test_window": _test_window_boundary(test),
+                }
+            )
+            continue
+
+        stage_a_result = run_single_fold_stage_a_pre_tuning(
+            decision_event_table,
+            contract=contract,
+            fold=fold_item,
+            trial_parameter_sets=stage_a_trial_parameter_sets,
+        )
+        stage_b_result = run_single_fold_stage_b_tuning(
+            decision_event_table,
+            contract=contract,
+            fold=fold_item,
+            stage_b_search_space=_as_mapping(stage_a_result.get("stage_b_search_space")),
+            trial_parameter_sets=stage_b_trial_parameter_sets,
+            minimum_train_trades_per_year=minimum_train_trades_per_year,
+        )
+        fold_results.append(
+            {
+                "fold_id": fold_id,
+                "status": "completed",
+                "artifact_identity": artifact_identity,
+                "decision_cache_key": signal_cache_key,
+                "stage_a": {
+                    "status": "completed",
+                    "scheduled_trial_count": stage_a_scheduled,
+                    "executed_trial_count": stage_a_result["trial_count"],
+                    "result": stage_a_result,
+                },
+                "stage_b": {
+                    "status": "completed",
+                    "scheduled_trial_count": stage_b_scheduled,
+                    "executed_trial_count": stage_b_result["trial_count"],
+                    "result": stage_b_result,
+                },
+                "test_window": _test_window_boundary(test),
+            }
+        )
+
+    return {
+        "schema": FULL_WALK_FORWARD_TUNING_RUN_SCHEMA,
+        "mode": mode,
+        "fold_count": len(fold_results),
+        "test_years": [int(_as_mapping(fold.get("test")).get("year")) for fold in folds],
+        "decision_cache_identity": _jsonable(dict(cache_identity)),
+        "decision_cache_reuse": {
+            "cache_key": signal_cache_key,
+            "fold_ids": [fold["fold_id"] for fold in fold_results],
+            "same_cache_key_for_all_folds": len({fold["decision_cache_key"] for fold in fold_results}) <= 1,
+        },
+        "trial_schedule": {
+            "stage_a_per_fold": stage_a_scheduled,
+            "stage_b_per_fold": stage_b_scheduled,
+        },
+        "folds": fold_results,
+    }
+
+
 def write_fixed_parameter_scored_portfolio_smoke_run(
     smoke_run: Mapping[str, Any],
     *,
@@ -868,6 +972,22 @@ def write_single_fold_stage_b_tuning(
     payload = _jsonable(dict(stage_b_result))
     artifacts = dict(_as_mapping(payload.get("artifacts")))
     artifacts["stage_b_tuning_json"] = str(json_path)
+    payload["artifacts"] = artifacts
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return json_path, payload
+
+
+def write_full_walk_forward_tuning_run(
+    run_result: Mapping[str, Any],
+    *,
+    output_dir: str | Path,
+) -> tuple[Path, dict[str, Any]]:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    json_path = output_path / "full_walk_forward_tuning_run.json"
+    payload = _jsonable(dict(run_result))
+    artifacts = dict(_as_mapping(payload.get("artifacts")))
+    artifacts["full_walk_forward_run_json"] = str(json_path)
     payload["artifacts"] = artifacts
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return json_path, payload
@@ -1193,6 +1313,51 @@ def _stage_score_gate_and_controls(contract: Mapping[str, Any], stage: str) -> t
     if not portfolio_controls:
         raise ValueError(f"contract stage missing portfolio_controls: {stage}")
     return score_gate, portfolio_controls
+
+
+def _scheduled_trials(contract: Mapping[str, Any], stage: str, mode: str) -> int:
+    stage_config = _as_mapping(_as_mapping(contract.get("stages")).get(stage))
+    key = "smoke_trials_per_fold" if mode == "smoke" else "standard_trials_per_fold"
+    value = stage_config.get(key)
+    if value is None:
+        raise ValueError(f"contract stage missing {key}: {stage}")
+    count = int(value)
+    if count <= 0:
+        raise ValueError(f"{stage}.{key} must be positive")
+    return count
+
+
+def _fold_artifact_identity(
+    *,
+    signal_cache_key: str,
+    fold_id: str,
+    mode: str,
+    stage_a_scheduled: int,
+    stage_b_scheduled: int,
+) -> str:
+    return _stable_hash(
+        {
+            "signal_cache_key": signal_cache_key,
+            "fold_id": fold_id,
+            "mode": mode,
+            "stage_a_scheduled": stage_a_scheduled,
+            "stage_b_scheduled": stage_b_scheduled,
+            "runner_schema": FULL_WALK_FORWARD_TUNING_RUN_SCHEMA,
+        }
+    )
+
+
+def _test_window_boundary(test_window: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "start": test_window.get("start"),
+        "end": test_window.get("end"),
+        "year": test_window.get("year"),
+        "evidence_use": "out_of_sample_evaluation_only",
+        "retunes_parameters": False,
+        "refits_score_gate": False,
+        "updates_stage_a_search_space": False,
+        "uses_stage_b_recommendations": True,
+    }
 
 
 def _stage_override_or_default(

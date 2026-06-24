@@ -13,6 +13,16 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-24 — 新增 full walk-forward tuning runner
+
+- 需求：继续推进 `#28 Full walk-forward standard runner`，把单 fold Stage A / Stage B 扩展为 5Y train / 1Y test / 1Y step 的完整 walk-forward 调度。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `run_full_walk_forward_tuning` 和写出函数，按合同生成 2020-2024 五个测试 fold，调度 Stage A / Stage B，复用同一个 decision cache identity，并记录 test window 只做样本外评估、不调参、不重拟合阈值、不更新 Stage A search-space。
+  - `attbacktrader/reports/__init__.py`：导出 full walk-forward runner schema、runner 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增离线 walk-forward fixture，验证 fold 年份、smoke/standard trial schedule、cache key 复用、resume/skip completed artifact，以及 test-window leakage 边界。
+  - `docs/FEATURES.md`：更新 full walk-forward runner 能力说明。
+- 影响：后续报告包可直接消费 fold-level Stage A / Stage B 输出；本 slice 仍使用小 trial fixture，不启动长标准研究。
+
 ## 2026-06-24 — 新增单 fold Stage B scored portfolio tuning
 
 - 需求：继续推进 `#27 Single-fold Stage B scored portfolio tuning`，在真实组合约束下运行单 fold Stage B 多目标参数调优，并输出候选推荐。

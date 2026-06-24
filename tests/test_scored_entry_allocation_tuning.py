@@ -7,6 +7,7 @@ import pytest
 from attbacktrader.cli import scored_entry_allocation_tuning as tuning_cli
 from attbacktrader.reports import (
     FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA,
+    FULL_WALK_FORWARD_TUNING_RUN_SCHEMA,
     SCORED_ENTRY_ALLOCATION_TUNING_CONTRACT_SCHEMA,
     SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA,
     SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA,
@@ -22,12 +23,14 @@ from attbacktrader.reports import (
     apply_fitted_score_gate_to_candidates,
     fit_training_score_gate_statistics,
     require_optuna_for_tuning,
+    run_full_walk_forward_tuning,
     run_fixed_parameter_scored_portfolio_smoke,
     run_scored_portfolio_baseline_comparison,
     run_single_fold_stage_a_pre_tuning,
     run_single_fold_stage_b_tuning,
     score_entry_candidates,
     simulate_scored_portfolio,
+    write_full_walk_forward_tuning_run,
     write_fixed_parameter_scored_portfolio_smoke_run,
     write_scored_portfolio_baseline_comparison,
     write_single_fold_stage_a_pre_tuning,
@@ -713,6 +716,70 @@ def test_single_fold_stage_b_tuning_uses_strict_gate_baseline_and_recommendation
     assert json.loads(json_path.read_text(encoding="utf-8"))["schema"] == SINGLE_FOLD_STAGE_B_TUNING_SCHEMA
 
 
+def test_full_walk_forward_runner_schedules_folds_reuses_cache_and_skips_completed(tmp_path: Path) -> None:
+    contract = build_scored_entry_allocation_tuning_contract(mode="dry-run")
+    table = build_strategy_decision_event_table(
+        _walk_forward_decision_events(),
+        cache_inputs=_decision_cache_inputs(),
+    )
+
+    run = run_full_walk_forward_tuning(
+        table,
+        contract=contract,
+        mode="smoke",
+        stage_a_trial_parameter_sets=_stage_a_trial_parameter_sets(),
+        stage_b_trial_parameter_sets=_stage_b_walk_forward_trial_parameter_sets(),
+        minimum_train_trades_per_year=0,
+    )
+
+    assert run["schema"] == FULL_WALK_FORWARD_TUNING_RUN_SCHEMA
+    assert run["test_years"] == [2020, 2021, 2022, 2023, 2024]
+    assert run["fold_count"] == 5
+    assert run["trial_schedule"] == {"stage_a_per_fold": 10, "stage_b_per_fold": 10}
+    assert run["decision_cache_reuse"]["same_cache_key_for_all_folds"] is True
+    assert len({fold["decision_cache_key"] for fold in run["folds"]}) == 1
+    assert all(fold["status"] == "completed" for fold in run["folds"])
+    assert all(fold["stage_a"]["scheduled_trial_count"] == 10 for fold in run["folds"])
+    assert all(fold["stage_b"]["scheduled_trial_count"] == 10 for fold in run["folds"])
+    assert all(fold["stage_a"]["result"]["evidence_use"] == "pre_tuning_only" for fold in run["folds"])
+    assert all(fold["stage_b"]["result"]["evidence_use"] == "portfolio_validation" for fold in run["folds"])
+    assert all(fold["test_window"]["evidence_use"] == "out_of_sample_evaluation_only" for fold in run["folds"])
+    assert all(fold["test_window"]["retunes_parameters"] is False for fold in run["folds"])
+    assert all(fold["test_window"]["refits_score_gate"] is False for fold in run["folds"])
+    assert all(fold["test_window"]["updates_stage_a_search_space"] is False for fold in run["folds"])
+
+    resumed = run_full_walk_forward_tuning(
+        table,
+        contract=contract,
+        mode="smoke",
+        stage_a_trial_parameter_sets=_stage_a_trial_parameter_sets(),
+        stage_b_trial_parameter_sets=_stage_b_walk_forward_trial_parameter_sets(),
+        completed_artifacts={run["folds"][0]["fold_id"]: run["folds"][0]["artifact_identity"]},
+        minimum_train_trades_per_year=0,
+    )
+
+    assert resumed["folds"][0]["status"] == "skipped_completed"
+    assert resumed["folds"][0]["stage_a"]["status"] == "skipped_completed"
+    assert resumed["folds"][1]["status"] == "completed"
+
+    standard = run_full_walk_forward_tuning(
+        table,
+        contract=contract,
+        mode="standard",
+        stage_a_trial_parameter_sets=_stage_a_trial_parameter_sets(),
+        stage_b_trial_parameter_sets=_stage_b_walk_forward_trial_parameter_sets(),
+        minimum_train_trades_per_year=0,
+    )
+
+    assert standard["trial_schedule"] == {"stage_a_per_fold": 300, "stage_b_per_fold": 300}
+
+    json_path, payload = write_full_walk_forward_tuning_run(run, output_dir=tmp_path)
+
+    assert json_path.exists()
+    assert payload["artifacts"]["full_walk_forward_run_json"] == str(json_path)
+    assert json.loads(json_path.read_text(encoding="utf-8"))["schema"] == FULL_WALK_FORWARD_TUNING_RUN_SCHEMA
+
+
 def test_stage_a_narrows_stage_b_ranges_and_report_selects_recommendations() -> None:
     stage_a_trials = [
         _trial("a1", annualized_return=0.20, sharpe_ratio=1.4, excess=0.10, max_drawdown=0.12, weights={"f1": 1.0, "f2": -0.8, "f3": -0.2}),
@@ -977,6 +1044,38 @@ def _stage_b_trial_parameter_sets() -> list[dict]:
     ]
 
 
+def _stage_b_walk_forward_trial_parameter_sets() -> list[dict]:
+    return [
+        {
+            "trial_id": "balanced",
+            "scorer_config": {
+                "factor_weights": {"rank_bucket": {"top": 2.0, "mid": 0.2, "low": -1.0}},
+                "interaction_weights": [
+                    {"name": "top_bonus", "fields": {"rank_bucket": "top"}, "weight": 0.4}
+                ],
+            },
+        },
+        {
+            "trial_id": "aggressive",
+            "scorer_config": {
+                "factor_weights": {"rank_bucket": {"top": 2.8, "mid": 0.4, "low": -1.1}},
+                "interaction_weights": [
+                    {"name": "top_bonus", "fields": {"rank_bucket": "top"}, "weight": 0.6}
+                ],
+            },
+        },
+        {
+            "trial_id": "defensive",
+            "scorer_config": {
+                "factor_weights": {"rank_bucket": {"top": 1.2, "mid": 0.0, "low": -0.7}},
+                "interaction_weights": [
+                    {"name": "top_bonus", "fields": {"rank_bucket": "top"}, "weight": 0.1}
+                ],
+            },
+        },
+    ]
+
+
 def _out_of_range_stage_b_trial_parameter_set() -> dict:
     return {
         "trial_id": "out-of-range",
@@ -987,6 +1086,25 @@ def _out_of_range_stage_b_trial_parameter_set() -> dict:
             ],
         },
     }
+
+
+def _walk_forward_decision_events() -> list[dict]:
+    events: list[dict] = []
+    for year in range(2019, 2025):
+        top_symbol = f"{year % 100:02d}0001.SZ"
+        mid_symbol = f"{year % 100:02d}0002.SZ"
+        low_symbol = f"{year % 100:02d}0003.SZ"
+        events.extend(
+            [
+                _rank_event(top_symbol, rank_bucket="top", industry="bank", stock_pool_order=1, trade_date=f"{year}-01-02", price=10.0),
+                _rank_event(mid_symbol, rank_bucket="mid", industry="tech", stock_pool_order=2, trade_date=f"{year}-01-02", price=10.0),
+                _rank_event(low_symbol, rank_bucket="low", industry="energy", stock_pool_order=3, trade_date=f"{year}-01-02", price=10.0),
+                _exit_event(top_symbol, trade_date=f"{year}-01-04", price=13.0, industry="bank"),
+                _exit_event(mid_symbol, trade_date=f"{year}-01-04", price=11.0, industry="tech"),
+                _exit_event(low_symbol, trade_date=f"{year}-01-04", price=8.0, industry="energy"),
+            ]
+        )
+    return events
 
 
 def _trial(
