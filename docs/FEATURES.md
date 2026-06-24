@@ -43,7 +43,7 @@ att-scored-entry-allocation-tuning --mode smoke --run-full-study \
 - Single-fold Stage B tuning：可在一个训练 fold 内用 Stage B strict gate、真实组合约束和 Stage A narrowed search space 执行 scored portfolio trial study，对照 Stage B unscored baseline，并输出 Pareto、balanced/aggressive/defensive 推荐和交易数门槛诊断。
 - Full walk-forward runner：按 5Y train / 1Y test / 1Y step 调度 2020-2024 五个 fold，支持 smoke / standard trial schedule、decision cache identity 复用、completed artifact resume/skip，并显式记录 test window 只做样本外评估，不调参、不重拟合 score gate、不更新 Stage A search-space。
 - Full study CLI：`--run-full-study` 可从已缓存的 Strategy Decision Event Table 与 Stage A / Stage B trial 参数 JSON 运行 full walk-forward，并写出 full run JSON、完整报告包、Pareto frontier 和 balanced/aggressive/defensive 参数文件。
-- Complete scored allocation report package：可从 full walk-forward run 生成机器可读 JSON、中文 Markdown、Pareto frontier artifact，以及 balanced/aggressive/defensive 参数文件；报告分离 Stage A 预调优、Stage B 训练与样本外评估边界，并显式列出缺失的 market-stage / factor-combination 切片原因。
+- Complete scored allocation report package：可从 full walk-forward run 生成机器可读 JSON、中文 Markdown、Pareto frontier artifact，以及 balanced/aggressive/defensive 参数文件；报告分离 Stage A 预调优、Stage B 训练与 Stage B 样本外组合评估，输出 OOS scored recommendation、OOS unscored baseline、OOS funnel 与训练窗漏斗，并显式列出缺失的 market-stage / factor-combination 切片原因。
 - Stage A elite 试验用于缩小 Stage B 搜索空间，不作为最终组合收益证据。
 - Stage B 报告输出 Pareto frontier，并选择 `balanced` / `aggressive` / `defensive` 推荐参数，同时记录低交易数拒绝原因。
 - Simulation cache identity 包含 signal cache identity、fold id、parameter hash、portfolio-control hash 和 simulator version。
