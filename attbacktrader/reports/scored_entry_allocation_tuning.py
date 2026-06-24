@@ -18,6 +18,7 @@ SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA = "attbacktrader.scored_portfolio_ba
 SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA = "attbacktrader.single_fold_stage_a_pre_tuning.v1"
 SINGLE_FOLD_STAGE_B_TUNING_SCHEMA = "attbacktrader.single_fold_stage_b_tuning.v1"
 FULL_WALK_FORWARD_TUNING_RUN_SCHEMA = "attbacktrader.full_walk_forward_tuning_run.v1"
+SCORED_ALLOCATION_REPORT_PACKAGE_SCHEMA = "attbacktrader.scored_allocation_report_package.v1"
 STRATEGY_DECISION_EVENT_TABLE_SCHEMA = "attbacktrader.strategy_decision_event_table.v1"
 
 _SUPPORTED_MODES = {"dry-run", "smoke", "standard", "sensitivity"}
@@ -59,6 +60,33 @@ _CORE_PORTFOLIO_METRICS = (
     "trade_count",
     "win_rate",
     "profit_loss_ratio",
+)
+_REPORT_METRIC_KEYS = (
+    "cumulative_return",
+    "annualized_return",
+    "monthly_returns",
+    "yearly_returns",
+    "benchmark_excess_return",
+    "max_drawdown",
+    "annualized_volatility",
+    "downside_volatility",
+    "sharpe_ratio",
+    "sortino_ratio",
+    "calmar_ratio",
+    "information_ratio",
+    "trade_count",
+    "win_rate",
+    "profit_loss_ratio",
+    "profit_factor",
+    "average_trade_return",
+    "median_trade_return",
+    "average_holding_days",
+    "average_cash_ratio",
+    "average_exposure",
+    "turnover",
+    "fee_slippage_ratio",
+    "single_symbol_maximum_weight",
+    "industry_concentration",
 )
 _STAGE_BASELINE_REGIMES = {
     "stage_a": "broad_high_capacity_unscored_candidate_filling",
@@ -913,6 +941,192 @@ def run_full_walk_forward_tuning(
     }
 
 
+def build_scored_allocation_report_package(run_result: Mapping[str, Any]) -> dict[str, Any]:
+    """Build the machine-readable scored allocation report package."""
+
+    if run_result.get("schema") != FULL_WALK_FORWARD_TUNING_RUN_SCHEMA:
+        raise ValueError("run_result must use the full walk-forward tuning run schema")
+    fold_reports: list[dict[str, Any]] = []
+    parameter_sets = {"balanced": [], "aggressive": [], "defensive": []}
+    stage_a_pareto: dict[str, Any] = {}
+    stage_b_pareto: dict[str, Any] = {}
+    stage_b_training_metrics: dict[str, Any] = {}
+    baseline_metrics: dict[str, Any] = {}
+    funnel_by_fold: dict[str, Any] = {}
+    yearly_stability: dict[str, Any] = {}
+    for fold in _as_sequence(run_result.get("folds")):
+        item = _as_mapping(fold)
+        fold_id = str(item.get("fold_id"))
+        test_window = _as_mapping(item.get("test_window"))
+        if item.get("status") != "completed":
+            fold_reports.append(
+                {
+                    "fold_id": fold_id,
+                    "status": item.get("status"),
+                    "test_window": _jsonable(dict(test_window)),
+                }
+            )
+            continue
+        stage_a_result = _as_mapping(_as_mapping(item.get("stage_a")).get("result"))
+        stage_b_result = _as_mapping(_as_mapping(item.get("stage_b")).get("result"))
+        stage_a_pareto[fold_id] = _jsonable(stage_a_result.get("pareto_frontier") or [])
+        stage_b_pareto[fold_id] = _jsonable(stage_b_result.get("pareto_frontier") or [])
+        recommendations = _as_mapping(stage_b_result.get("recommendations"))
+        for name in ("balanced", "aggressive", "defensive"):
+            parameter_sets[name].append(
+                {
+                    "fold_id": fold_id,
+                    "parameters": _jsonable(_as_mapping(_as_mapping(recommendations.get(name)).get("parameters"))),
+                    "trial_id": _as_mapping(recommendations.get(name)).get("trial_id"),
+                }
+            )
+        balanced = _as_mapping(recommendations.get("balanced"))
+        scored_metrics = _as_mapping(balanced.get("metrics"))
+        baseline = _as_mapping(stage_b_result.get("baseline"))
+        baseline_metric_values = _as_mapping(baseline.get("metrics"))
+        stage_b_training_metrics[fold_id] = _metric_snapshot(scored_metrics)
+        baseline_metrics[fold_id] = _metric_snapshot(baseline_metric_values)
+        funnel_by_fold[fold_id] = _aggregate_funnels(_as_sequence(stage_b_result.get("trials")))
+        year = str(test_window.get("year"))
+        yearly_stability[year] = {
+            "fold_id": fold_id,
+            "scored": stage_b_training_metrics[fold_id],
+            "unscored_baseline": baseline_metrics[fold_id],
+        }
+        fold_reports.append(
+            {
+                "fold_id": fold_id,
+                "status": "completed",
+                "stage_a": {
+                    "evidence_use": stage_a_result.get("evidence_use"),
+                    "trial_count": stage_a_result.get("trial_count"),
+                    "pareto_count": len(_as_sequence(stage_a_result.get("pareto_frontier"))),
+                    "elite_trial_ids": _jsonable(stage_a_result.get("elite_trial_ids") or []),
+                },
+                "stage_b": {
+                    "evidence_use": stage_b_result.get("evidence_use"),
+                    "trial_count": stage_b_result.get("trial_count"),
+                    "eligible_trial_count": stage_b_result.get("eligible_trial_count"),
+                    "pareto_count": len(_as_sequence(stage_b_result.get("pareto_frontier"))),
+                    "recommendations": {
+                        name: _jsonable(_as_mapping(recommendations.get(name)))
+                        for name in ("balanced", "aggressive", "defensive")
+                    },
+                    "baseline": _jsonable(baseline),
+                },
+                "out_of_sample": {
+                    "test_window": _jsonable(dict(test_window)),
+                    "evidence_status": "evaluation_boundary_recorded",
+                    "retunes_parameters": False,
+                    "refits_score_gate": False,
+                    "updates_stage_a_search_space": False,
+                },
+            }
+        )
+
+    return {
+        "schema": SCORED_ALLOCATION_REPORT_PACKAGE_SCHEMA,
+        "mode": run_result.get("mode"),
+        "fold_count": run_result.get("fold_count"),
+        "metric_keys": list(_REPORT_METRIC_KEYS),
+        "warning": "Stage A is pre-tuning evidence only; final conclusions must come from out-of-sample scored portfolio results.",
+        "folds": fold_reports,
+        "pareto_frontiers": {
+            "stage_a": stage_a_pareto,
+            "stage_b": stage_b_pareto,
+        },
+        "recommended_parameter_sets": parameter_sets,
+        "metrics": {
+            "stage_b_training_scored": stage_b_training_metrics,
+            "stage_b_unscored_baseline": baseline_metrics,
+        },
+        "stability": {
+            "yearly": yearly_stability,
+            "market_stage": {
+                "status": "not_available_in_current_fixture",
+                "missing_reason": "market-stage labels are not present in the deterministic fixture outputs",
+            },
+        },
+        "scored_entry_funnel": {
+            "global": _aggregate_funnel_dicts(funnel_by_fold.values()),
+            "by_fold": funnel_by_fold,
+            "by_year": {
+                str(_as_mapping(fold.get("test_window")).get("year")): funnel_by_fold.get(str(fold.get("fold_id")), {})
+                for fold in _as_sequence(run_result.get("folds"))
+            },
+            "by_market_stage": {
+                "status": "not_available_in_current_fixture",
+                "missing_reason": "market-stage labels are not present in the deterministic fixture outputs",
+            },
+            "by_factor_combination_hit_status": {
+                "status": "not_available_in_current_fixture",
+                "missing_reason": "factor-combination hit labels are not present in the deterministic fixture outputs",
+            },
+        },
+    }
+
+
+def render_scored_allocation_report_package_markdown_zh(package: Mapping[str, Any]) -> str:
+    lines = [
+        "# Scored Entry Allocation Tuning 报告",
+        "",
+        "## 关键警告",
+        "",
+        "- Stage A 只用于预调优和缩小 Stage B 搜索空间，不能当作最终组合收益证据。",
+        "- 最终结论必须来自样本外 scored portfolio 结果，并且要和真实约束下的 unscored baseline 对比。",
+        "",
+        "## 概览",
+        "",
+        f"- schema: `{package.get('schema')}`",
+        f"- mode: `{package.get('mode')}`",
+        f"- fold_count: `{package.get('fold_count')}`",
+        "",
+        "## Stage A 预调优",
+        "",
+    ]
+    for fold in _as_sequence(package.get("folds")):
+        item = _as_mapping(fold)
+        stage_a = _as_mapping(item.get("stage_a"))
+        if stage_a:
+            lines.append(
+                f"- `{item.get('fold_id')}`: trials={stage_a.get('trial_count')}, "
+                f"pareto={stage_a.get('pareto_count')}, elite={len(_as_sequence(stage_a.get('elite_trial_ids')))}"
+            )
+    lines.extend(["", "## Stage B 训练", ""])
+    for fold in _as_sequence(package.get("folds")):
+        item = _as_mapping(fold)
+        stage_b = _as_mapping(item.get("stage_b"))
+        if stage_b:
+            recs = _as_mapping(stage_b.get("recommendations"))
+            lines.append(
+                f"- `{item.get('fold_id')}`: eligible={stage_b.get('eligible_trial_count')}, "
+                f"balanced=`{_as_mapping(recs.get('balanced')).get('trial_id')}`, "
+                f"aggressive=`{_as_mapping(recs.get('aggressive')).get('trial_id')}`, "
+                f"defensive=`{_as_mapping(recs.get('defensive')).get('trial_id')}`"
+            )
+    lines.extend(["", "## 样本外评估边界", ""])
+    for fold in _as_sequence(package.get("folds")):
+        item = _as_mapping(fold)
+        oos = _as_mapping(item.get("out_of_sample"))
+        test = _as_mapping(oos.get("test_window"))
+        if oos:
+            lines.append(
+                f"- `{item.get('fold_id')}`: test={test.get('start')} to {test.get('end')}, "
+                f"retune={oos.get('retunes_parameters')}, refit_gate={oos.get('refits_score_gate')}"
+            )
+    lines.extend(["", "## 漏斗诊断", ""])
+    global_funnel = _as_mapping(_as_mapping(package.get("scored_entry_funnel")).get("global"))
+    for key, value in sorted(global_funnel.items()):
+        lines.append(f"- {key}: {value}")
+    lines.extend(["", "## 缺失切片说明", ""])
+    market_stage = _as_mapping(_as_mapping(package.get("stability")).get("market_stage"))
+    lines.append(f"- market-stage stability: {market_stage.get('missing_reason')}")
+    factor_slice = _as_mapping(_as_mapping(package.get("scored_entry_funnel")).get("by_factor_combination_hit_status"))
+    lines.append(f"- factor/combination funnel slice: {factor_slice.get('missing_reason')}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def write_fixed_parameter_scored_portfolio_smoke_run(
     smoke_run: Mapping[str, Any],
     *,
@@ -991,6 +1205,48 @@ def write_full_walk_forward_tuning_run(
     payload["artifacts"] = artifacts
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return json_path, payload
+
+
+def write_scored_allocation_report_package(
+    package: Mapping[str, Any],
+    *,
+    output_dir: str | Path,
+) -> tuple[dict[str, Path], dict[str, Any]]:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    package_json_path = output_path / "scored_allocation_report_package.json"
+    markdown_path = output_path / "scored_allocation_report_package.zh.md"
+    pareto_path = output_path / "pareto_frontiers.json"
+    parameter_paths = {
+        "balanced": output_path / "balanced_parameters.json",
+        "aggressive": output_path / "aggressive_parameters.json",
+        "defensive": output_path / "defensive_parameters.json",
+    }
+    payload = _jsonable(dict(package))
+    artifacts = {
+        "package_json": str(package_json_path),
+        "markdown_zh": str(markdown_path),
+        "pareto_frontiers_json": str(pareto_path),
+        "balanced_parameters_json": str(parameter_paths["balanced"]),
+        "aggressive_parameters_json": str(parameter_paths["aggressive"]),
+        "defensive_parameters_json": str(parameter_paths["defensive"]),
+    }
+    payload["artifacts"] = artifacts
+    for name, path in parameter_paths.items():
+        path.write_text(
+            json.dumps(_jsonable(_as_mapping(payload.get("recommended_parameter_sets")).get(name) or []), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    pareto_path.write_text(json.dumps(_jsonable(payload.get("pareto_frontiers") or {}), ensure_ascii=False, indent=2), encoding="utf-8")
+    markdown_path.write_text(render_scored_allocation_report_package_markdown_zh(payload), encoding="utf-8")
+    package_json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    paths = {
+        "package_json": package_json_path,
+        "markdown_zh": markdown_path,
+        "pareto_frontiers_json": pareto_path,
+        **{f"{name}_parameters_json": path for name, path in parameter_paths.items()},
+    }
+    return paths, payload
 
 
 def _simulate_scored_portfolio_from_normalized(
@@ -1549,6 +1805,30 @@ def _core_metric_delta(scored: Mapping[str, Any], baseline: Mapping[str, Any]) -
         key: _number_or_zero(scored.get(key)) - _number_or_zero(baseline.get(key))
         for key in _CORE_PORTFOLIO_METRICS
     }
+
+
+def _metric_snapshot(metrics: Mapping[str, Any]) -> dict[str, Any]:
+    values = {key: _jsonable(metrics.get(key)) for key in _REPORT_METRIC_KEYS}
+    missing = [key for key in _REPORT_METRIC_KEYS if key not in metrics]
+    return {
+        "values": values,
+        "missing_metric_fields": missing,
+    }
+
+
+def _aggregate_funnels(trials: Sequence[Any]) -> dict[str, int]:
+    return _aggregate_funnel_dicts(
+        _as_mapping(_as_mapping(trial).get("funnel"))
+        for trial in trials
+    )
+
+
+def _aggregate_funnel_dicts(funnels: Any) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for funnel in funnels:
+        for key, value in _as_mapping(funnel).items():
+            totals[str(key)] = totals.get(str(key), 0) + int(value or 0)
+    return totals
 
 
 def require_optuna_for_tuning(*, import_module: Any = importlib.import_module) -> Any:

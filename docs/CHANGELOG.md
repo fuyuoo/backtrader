@@ -13,6 +13,16 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-24 — 新增 Scored Allocation 完整报告包
+
+- 需求：继续推进 `#29 Complete scored allocation report package`，生成机器可读 JSON 与中文 Markdown 报告包，汇总 Stage A、Stage B、样本外边界、Pareto、推荐参数、baseline、稳定性和漏斗诊断。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `build_scored_allocation_report_package`、中文 Markdown renderer 和写出函数，输出 package JSON、中文 Markdown、Pareto frontier JSON，以及 balanced/aggressive/defensive 参数文件。
+  - `attbacktrader/reports/__init__.py`：导出报告包 schema、builder、renderer 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增 deterministic full-run fixture 报告测试，验证 schema、关键中文章节、Stage A 风险提示、指标目录、缺失指标显式列出、稳定性/漏斗切片和 artifact 文件。
+  - `docs/FEATURES.md`：更新完整报告包能力说明。
+- 影响：报告层会显式警告 Stage A 只是预调优证据；当前 fixture 缺少 market-stage 与 factor-combination 切片时会在报告中明示缺失原因，不静默伪造数据。
+
 ## 2026-06-24 — 新增 full walk-forward tuning runner
 
 - 需求：继续推进 `#28 Full walk-forward standard runner`，把单 fold Stage A / Stage B 扩展为 5Y train / 1Y test / 1Y step 的完整 walk-forward 调度。

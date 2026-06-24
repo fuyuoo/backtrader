@@ -8,12 +8,14 @@ from attbacktrader.cli import scored_entry_allocation_tuning as tuning_cli
 from attbacktrader.reports import (
     FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA,
     FULL_WALK_FORWARD_TUNING_RUN_SCHEMA,
+    SCORED_ALLOCATION_REPORT_PACKAGE_SCHEMA,
     SCORED_ENTRY_ALLOCATION_TUNING_CONTRACT_SCHEMA,
     SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA,
     SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA,
     SINGLE_FOLD_STAGE_B_TUNING_SCHEMA,
     STRATEGY_DECISION_EVENT_TABLE_SCHEMA,
     build_scored_entry_allocation_tuning_report,
+    build_scored_allocation_report_package,
     build_simulation_cache_identity,
     build_strategy_decision_event_table_from_intents,
     build_stage_b_search_space_from_stage_a,
@@ -23,6 +25,7 @@ from attbacktrader.reports import (
     apply_fitted_score_gate_to_candidates,
     fit_training_score_gate_statistics,
     require_optuna_for_tuning,
+    render_scored_allocation_report_package_markdown_zh,
     run_full_walk_forward_tuning,
     run_fixed_parameter_scored_portfolio_smoke,
     run_scored_portfolio_baseline_comparison,
@@ -31,6 +34,7 @@ from attbacktrader.reports import (
     score_entry_candidates,
     simulate_scored_portfolio,
     write_full_walk_forward_tuning_run,
+    write_scored_allocation_report_package,
     write_fixed_parameter_scored_portfolio_smoke_run,
     write_scored_portfolio_baseline_comparison,
     write_single_fold_stage_a_pre_tuning,
@@ -778,6 +782,59 @@ def test_full_walk_forward_runner_schedules_folds_reuses_cache_and_skips_complet
     assert json_path.exists()
     assert payload["artifacts"]["full_walk_forward_run_json"] == str(json_path)
     assert json.loads(json_path.read_text(encoding="utf-8"))["schema"] == FULL_WALK_FORWARD_TUNING_RUN_SCHEMA
+
+
+def test_scored_allocation_report_package_schema_markdown_and_artifacts(tmp_path: Path) -> None:
+    contract = build_scored_entry_allocation_tuning_contract(mode="dry-run")
+    table = build_strategy_decision_event_table(
+        _walk_forward_decision_events(),
+        cache_inputs=_decision_cache_inputs(),
+    )
+    run = run_full_walk_forward_tuning(
+        table,
+        contract=contract,
+        mode="smoke",
+        stage_a_trial_parameter_sets=_stage_a_trial_parameter_sets(),
+        stage_b_trial_parameter_sets=_stage_b_walk_forward_trial_parameter_sets(),
+        minimum_train_trades_per_year=0,
+    )
+
+    package = build_scored_allocation_report_package(run)
+    markdown = render_scored_allocation_report_package_markdown_zh(package)
+
+    assert package["schema"] == SCORED_ALLOCATION_REPORT_PACKAGE_SCHEMA
+    assert package["fold_count"] == 5
+    assert "Stage A is pre-tuning evidence only" in package["warning"]
+    assert {"balanced", "aggressive", "defensive"} == set(package["recommended_parameter_sets"])
+    assert len(package["recommended_parameter_sets"]["balanced"]) == 5
+    assert "stage_a" in package["pareto_frontiers"]
+    assert "stage_b" in package["pareto_frontiers"]
+    assert "monthly_returns" in package["metric_keys"]
+    assert "yearly_returns" in package["metric_keys"]
+    first_fold = run["folds"][0]["fold_id"]
+    assert "monthly_returns" in package["metrics"]["stage_b_training_scored"][first_fold]["missing_metric_fields"]
+    assert "yearly" in package["stability"]
+    assert "market_stage" in package["stability"]
+    assert "by_fold" in package["scored_entry_funnel"]
+    assert "by_year" in package["scored_entry_funnel"]
+    assert "by_market_stage" in package["scored_entry_funnel"]
+    assert "by_factor_combination_hit_status" in package["scored_entry_funnel"]
+    assert "Stage A 只用于预调优" in markdown
+    assert "最终结论必须来自样本外 scored portfolio 结果" in markdown
+    assert "## Stage B 训练" in markdown
+    assert "## 漏斗诊断" in markdown
+
+    paths, payload = write_scored_allocation_report_package(package, output_dir=tmp_path)
+
+    assert paths["package_json"].exists()
+    assert paths["markdown_zh"].exists()
+    assert paths["pareto_frontiers_json"].exists()
+    assert paths["balanced_parameters_json"].exists()
+    assert paths["aggressive_parameters_json"].exists()
+    assert paths["defensive_parameters_json"].exists()
+    assert payload["artifacts"]["balanced_parameters_json"] == str(paths["balanced_parameters_json"])
+    assert json.loads(paths["package_json"].read_text(encoding="utf-8"))["schema"] == SCORED_ALLOCATION_REPORT_PACKAGE_SCHEMA
+    assert "关键警告" in paths["markdown_zh"].read_text(encoding="utf-8")
 
 
 def test_stage_a_narrows_stage_b_ranges_and_report_selects_recommendations() -> None:
