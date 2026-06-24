@@ -13,6 +13,16 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-24 — 新增单 fold Stage B scored portfolio tuning
+
+- 需求：继续推进 `#27 Single-fold Stage B scored portfolio tuning`，在真实组合约束下运行单 fold Stage B 多目标参数调优，并输出候选推荐。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `run_single_fold_stage_b_tuning` 和写出函数，使用 Stage B strict score gate、真实组合约束和 Stage A narrowed search space 跑 trial study，并与 Stage B unscored baseline 对照。
+  - `attbacktrader/reports/__init__.py`：导出 Stage B tuning schema、runner 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增小 fixture，验证默认 train-per-year 交易数门槛、Stage B baseline、Pareto 输出、balanced/aggressive/defensive 推荐、search-space 越界失败和 JSON artifact 写出。
+  - `docs/FEATURES.md`：更新 Stage B tuning 能力说明。
+- 影响：为后续 full walk-forward runner 提供单 fold Stage B 纵切；默认交易数门槛仍按合同执行，测试通过显式小门槛避免长运行。
+
 ## 2026-06-24 — 新增单 fold Stage A pre-tuning
 
 - 需求：继续推进 `#26 Single-fold Stage A pre-tuning`，用宽 score gate 与高容量约束跑通单训练窗的 Stage A 参数预调优。

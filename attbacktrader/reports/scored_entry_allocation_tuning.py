@@ -16,6 +16,7 @@ SCORED_ENTRY_ALLOCATION_TUNING_REPORT_SCHEMA = "attbacktrader.scored_entry_alloc
 FIXED_PARAMETER_SCORED_PORTFOLIO_SMOKE_RUN_SCHEMA = "attbacktrader.fixed_parameter_scored_portfolio_smoke_run.v1"
 SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA = "attbacktrader.scored_portfolio_baseline_comparison.v1"
 SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA = "attbacktrader.single_fold_stage_a_pre_tuning.v1"
+SINGLE_FOLD_STAGE_B_TUNING_SCHEMA = "attbacktrader.single_fold_stage_b_tuning.v1"
 STRATEGY_DECISION_EVENT_TABLE_SCHEMA = "attbacktrader.strategy_decision_event_table.v1"
 
 _SUPPORTED_MODES = {"dry-run", "smoke", "standard", "sensitivity"}
@@ -706,6 +707,108 @@ def run_single_fold_stage_a_pre_tuning(
     }
 
 
+def run_single_fold_stage_b_tuning(
+    decision_event_table: Mapping[str, Any],
+    *,
+    contract: Mapping[str, Any],
+    fold: Mapping[str, Any],
+    stage_b_search_space: Mapping[str, Any],
+    trial_parameter_sets: Sequence[Mapping[str, Any]],
+    minimum_train_trades_per_year: int | None = None,
+) -> dict[str, Any]:
+    """Run one-fold Stage B scored portfolio tuning under realistic constraints."""
+
+    if not trial_parameter_sets:
+        raise ValueError("trial_parameter_sets cannot be empty")
+    fold_id = str(fold.get("fold_id") or "")
+    if not fold_id:
+        raise ValueError("fold.fold_id is required")
+    score_gate, portfolio_controls = _stage_score_gate_and_controls(contract, "stage_b")
+    training_events = _decision_events_for_fold_window(decision_event_table, fold, window="train")
+    if not training_events:
+        raise ValueError(f"fold {fold_id} has no training decision events")
+    baseline_simulation = simulate_scored_portfolio(
+        training_events,
+        scorer_config=_baseline_scorer_config(training_events),
+        training_events=training_events,
+        score_gate=_UNSCORED_BASELINE_SCORE_GATE,
+        portfolio_controls=portfolio_controls,
+        unscored_baseline=True,
+    )
+
+    trials: list[dict[str, Any]] = []
+    for index, trial_parameters in enumerate(trial_parameter_sets, start=1):
+        item = _as_mapping(trial_parameters)
+        trial_id = str(item.get("trial_id") or f"stage-b-{index:03d}")
+        scorer_config = _trial_scorer_config(item)
+        weights = _flatten_scorer_weights(scorer_config)
+        _assert_trial_within_stage_b_search_space(weights, stage_b_search_space)
+        simulation = simulate_scored_portfolio(
+            training_events,
+            scorer_config=scorer_config,
+            training_events=training_events,
+            score_gate=score_gate,
+            portfolio_controls=portfolio_controls,
+        )
+        metrics = dict(_as_mapping(simulation.get("metrics")))
+        metrics["funnel_counts"] = _jsonable(simulation.get("funnel") or {})
+        metrics["core_metric_delta_vs_unscored_baseline"] = _core_metric_delta(
+            _core_portfolio_metrics(_as_mapping(metrics)),
+            _core_portfolio_metrics(_as_mapping(baseline_simulation.get("metrics"))),
+        )
+        objectives = {key: metrics.get(key, 0.0) for key in _OBJECTIVES}
+        trials.append(
+            {
+                "trial_id": trial_id,
+                "fold_id": fold_id,
+                "stage": "stage_b",
+                "parameters": {
+                    "weights": weights,
+                    "scorer_config": _jsonable(dict(scorer_config)),
+                },
+                "objectives": _jsonable(objectives),
+                "metrics": _jsonable(metrics),
+                "funnel": _jsonable(simulation.get("funnel") or {}),
+                "selected_entry_count": len(_as_sequence(simulation.get("executed_entries"))),
+            }
+        )
+
+    gate_config = _stage_b_trade_count_gate(
+        contract,
+        fold,
+        minimum_train_trades_per_year=minimum_train_trades_per_year,
+    )
+    eligible, rejected = _eligible_trials(trials, min_trade_count=gate_config["minimum_train_trade_count"])
+    recommendations = _select_recommendations(eligible)
+    recommendations["rejected"] = _jsonable(rejected)
+    return {
+        "schema": SINGLE_FOLD_STAGE_B_TUNING_SCHEMA,
+        "fold_id": fold_id,
+        "stage": "stage_b",
+        "evidence_use": "portfolio_validation",
+        "score_gate": _jsonable(dict(score_gate)),
+        "portfolio_controls": _jsonable(dict(portfolio_controls)),
+        "stage_b_search_space": _jsonable(dict(stage_b_search_space)),
+        "baseline": {
+            "result_type": "unscored_baseline",
+            "portfolio_controls": _jsonable(dict(portfolio_controls)),
+            "metrics": _jsonable(baseline_simulation.get("metrics") or {}),
+            "funnel": _jsonable(baseline_simulation.get("funnel") or {}),
+            "core_metrics": _core_portfolio_metrics(_as_mapping(baseline_simulation.get("metrics"))),
+        },
+        "objective_keys": list(_OBJECTIVES),
+        "trade_count_gates": gate_config,
+        "trial_count": len(trials),
+        "eligible_trial_count": len(eligible),
+        "rejected_trial_count": len(rejected),
+        "trials": _jsonable(trials),
+        "eligible_trials": _jsonable(eligible),
+        "rejected_trials": _jsonable(rejected),
+        "pareto_frontier": _pareto_frontier(eligible),
+        "recommendations": recommendations,
+    }
+
+
 def write_fixed_parameter_scored_portfolio_smoke_run(
     smoke_run: Mapping[str, Any],
     *,
@@ -749,6 +852,22 @@ def write_single_fold_stage_a_pre_tuning(
     payload = _jsonable(dict(stage_a_result))
     artifacts = dict(_as_mapping(payload.get("artifacts")))
     artifacts["stage_a_pre_tuning_json"] = str(json_path)
+    payload["artifacts"] = artifacts
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return json_path, payload
+
+
+def write_single_fold_stage_b_tuning(
+    stage_b_result: Mapping[str, Any],
+    *,
+    output_dir: str | Path,
+) -> tuple[Path, dict[str, Any]]:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    json_path = output_path / "single_fold_stage_b_tuning.json"
+    payload = _jsonable(dict(stage_b_result))
+    artifacts = dict(_as_mapping(payload.get("artifacts")))
+    artifacts["stage_b_tuning_json"] = str(json_path)
     payload["artifacts"] = artifacts
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return json_path, payload
@@ -1115,6 +1234,13 @@ def _trial_scorer_config(trial_parameters: Mapping[str, Any]) -> Mapping[str, An
     return scorer_config
 
 
+def _baseline_scorer_config(events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    fields: set[str] = set()
+    for event in events:
+        fields.update(str(key) for key in _as_mapping(event.get("evidence")))
+    return {"factor_weights": {field: {} for field in sorted(fields)}}
+
+
 def _flatten_scorer_weights(scorer_config: Mapping[str, Any]) -> dict[str, float]:
     weights: dict[str, float] = {}
     for field, bucket_weights in _as_mapping(scorer_config.get("factor_weights")).items():
@@ -1138,6 +1264,54 @@ def _infer_weight_keys(trials: Sequence[Mapping[str, Any]]) -> list[str]:
     for trial in trials:
         keys.update(str(key) for key in _as_mapping(_as_mapping(trial.get("parameters")).get("weights")))
     return sorted(keys)
+
+
+def _assert_trial_within_stage_b_search_space(
+    weights: Mapping[str, Any],
+    stage_b_search_space: Mapping[str, Any],
+) -> None:
+    search_weights = _as_mapping(stage_b_search_space.get("weights"))
+    if not search_weights:
+        raise ValueError("stage_b_search_space.weights cannot be empty")
+    violations: list[str] = []
+    for key, limits in search_weights.items():
+        bounds = _as_mapping(limits)
+        if key not in weights:
+            violations.append(f"{key}=<missing>")
+            continue
+        value = _number_or_zero(weights.get(key))
+        low = _number_or_none(bounds.get("low"))
+        high = _number_or_none(bounds.get("high"))
+        if low is None or high is None:
+            raise ValueError(f"stage_b_search_space weight missing low/high: {key}")
+        if value < low or value > high:
+            violations.append(f"{key}={value} outside [{low}, {high}]")
+    if violations:
+        raise ValueError("trial scorer weights outside Stage B narrowed search space: " + "; ".join(violations))
+
+
+def _stage_b_trade_count_gate(
+    contract: Mapping[str, Any],
+    fold: Mapping[str, Any],
+    *,
+    minimum_train_trades_per_year: int | None,
+) -> dict[str, int]:
+    gates = _as_mapping(contract.get("trade_count_gates"))
+    train_per_year = (
+        int(minimum_train_trades_per_year)
+        if minimum_train_trades_per_year is not None
+        else int(gates.get("train_per_year") or 50)
+    )
+    if train_per_year < 0:
+        raise ValueError("minimum_train_trades_per_year must be non-negative")
+    train_years = len(_as_sequence(_as_mapping(fold.get("train")).get("years"))) or 1
+    return {
+        "train_per_year": train_per_year,
+        "train_years": train_years,
+        "minimum_train_trade_count": train_per_year * train_years,
+        "test_per_year": int(gates.get("test_per_year") or 20),
+        "full_out_of_sample_total": int(gates.get("full_out_of_sample_total") or 120),
+    }
 
 
 def _balanced_top_trials(trials: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:

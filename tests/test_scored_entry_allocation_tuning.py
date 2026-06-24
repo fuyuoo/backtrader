@@ -10,6 +10,7 @@ from attbacktrader.reports import (
     SCORED_ENTRY_ALLOCATION_TUNING_CONTRACT_SCHEMA,
     SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA,
     SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA,
+    SINGLE_FOLD_STAGE_B_TUNING_SCHEMA,
     STRATEGY_DECISION_EVENT_TABLE_SCHEMA,
     build_scored_entry_allocation_tuning_report,
     build_simulation_cache_identity,
@@ -24,11 +25,13 @@ from attbacktrader.reports import (
     run_fixed_parameter_scored_portfolio_smoke,
     run_scored_portfolio_baseline_comparison,
     run_single_fold_stage_a_pre_tuning,
+    run_single_fold_stage_b_tuning,
     score_entry_candidates,
     simulate_scored_portfolio,
     write_fixed_parameter_scored_portfolio_smoke_run,
     write_scored_portfolio_baseline_comparison,
     write_single_fold_stage_a_pre_tuning,
+    write_single_fold_stage_b_tuning,
     write_scored_entry_allocation_tuning_contract,
 )
 from attbacktrader.strategies import TradeIntent, TradeIntentType
@@ -631,6 +634,85 @@ def test_single_fold_stage_a_pre_tuning_runs_broad_gate_and_emits_elite_search_s
     assert json.loads(json_path.read_text(encoding="utf-8"))["schema"] == SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA
 
 
+def test_single_fold_stage_b_tuning_uses_strict_gate_baseline_and_recommendations(tmp_path: Path) -> None:
+    contract = build_scored_entry_allocation_tuning_contract(mode="dry-run")
+    fold = contract["folds"][0]
+    table = build_strategy_decision_event_table(
+        [
+            _rank_event("000001.SZ", rank_bucket="top", industry="bank", stock_pool_order=1, trade_date="2019-01-02", price=10.0),
+            _rank_event("000002.SZ", rank_bucket="mid", industry="tech", stock_pool_order=2, trade_date="2019-01-02", price=10.0),
+            _rank_event("000003.SZ", rank_bucket="low", industry="energy", stock_pool_order=3, trade_date="2019-01-02", price=10.0),
+            _exit_event("000001.SZ", trade_date="2019-01-04", price=14.0, industry="bank"),
+            _exit_event("000002.SZ", trade_date="2019-01-04", price=11.0, industry="tech"),
+            _exit_event("000003.SZ", trade_date="2019-01-04", price=8.0, industry="energy"),
+        ],
+        cache_inputs=_decision_cache_inputs(),
+    )
+
+    default_gate_result = run_single_fold_stage_b_tuning(
+        table,
+        contract=contract,
+        fold=fold,
+        stage_b_search_space=_stage_b_search_space(),
+        trial_parameter_sets=_stage_b_trial_parameter_sets(),
+    )
+
+    assert default_gate_result["schema"] == SINGLE_FOLD_STAGE_B_TUNING_SCHEMA
+    assert default_gate_result["score_gate"] == {"minimum_score_z": 0.75, "minimum_score_quantile": 0.7}
+    assert default_gate_result["portfolio_controls"]["initial_cash"] == 10_000_000
+    assert default_gate_result["portfolio_controls"]["max_holding_count"] == 20
+    assert default_gate_result["portfolio_controls"]["max_new_positions_per_day"] == 3
+    assert default_gate_result["trade_count_gates"]["train_per_year"] == 50
+    assert default_gate_result["trade_count_gates"]["minimum_train_trade_count"] == 250
+    assert default_gate_result["eligible_trial_count"] == 0
+    assert default_gate_result["rejected_trial_count"] == 3
+
+    result = run_single_fold_stage_b_tuning(
+        table,
+        contract=contract,
+        fold=fold,
+        stage_b_search_space=_stage_b_search_space(),
+        trial_parameter_sets=_stage_b_trial_parameter_sets(),
+        minimum_train_trades_per_year=0,
+    )
+
+    assert result["stage"] == "stage_b"
+    assert result["evidence_use"] == "portfolio_validation"
+    assert result["baseline"]["result_type"] == "unscored_baseline"
+    assert result["baseline"]["portfolio_controls"]["max_holding_count"] == 20
+    assert "core_metrics" in result["baseline"]
+    assert result["trade_count_gates"]["train_per_year"] == 0
+    assert result["eligible_trial_count"] == 3
+    assert result["rejected_trial_count"] == 0
+    assert result["objective_keys"] == [
+        "annualized_return",
+        "sharpe_ratio",
+        "benchmark_excess_return",
+        "max_drawdown",
+    ]
+    assert result["pareto_frontier"]
+    assert result["recommendations"]["balanced"]["trial_id"] in {"balanced", "aggressive", "defensive"}
+    assert result["recommendations"]["aggressive"]["trial_id"] in {"balanced", "aggressive", "defensive"}
+    assert result["recommendations"]["defensive"]["trial_id"] in {"balanced", "aggressive", "defensive"}
+    assert all("core_metric_delta_vs_unscored_baseline" in trial["metrics"] for trial in result["trials"])
+
+    with pytest.raises(ValueError, match="outside Stage B narrowed search space"):
+        run_single_fold_stage_b_tuning(
+            table,
+            contract=contract,
+            fold=fold,
+            stage_b_search_space=_stage_b_search_space(),
+            trial_parameter_sets=[_out_of_range_stage_b_trial_parameter_set()],
+            minimum_train_trades_per_year=0,
+        )
+
+    json_path, payload = write_single_fold_stage_b_tuning(result, output_dir=tmp_path)
+
+    assert json_path.exists()
+    assert payload["artifacts"]["stage_b_tuning_json"] == str(json_path)
+    assert json.loads(json_path.read_text(encoding="utf-8"))["schema"] == SINGLE_FOLD_STAGE_B_TUNING_SCHEMA
+
+
 def test_stage_a_narrows_stage_b_ranges_and_report_selects_recommendations() -> None:
     stage_a_trials = [
         _trial("a1", annualized_return=0.20, sharpe_ratio=1.4, excess=0.10, max_drawdown=0.12, weights={"f1": 1.0, "f2": -0.8, "f3": -0.2}),
@@ -848,6 +930,63 @@ def _stage_a_trial_parameter_sets() -> list[dict]:
             },
         },
     ]
+
+
+def _stage_b_search_space() -> dict:
+    return {
+        "schema": "attbacktrader.stage_b_search_space_from_stage_a.v1",
+        "evidence_use": "narrows_stage_b_search_space_only",
+        "weights": {
+            "factor:rank_bucket=top": {"classification": "stable_positive", "low": 0.0, "high": 6.0},
+            "factor:rank_bucket=mid": {"classification": "unstable", "low": -0.5, "high": 1.0},
+            "factor:rank_bucket=low": {"classification": "stable_negative", "low": -3.0, "high": 0.0},
+            "interaction:top_bonus": {"classification": "stable_positive", "low": 0.0, "high": 3.0},
+        },
+    }
+
+
+def _stage_b_trial_parameter_sets() -> list[dict]:
+    return [
+        {
+            "trial_id": "balanced",
+            "scorer_config": {
+                "factor_weights": {"rank_bucket": {"top": 2.0, "mid": 0.4, "low": -1.0}},
+                "interaction_weights": [
+                    {"name": "top_bonus", "fields": {"rank_bucket": "top"}, "weight": 0.4}
+                ],
+            },
+        },
+        {
+            "trial_id": "aggressive",
+            "scorer_config": {
+                "factor_weights": {"rank_bucket": {"top": 5.0, "mid": 0.8, "low": -2.0}},
+                "interaction_weights": [
+                    {"name": "top_bonus", "fields": {"rank_bucket": "top"}, "weight": 1.5}
+                ],
+            },
+        },
+        {
+            "trial_id": "defensive",
+            "scorer_config": {
+                "factor_weights": {"rank_bucket": {"top": 1.0, "mid": 0.0, "low": -0.5}},
+                "interaction_weights": [
+                    {"name": "top_bonus", "fields": {"rank_bucket": "top"}, "weight": 0.1}
+                ],
+            },
+        },
+    ]
+
+
+def _out_of_range_stage_b_trial_parameter_set() -> dict:
+    return {
+        "trial_id": "out-of-range",
+        "scorer_config": {
+            "factor_weights": {"rank_bucket": {"top": 99.0, "mid": 0.0, "low": -0.5}},
+            "interaction_weights": [
+                {"name": "top_bonus", "fields": {"rank_bucket": "top"}, "weight": 0.1}
+            ],
+        },
+    }
 
 
 def _trial(
