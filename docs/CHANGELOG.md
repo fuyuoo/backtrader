@@ -13,6 +13,106 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-24 — 新增 Scored Allocation full study CLI 入口
+
+- 需求：继续推进 #30 前置证据缺口，让已实现的 full walk-forward runner 和报告包可以从本地 artifact 直接生成标准研究包。
+- 改动：
+  - `attbacktrader/cli/scored_entry_allocation_tuning.py`：新增 `--run-full-study`、`--decision-event-table`、`--stage-a-trials`、`--stage-b-trials`、`--completed-artifacts` 和 `--minimum-train-trades-per-year` 参数，串联 contract、full walk-forward run 与 scored allocation report package 写出。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增 CLI full-study 测试，使用 deterministic decision event table 和 Stage A / Stage B trial 参数 JSON 验证 full run、报告包和推荐参数文件落盘。
+  - `docs/FEATURES.md`：补充 full study CLI 示例和能力说明。
+- 影响：#30 仍需要真实标准研究输入数据；新入口解决的是从已缓存决策事件和 trial 参数生成可审报告包的问题，不把 contract 输出误当研究结论。
+
+## 2026-06-24 — 新增 Scored Allocation 完整报告包
+
+- 需求：继续推进 `#29 Complete scored allocation report package`，生成机器可读 JSON 与中文 Markdown 报告包，汇总 Stage A、Stage B、样本外边界、Pareto、推荐参数、baseline、稳定性和漏斗诊断。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `build_scored_allocation_report_package`、中文 Markdown renderer 和写出函数，输出 package JSON、中文 Markdown、Pareto frontier JSON，以及 balanced/aggressive/defensive 参数文件。
+  - `attbacktrader/reports/__init__.py`：导出报告包 schema、builder、renderer 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增 deterministic full-run fixture 报告测试，验证 schema、关键中文章节、Stage A 风险提示、指标目录、缺失指标显式列出、稳定性/漏斗切片和 artifact 文件。
+  - `docs/FEATURES.md`：更新完整报告包能力说明。
+- 影响：报告层会显式警告 Stage A 只是预调优证据；当前 fixture 缺少 market-stage 与 factor-combination 切片时会在报告中明示缺失原因，不静默伪造数据。
+
+## 2026-06-24 — 新增 full walk-forward tuning runner
+
+- 需求：继续推进 `#28 Full walk-forward standard runner`，把单 fold Stage A / Stage B 扩展为 5Y train / 1Y test / 1Y step 的完整 walk-forward 调度。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `run_full_walk_forward_tuning` 和写出函数，按合同生成 2020-2024 五个测试 fold，调度 Stage A / Stage B，复用同一个 decision cache identity，并记录 test window 只做样本外评估、不调参、不重拟合阈值、不更新 Stage A search-space。
+  - `attbacktrader/reports/__init__.py`：导出 full walk-forward runner schema、runner 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增离线 walk-forward fixture，验证 fold 年份、smoke/standard trial schedule、cache key 复用、resume/skip completed artifact，以及 test-window leakage 边界。
+  - `docs/FEATURES.md`：更新 full walk-forward runner 能力说明。
+- 影响：后续报告包可直接消费 fold-level Stage A / Stage B 输出；本 slice 仍使用小 trial fixture，不启动长标准研究。
+
+## 2026-06-24 — 新增单 fold Stage B scored portfolio tuning
+
+- 需求：继续推进 `#27 Single-fold Stage B scored portfolio tuning`，在真实组合约束下运行单 fold Stage B 多目标参数调优，并输出候选推荐。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `run_single_fold_stage_b_tuning` 和写出函数，使用 Stage B strict score gate、真实组合约束和 Stage A narrowed search space 跑 trial study，并与 Stage B unscored baseline 对照。
+  - `attbacktrader/reports/__init__.py`：导出 Stage B tuning schema、runner 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增小 fixture，验证默认 train-per-year 交易数门槛、Stage B baseline、Pareto 输出、balanced/aggressive/defensive 推荐、search-space 越界失败和 JSON artifact 写出。
+  - `docs/FEATURES.md`：更新 Stage B tuning 能力说明。
+- 影响：为后续 full walk-forward runner 提供单 fold Stage B 纵切；默认交易数门槛仍按合同执行，测试通过显式小门槛避免长运行。
+
+## 2026-06-24 — 新增单 fold Stage A pre-tuning
+
+- 需求：继续推进 `#26 Single-fold Stage A pre-tuning`，用宽 score gate 与高容量约束跑通单训练窗的 Stage A 参数预调优。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `run_single_fold_stage_a_pre_tuning` 和写出函数，按 fold 训练窗过滤决策事件，执行小 trial study，记录四目标、trial metrics、Pareto、balanced top 20%、elite trial、方向稳定性和 Stage B 搜索空间收窄建议。
+  - `attbacktrader/reports/__init__.py`：导出 Stage A pre-tuning schema、runner 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增离线 fixture，验证 Stage A 宽 gate、高容量约束、四目标记录、elite 规则、factor/interaction 方向稳定性与 JSON artifact 写出。
+  - `docs/FEATURES.md`：更新 Stage A pre-tuning 能力说明。
+- 影响：Stage A 结果只用于预调优与收窄 Stage B 搜索空间，不作为最终组合收益证据。
+
+## 2026-06-24 — 补齐 score gate 训练窗泄漏护栏
+
+- 需求：继续推进 `#25 Scored entry gates and cache leakage guards`，确保 score gate 阈值只由训练窗拟合，测试窗不能影响阈值、权重或缓存构造。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `fit_training_score_gate_statistics` 与 `apply_fitted_score_gate_to_candidates`，将训练窗阈值拟合和候选打分应用拆开；拟合入口会拒绝带 `test/oos/out_of_sample/validation` 窗口标记的事件。
+  - `attbacktrader/reports/__init__.py`：导出训练窗 score gate 拟合与应用入口。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增确定性测试，验证训练窗 mean/std/quantile/z-threshold 被复用于测试窗，并捕获使用测试窗候选拟合阈值的错误；扩展 decision cache identity 测试，确认 scorer weights、trial id、score gate 和 score thresholds 不进入决策缓存 key。
+  - `docs/FEATURES.md`：更新 score gate 与缓存泄漏护栏说明。
+- 影响：后续 Stage A/B tuning 可复用已拟合训练窗阈值，降低样本外测试窗泄漏和参数过拟合风险。
+
+## 2026-06-23 — 新增 scored/unscored baseline comparison
+
+- 需求：继续推进 `#24 Unscored baselines and core metrics`，为 scored portfolio smoke path 增加匹配的不打分基线和核心组合指标。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `run_scored_portfolio_baseline_comparison` 和写出函数，按 Stage A / Stage B 分别输出 scored 与 unscored baseline；baseline 使用固定股票池顺序，不使用分数排序。
+  - `attbacktrader/reports/__init__.py`：导出 baseline comparison schema、runner 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增确定性 fixture，验证 Stage A 高容量基线、Stage B 真实约束基线、固定股票池排序、核心指标字段与单笔交易指标计算。
+  - `docs/FEATURES.md`：更新 baseline comparison 能力说明。
+- 影响：后续 Stage A/B tuning 可用同一 artifact 对比 scored 与 unscored 口径，避免把容量约束或股票池顺序收益误判为打分器收益。
+
+## 2026-06-23 — 新增固定参数 Scored Portfolio smoke run
+
+- 需求：继续推进 `#23 Fixed-parameter scored portfolio smoke run`，用缓存的决策事件跑通固定参数组合模拟闭环。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `run_fixed_parameter_scored_portfolio_smoke` 和写出函数，消费 Strategy Decision Event Table，产出 selected entries、cash movements、position snapshots、equity curve、blocked entries、funnel 和 metrics。
+  - `attbacktrader/reports/__init__.py`：导出 smoke run schema、runner 和 writer。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增离线 fixture，覆盖同日 score 排序、确定性 tie-break、score/capacity/holding/cash/tradability 阻塞、现金流水、持仓快照和 JSON artifact 写出。
+  - `docs/FEATURES.md`：更新 Scored Portfolio Simulation 能力说明。
+- 影响：为后续 Stage A/B tuning 提供固定参数下的组合级 smoke evidence；不访问实时数据，不改变策略执行逻辑。
+
+## 2026-06-23 — 补齐 Strategy Decision Event Table 的 TradeIntent 输入路径
+
+- 需求：继续推进 `#22 Minimal decision-event cache for actionable intents`，让决策事件缓存能消费策略实际输出的意图对象。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：新增 `build_strategy_decision_event_table_from_intents`，从 `TradeIntent` 与同日 market context 生成事件表，只抽取 `attribution.values/categories/checks` 等决策时证据。
+  - `attbacktrader/reports/__init__.py`：导出新的事件表构建入口。
+  - `tests/test_scored_entry_allocation_tuning.py`：新增真实 `TradeIntent` fixture，验证 actionable intent 保留、`hold` 过滤、sizing/execution/completed-trade 状态不进入事件 rows、缺 market context 明确失败。
+  - `docs/FEATURES.md`：更新 Strategy Decision Event Table 能力说明。
+- 影响：为后续 scored portfolio simulation 消费真实策略决策输出提供缓存边界；不改变现有回测执行语义。
+
+## 2026-06-23 — 新增 Scored Entry Allocation Tuning 本地纵切
+
+- 需求：按 PRD 将 Scored Entry Allocation Tuning 全部实现为可测试的本地纵切，并使用 TDD 推进。
+- 改动：
+  - 新增 `attbacktrader/reports/scored_entry_allocation_tuning.py`：tuning 合同、walk-forward fold、Strategy Decision Event Table、cache identity、entry scoring、scored portfolio simulation、Stage A 搜索空间收窄、Stage B 推荐报告、Optuna optional gate、合同写出。
+  - 新增 `attbacktrader/cli/scored_entry_allocation_tuning.py`：`att-scored-entry-allocation-tuning --mode dry-run` 生成合同 JSON/Markdown。
+  - 更新 `setup.py`：新增 `tuning` extra（Optuna）和 console script。
+  - 新增 `tests/test_scored_entry_allocation_tuning.py`：覆盖 dry-run 合同、cache identity、禁存字段、评分器、组合模拟、Stage A/B 报告、simulation cache、Optuna gate 和 CLI 写出。
+  - 更新 `docs/FEATURES.md`：记录当前 attbacktrader tuning 能力与命令入口。
+- 影响：新增能力不触发真实 2015-2024 标准研究；默认测试使用合成数据，不依赖 Tushare 或长回测。
+
 ## 2026-05-09 — 新增 3 个可选入场过滤开关（个股均线多头 + 周线/月线 MACD 区间）
 
 - 需求：探索个股均线多空、周/月线 MACD 区间对入场质量的影响，需将这些条件参数化以便对比回测。
