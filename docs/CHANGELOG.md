@@ -13,6 +13,16 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-25 — 新增 10 年分区间因子贡献矩阵
+
+- 需求：把 2015-2024 十年样本切成几个区间，观察各入场因子桶在不同区间的贡献能力，用于判断因子更适合的环境。
+- 改动：
+  - `attbacktrader/reports/segmented_factor_contribution_matrix.py`：新增 `segmented_factor_contribution_matrix.json/.zh.md` 报表构建，读取已落盘 `environment_fit.trade_contributions`，按入场日期默认切成 2015-2016、2017-2018、2019-2020、2021-2022、2023-2024 五个研究区间，输出各因子桶的区间收益、胜率、净 PnL、资金收益率、相对区间 lift、稳定正向/环境型/偏负向评估；默认候选榜单排除 `entry_to_exit`、`exit`、`trade` 等事后诊断字段。
+  - `attbacktrader/cli/segmented_factor_contribution_matrix.py`：新增 `att-segmented-factor-contribution-matrix` 命令，支持从 `environment_fit.enriched.json`、`environment_fit.json` 或所在目录生成矩阵，可传入自定义区间。
+  - `tests/test_segmented_factor_contribution_matrix.py`：覆盖稳定正向、环境型、偏负向分类、CLI 写盘和 artifact payload。
+  - `docs/FEATURES.md`：补充分区间因子贡献矩阵命令和口径说明。
+- 影响：该报告只消费已落盘归因证据，不重跑策略、不重新计算指标；区间是人工研究镜头，不是自动市场识别，结论不能直接作为策略开关。
+
 ## 2026-06-25 — Decision Event Table 流式构建与进度日志
 
 - 需求：真实 full source RunPlan 已生成 17GB+ `signal_audit.json`，继续推进 standard study 前需要可观测、低内存风险地构建 `decision_event_table.json`。

@@ -42,6 +42,27 @@ att-scored-entry-allocation-tuning --mode smoke --run-full-study \
   --output-dir reports/scored-entry-allocation-tuning
 ```
 
+已有 `environment_fit.enriched.json` 或 `environment_fit.json` 时，可生成 10 年分区间因子贡献矩阵：
+
+```bash
+att-segmented-factor-contribution-matrix \
+  --environment-fit reports/baoma-v1-fixed-sample-2015-2024-maxhold800/full_entry_scope_environment_fit_review/environment_fit.enriched.json \
+  --output-dir reports/segmented-factor-contribution-matrix-baoma-v1-fixed-sample-2015-2024-maxhold800
+```
+
+该命令默认按入场日期切分：
+
+- `2015_2016_high_volatility_bear_shock`：2015-01-01 到 2016-12-31
+- `2017_2018_structural_to_bear`：2017-01-01 到 2018-12-31
+- `2019_2020_recovery_structural_bull`：2019-01-01 到 2020-12-31
+- `2021_2022_range_to_bear`：2021-01-01 到 2022-12-31
+- `2023_2024_weak_range_repair`：2023-01-01 到 2024-12-31
+
+写出：
+
+- `segmented_factor_contribution_matrix.json`
+- `segmented_factor_contribution_matrix.zh.md`
+
 ### 已覆盖能力
 
 - 生成 tuning 合同：列出 2015-2019→2020 至 2019-2023→2024 的 5 个 walk-forward fold。
@@ -58,6 +79,7 @@ att-scored-entry-allocation-tuning --mode smoke --run-full-study \
 - Full walk-forward runner：按 5Y train / 1Y test / 1Y step 调度 2020-2024 五个 fold，支持 smoke / standard trial schedule、decision cache identity 复用、completed artifact resume/skip，并显式记录 test window 只做样本外评估，不调参、不重拟合 score gate、不更新 Stage A search-space。
 - Full study CLI：`--run-full-study` 可从已缓存的 Strategy Decision Event Table 与 Stage A / Stage B trial 参数 JSON 运行 full walk-forward，并写出 full run JSON、完整报告包、Pareto frontier 和 balanced/aggressive/defensive 参数文件；`--progress-log` / `--progress-interval-trials` 可记录 decision table 读取、fold、Stage A/B trial 进度和报告写盘阶段。
 - Complete scored allocation report package：可从 full walk-forward run 生成机器可读 JSON、中文 Markdown、Pareto frontier artifact，以及 balanced/aggressive/defensive 参数文件；报告分离 Stage A 预调优、Stage B 训练与 Stage B 样本外组合评估，输出 OOS scored recommendation、OOS unscored baseline、OOS funnel 与训练窗漏斗，并显式列出缺失的 market-stage / factor-combination 切片原因。
+- 10 年分区间因子贡献矩阵：`att-segmented-factor-contribution-matrix` 读取已落盘 `environment_fit.trade_contributions`，不重跑策略、不重算指标，按人工研究区间输出每个因子桶的样本数、胜率、平均收益、净 PnL、资金收益率、profit factor、相对区间 lift、最好/最差区间和 `stable_positive` / `environment_specific` / `mostly_negative` / low-sample 风险评估；默认候选榜单只纳入 `entry_decision` 字段，`entry_to_exit`、`exit`、`trade` 等事后诊断字段仅保留在诊断区。
 - RunPlan 长任务进度日志：`att-run-plan --progress-log reports/.../run-progress.ndjson --progress-interval-days 25` 可把 CLI / runner / data preflight / prepared data / entry attribution context / Baoma engine 阶段写入 NDJSON；适合真实 full source RunPlan 长跑时持续观察 preflight 股票数、prepared data 股票数、entry attribution evidence 构建、Baoma rows 构建、处理交易日、股票槽位、intent、closed trades 和 open holdings 变化。
 - Full artifact 写盘：`artifact_detail=full` 仍会把完整信号写入 `signal_audit.json`；`result.json` 保持 compact manifest，避免把大型 `signal_audit` 在 result 中重复序列化，并通过 progress log 标记每个 JSON artifact 的 started/completed。
 - Stage A elite 试验用于缩小 Stage B 搜索空间，不作为最终组合收益证据。
