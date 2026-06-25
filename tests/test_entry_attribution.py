@@ -232,6 +232,46 @@ def test_entry_attribution_context_builds_symbol_market_and_industry_evidence() 
     assert evidence.categories["industry.relative.hs300.strength_state"] == "weak_underperform"
 
 
+def test_entry_attribution_context_reports_structured_progress() -> None:
+    bars = _daily_bars("000001.SZ", count=90, start_close=10.0, step=0.3)
+    frame = indicator_frame_from_snapshots(
+        build_indicator_snapshots_for_requirements(
+            bars,
+            indicator_requirements=(
+                IndicatorRequirement("kdj", "D"),
+                IndicatorRequirement("ma20", "D"),
+                IndicatorRequirement("ma25", "D"),
+                IndicatorRequirement("ma60", "D"),
+            ),
+        )
+    )
+    events = []
+
+    context = build_entry_attribution_context(
+        bars_by_symbol={"000001.SZ": bars},
+        indicators_by_symbol={"000001.SZ": frame},
+        progress_callback=events.append,
+        progress_stage="test_entry_attribution_context",
+    )
+
+    stage_statuses = [(event["stage"], event["status"]) for event in events]
+    symbol_progress = [
+        event
+        for event in events
+        if event["stage"] == "test_entry_attribution_context_symbols" and event["status"] == "running"
+    ]
+
+    assert context.evidence_by_key
+    assert ("test_entry_attribution_context", "started") in stage_statuses
+    assert ("test_entry_attribution_context_cross_section", "completed") in stage_statuses
+    assert ("test_entry_attribution_context_symbols", "started") in stage_statuses
+    assert symbol_progress[0]["processed_symbol_count"] == 1
+    assert symbol_progress[0]["symbol"] == "000001.SZ"
+    assert symbol_progress[0]["symbol_evidence_count"] > 0
+    assert events[-1]["stage"] == "test_entry_attribution_context"
+    assert events[-1]["status"] == "completed"
+
+
 def test_entry_attribution_context_uses_same_day_cross_section_percentile_buckets() -> None:
     bars_by_symbol = {
         "000001.SZ": _daily_bars("000001.SZ", count=130, start_close=10.0, step=0.1),

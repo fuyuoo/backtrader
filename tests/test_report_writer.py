@@ -228,17 +228,33 @@ def test_write_run_artifacts_can_persist_full_raw_audit_for_debugging(tmp_path: 
     )
     result = execute_run_plan(run_plan, provider=FakeDailyProvider(bars))
 
-    artifacts = write_run_artifacts(run_plan, result, output_root=tmp_path / "reports")
+    progress_events = []
+    artifacts = write_run_artifacts(
+        run_plan,
+        result,
+        output_root=tmp_path / "reports",
+        progress_callback=progress_events.append,
+    )
 
     result_payload = _read_json(artifacts.result_path)
     signal_audit_payload = _read_json(artifacts.signal_audit_path)
+    stage_statuses = [
+        (event["artifact"], event["status"])
+        for event in progress_events
+        if event["stage"] == "write_artifact"
+    ]
 
-    assert result_payload["schema"] == "attbacktrader.full_result.v2"
+    assert result_payload["schema"] == "attbacktrader.full_artifact_manifest_result.v1"
     assert result_payload["run_config"]["run"]["id"] == "writer-test"
-    assert result_payload["result"]["run_id"] == "writer-test"
-    assert "signal_audit" in result_payload["result"]
+    assert result_payload["run_id"] == "writer-test"
+    assert result_payload["counts"]["signal_intent_count"] == len(result.signal_audit)
+    assert "signal_audit" not in result_payload
     assert isinstance(signal_audit_payload, list)
     assert signal_audit_payload[0]["method_name"] == "kdj_oversold_entry"
+    assert ("result", "started") in stage_statuses
+    assert ("result", "completed") in stage_statuses
+    assert ("signal_audit", "started") in stage_statuses
+    assert ("signal_audit", "completed") in stage_statuses
 
 
 def _read_json(path: Path) -> dict:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -109,6 +109,7 @@ def run_data_preflight(
     max_symbols: int | None = None,
     indicator_alarm_threshold: float = 0.05,
     progress: Callable[[int, int, str, str], None] | None = None,
+    event_progress: Callable[[Mapping[str, object]], None] | None = None,
 ) -> DataPreflightReport:
     if indicator_alarm_threshold < 0:
         raise ValueError("indicator_alarm_threshold must be non-negative")
@@ -120,11 +121,59 @@ def run_data_preflight(
         series = series[:max_symbols]
     indicator_requirements = tuple(sorted(required_indicators_for_strategy_config(run_plan.strategy)))
 
+    _emit_preflight_event(
+        event_progress,
+        stage="data_preflight",
+        status="started",
+        run_id=run_plan.run.id,
+        total_symbols=len(series),
+    )
+    index_symbols = tuple(dict.fromkeys((*run_plan.data.decision_series.indexes, *run_plan.data.benchmark_series.indexes)))
+    _emit_preflight_event(
+        event_progress,
+        stage="data_preflight_indexes",
+        status="started",
+        run_id=run_plan.run.id,
+        index_count=len(index_symbols),
+    )
     prepared_indexes, index_results = _prepare_common_indexes(run_plan, provider=provider)
+    _emit_preflight_event(
+        event_progress,
+        stage="data_preflight_indexes",
+        status="completed",
+        run_id=run_plan.run.id,
+        index_count=len(index_results),
+        error_count=sum(1 for result in index_results if result.status == "error"),
+    )
+    _emit_preflight_event(
+        event_progress,
+        stage="data_preflight_industry_indexes",
+        status="started",
+        run_id=run_plan.run.id,
+        index_count=len(run_plan.data.industry_series.indexes),
+    )
     _, industry_index_results = _prepare_common_industry_indexes(run_plan, provider=provider)
+    _emit_preflight_event(
+        event_progress,
+        stage="data_preflight_industry_indexes",
+        status="completed",
+        run_id=run_plan.run.id,
+        index_count=len(industry_index_results),
+        error_count=sum(1 for result in industry_index_results if result.status == "error"),
+    )
     trading_calendar = _trading_calendar_for_run(run_plan, prepared_indexes)
 
     symbol_results: list[DataPreflightSymbolResult] = []
+    running_ok_count = 0
+    running_warning_count = 0
+    running_failed_count = 0
+    _emit_preflight_event(
+        event_progress,
+        stage="data_preflight_symbols",
+        status="started",
+        run_id=run_plan.run.id,
+        total_symbols=len(series),
+    )
     for index, item in enumerate(series, start=1):
         result = _preflight_symbol(
             run_plan,
@@ -135,8 +184,27 @@ def run_data_preflight(
             trading_calendar=trading_calendar,
         )
         symbol_results.append(result)
+        if result.status == "ok":
+            running_ok_count += 1
+        elif result.status == "warning":
+            running_warning_count += 1
+        elif result.status == "error":
+            running_failed_count += 1
         if progress is not None:
             progress(index, len(series), item.symbol, result.status)
+        _emit_preflight_event(
+            event_progress,
+            stage="data_preflight_symbols",
+            status="running",
+            run_id=run_plan.run.id,
+            processed_symbol_count=index,
+            total_symbols=len(series),
+            symbol=item.symbol,
+            symbol_status=result.status,
+            ok_symbol_count=running_ok_count,
+            warning_symbol_count=running_warning_count,
+            failed_symbol_count=running_failed_count,
+        )
 
     issue_summary = _issue_summary(symbol_results)
     error_summary = _error_summary(symbol_results, index_results, industry_index_results)
@@ -148,6 +216,28 @@ def run_data_preflight(
         status = "error"
     elif warning_count or any(result.status == "warning" for result in (*index_results, *industry_index_results)):
         status = "warning"
+
+    _emit_preflight_event(
+        event_progress,
+        stage="data_preflight_symbols",
+        status="completed",
+        run_id=run_plan.run.id,
+        total_symbols=len(series),
+        ok_symbol_count=ok_count,
+        warning_symbol_count=warning_count,
+        failed_symbol_count=failed_count,
+    )
+    _emit_preflight_event(
+        event_progress,
+        stage="data_preflight",
+        status="completed",
+        run_id=run_plan.run.id,
+        preflight_status=status,
+        total_symbols=len(series),
+        ok_symbol_count=ok_count,
+        warning_symbol_count=warning_count,
+        failed_symbol_count=failed_count,
+    )
 
     return DataPreflightReport(
         schema="attbacktrader.data_preflight.v1",
@@ -168,6 +258,15 @@ def run_data_preflight(
         issue_summary=issue_summary,
         error_summary=error_summary,
     )
+
+
+def _emit_preflight_event(
+    event_progress: Callable[[Mapping[str, object]], None] | None,
+    **event: object,
+) -> None:
+    if event_progress is None:
+        return
+    event_progress(event)
 
 
 def render_data_preflight_summary_text(report: DataPreflightReport) -> str:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -80,6 +80,7 @@ def write_run_artifacts(
     result: "RunPlanExecutionResult",
     *,
     output_root: str | Path = "reports",
+    progress_callback: Callable[[Mapping[str, object]], None] | None = None,
 ) -> RunArtifactPaths:
     output_dir = Path(output_root) / _safe_path_name(result.run_id)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -123,9 +124,14 @@ def write_run_artifacts(
     run_config = _run_config_trace(run_plan)
     trade_lifecycle = _trade_lifecycle(result)
 
-    _write_json(artifact_paths.run_plan_path, run_plan)
-    _write_json(artifact_paths.result_path, _result_payload(result, artifact_detail=artifact_detail, run_config=run_config))
-    _write_json(artifact_paths.report_path, result.report)
+    _write_json_artifact(progress_callback, "run_plan", artifact_paths.run_plan_path, run_plan)
+    _write_json_artifact(
+        progress_callback,
+        "result",
+        artifact_paths.result_path,
+        _result_payload(result, artifact_detail=artifact_detail, run_config=run_config),
+    )
+    _write_json_artifact(progress_callback, "report", artifact_paths.report_path, result.report)
     artifact_paths.report_markdown_path.write_text(
         render_backtest_report_markdown(run_plan, result),
         encoding="utf-8",
@@ -134,7 +140,9 @@ def write_run_artifacts(
         render_backtest_report_markdown_zh(run_plan, result),
         encoding="utf-8",
     )
-    _write_json(
+    _write_json_artifact(
+        progress_callback,
+        "trades",
         artifact_paths.trades_path,
         {
             "schema": "attbacktrader.trades.v2",
@@ -144,7 +152,9 @@ def write_run_artifacts(
             "open_positions": result.open_positions,
         },
     )
-    _write_json(
+    _write_json_artifact(
+        progress_callback,
+        "signal_audit",
         artifact_paths.signal_audit_path,
         _signal_audit_payload(
             result,
@@ -152,22 +162,32 @@ def write_run_artifacts(
             sample_limit=signal_audit_sample_limit,
         ),
     )
-    _write_json(artifact_paths.sizing_audit_path, _sizing_audit(result))
-    _write_json(artifact_paths.result_diagnostics_path, _result_diagnostics(result))
-    _write_json(artifact_paths.trade_lifecycle_path, trade_lifecycle)
+    _write_json_artifact(progress_callback, "sizing_audit", artifact_paths.sizing_audit_path, _sizing_audit(result))
+    _write_json_artifact(
+        progress_callback,
+        "result_diagnostics",
+        artifact_paths.result_diagnostics_path,
+        _result_diagnostics(result),
+    )
+    _write_json_artifact(progress_callback, "trade_lifecycle", artifact_paths.trade_lifecycle_path, trade_lifecycle)
     artifact_paths.trade_lifecycle_chinese_markdown_path.write_text(
         render_trade_lifecycle_markdown_zh(trade_lifecycle),
         encoding="utf-8",
     )
-    _write_json(artifact_paths.scale_out_attribution_path, _scale_out_attribution(result, run_config))
+    _write_json_artifact(
+        progress_callback,
+        "scale_out_attribution",
+        artifact_paths.scale_out_attribution_path,
+        _scale_out_attribution(result, run_config),
+    )
     trade_attribution = _trade_attribution(result, trade_lifecycle)
-    _write_json(artifact_paths.trade_attribution_path, trade_attribution)
+    _write_json_artifact(progress_callback, "trade_attribution", artifact_paths.trade_attribution_path, trade_attribution)
     artifact_paths.trade_attribution_chinese_markdown_path.write_text(
         render_trade_attribution_markdown_zh(trade_attribution),
         encoding="utf-8",
     )
     trade_review = _trade_review(result, trade_lifecycle)
-    _write_json(artifact_paths.trade_review_path, trade_review)
+    _write_json_artifact(progress_callback, "trade_review", artifact_paths.trade_review_path, trade_review)
     artifact_paths.trade_review_chinese_markdown_path.write_text(
         render_trade_review_markdown_zh(trade_review),
         encoding="utf-8",
@@ -178,7 +198,7 @@ def write_run_artifacts(
         trade_lifecycle=trade_lifecycle,
         trade_review=trade_review,
     )
-    _write_json(artifact_paths.environment_fit_path, environment_fit)
+    _write_json_artifact(progress_callback, "environment_fit", artifact_paths.environment_fit_path, environment_fit)
     artifact_paths.environment_fit_chinese_markdown_path.write_text(
         render_environment_fit_markdown_zh(environment_fit),
         encoding="utf-8",
@@ -187,24 +207,34 @@ def write_run_artifacts(
         output_dir=output_dir,
         environment_fit=environment_fit,
     )
-    _write_json(artifact_paths.strategy_environment_profile_path, strategy_environment_profile)
+    _write_json_artifact(
+        progress_callback,
+        "strategy_environment_profile",
+        artifact_paths.strategy_environment_profile_path,
+        strategy_environment_profile,
+    )
     artifact_paths.strategy_environment_profile_chinese_markdown_path.write_text(
         render_strategy_environment_profile_markdown_zh(strategy_environment_profile),
         encoding="utf-8",
     )
-    _write_json(artifact_paths.post_exit_analysis_path, result.post_exit_analysis)
+    _write_json_artifact(progress_callback, "post_exit_analysis", artifact_paths.post_exit_analysis_path, result.post_exit_analysis)
     artifact_paths.post_exit_analysis_chinese_markdown_path.write_text(
         render_post_exit_analysis_markdown_zh(result.post_exit_analysis),
         encoding="utf-8",
     )
-    _write_json(artifact_paths.evidence_validation_path, _evidence_validation(result))
-    _write_json(artifact_paths.equity_curve_path, result.equity_curve)
-    _write_json(artifact_paths.positions_path, result.position_snapshots)
-    _write_json(artifact_paths.execution_audit_path, result.execution_audit)
-    _write_json(artifact_paths.snapshots_path, _snapshot_index(result))
-    _write_json(artifact_paths.data_preflight_path, result.data_preflight_report)
-    _write_json(artifact_paths.stock_pool_filter_path, result.stock_pool_filter)
-    _write_json(artifact_paths.attribution_factor_selection_path, result.attribution_factor_selection)
+    _write_json_artifact(progress_callback, "evidence_validation", artifact_paths.evidence_validation_path, _evidence_validation(result))
+    _write_json_artifact(progress_callback, "equity_curve", artifact_paths.equity_curve_path, result.equity_curve)
+    _write_json_artifact(progress_callback, "positions", artifact_paths.positions_path, result.position_snapshots)
+    _write_json_artifact(progress_callback, "execution_audit", artifact_paths.execution_audit_path, result.execution_audit)
+    _write_json_artifact(progress_callback, "snapshots", artifact_paths.snapshots_path, _snapshot_index(result))
+    _write_json_artifact(progress_callback, "data_preflight", artifact_paths.data_preflight_path, result.data_preflight_report)
+    _write_json_artifact(progress_callback, "stock_pool_filter", artifact_paths.stock_pool_filter_path, result.stock_pool_filter)
+    _write_json_artifact(
+        progress_callback,
+        "attribution_factor_selection",
+        artifact_paths.attribution_factor_selection_path,
+        result.attribution_factor_selection,
+    )
 
     return artifact_paths
 
@@ -301,9 +331,26 @@ def _run_config_trace(run_plan: RunPlan) -> dict[str, Any]:
 def _result_payload(result: RunPlanExecutionResult, *, artifact_detail: str, run_config: Mapping[str, Any]) -> Any:
     if artifact_detail == "full":
         return {
-            "schema": "attbacktrader.full_result.v2",
+            "schema": "attbacktrader.full_artifact_manifest_result.v1",
+            "artifact_detail": "full",
+            "raw_result_persisted": False,
+            "full_signal_audit_persisted": True,
             "run_config": run_config,
-            "result": result,
+            "run_id": result.run_id,
+            "engine": result.engine,
+            "adjustment": result.adjustment,
+            "symbols": result.symbols,
+            "counts": _result_counts(result),
+            "final_cash": result.final_cash,
+            "final_value": result.final_value,
+            "report": result.report,
+            "post_exit_analysis_summary": _post_exit_analysis_summary(result),
+            "attribution_factor_selection": result.attribution_factor_selection,
+            "raw_detail_note": (
+                "Full high-volume detail is persisted in dedicated artifacts such as signal_audit.json, "
+                "trades.json, execution_audit.json, and trade_lifecycle.json. result.json remains compact "
+                "to avoid duplicating large payloads."
+            ),
         }
     return {
         "schema": "attbacktrader.compact_result.v1",
@@ -314,33 +361,41 @@ def _result_payload(result: RunPlanExecutionResult, *, artifact_detail: str, run
         "adjustment": result.adjustment,
         "run_config": run_config,
         "symbols": result.symbols,
-        "counts": {
-            "symbol_count": len(result.symbols),
-            "closed_trade_count": len(result.closed_trades),
-            "open_position_count": len(result.open_positions),
-            "signal_intent_count": len(result.signal_audit),
-            "execution_event_count": len(result.execution_audit),
-            "lifecycle_event_count": len(result.lifecycle_events),
-            "lifecycle_snapshot_count": len(result.lifecycle_snapshots),
-            "equity_point_count": len(result.equity_curve),
-            "position_snapshot_count": len(result.position_snapshots),
-        },
+        "counts": _result_counts(result),
         "final_cash": result.final_cash,
         "final_value": result.final_value,
         "report": result.report,
-        "post_exit_analysis_summary": {
-            "trade_count": result.post_exit_analysis.trade_count,
-            "window_days": result.post_exit_analysis.window_days,
-            "configured_window_days": result.post_exit_analysis.configured_window_days,
-            "sold_too_early_threshold": result.post_exit_analysis.sold_too_early_threshold,
-            "rebound_thresholds": result.post_exit_analysis.rebound_thresholds,
-        },
+        "post_exit_analysis_summary": _post_exit_analysis_summary(result),
         "attribution_factor_selection": result.attribution_factor_selection,
         "raw_detail_note": (
             "Full result persistence is disabled by output.artifact_detail=compact. "
             "Use report/trades/snapshots/evidence_validation and derived review artifacts for AI review, "
             "or set output.artifact_detail=full for debugging."
         ),
+    }
+
+
+def _result_counts(result: RunPlanExecutionResult) -> dict[str, int]:
+    return {
+        "symbol_count": len(result.symbols),
+        "closed_trade_count": len(result.closed_trades),
+        "open_position_count": len(result.open_positions),
+        "signal_intent_count": len(result.signal_audit),
+        "execution_event_count": len(result.execution_audit),
+        "lifecycle_event_count": len(result.lifecycle_events),
+        "lifecycle_snapshot_count": len(result.lifecycle_snapshots),
+        "equity_point_count": len(result.equity_curve),
+        "position_snapshot_count": len(result.position_snapshots),
+    }
+
+
+def _post_exit_analysis_summary(result: RunPlanExecutionResult) -> dict[str, Any]:
+    return {
+        "trade_count": result.post_exit_analysis.trade_count,
+        "window_days": result.post_exit_analysis.window_days,
+        "configured_window_days": result.post_exit_analysis.configured_window_days,
+        "sold_too_early_threshold": result.post_exit_analysis.sold_too_early_threshold,
+        "rebound_thresholds": result.post_exit_analysis.rebound_thresholds,
     }
 
 
@@ -626,6 +681,44 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(
         json.dumps(to_jsonable(payload), ensure_ascii=False, indent=2),
         encoding="utf-8",
+    )
+
+
+def _write_json_artifact(
+    progress_callback: Callable[[Mapping[str, object]], None] | None,
+    artifact: str,
+    path: Path,
+    payload: Any,
+) -> None:
+    _emit_artifact_progress(progress_callback, artifact=artifact, path=path, status="started")
+    _write_json(path, payload)
+    _emit_artifact_progress(
+        progress_callback,
+        artifact=artifact,
+        path=path,
+        status="completed",
+        byte_count=path.stat().st_size,
+    )
+
+
+def _emit_artifact_progress(
+    progress_callback: Callable[[Mapping[str, object]], None] | None,
+    *,
+    artifact: str,
+    path: Path,
+    status: str,
+    **fields: object,
+) -> None:
+    if progress_callback is None:
+        return
+    progress_callback(
+        {
+            "stage": "write_artifact",
+            "status": status,
+            "artifact": artifact,
+            "path": str(path),
+            **fields,
+        }
     )
 
 

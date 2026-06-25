@@ -278,6 +278,7 @@ class PreparedRunDataCache:
         *,
         provider: RunDataProvider | None = None,
         snapshot_read_cache: SnapshotReadCache | None = None,
+        event_progress: Callable[[Mapping[str, object]], None] | None = None,
         prepare: Callable[..., Any] | None = None,
     ) -> Any:
         key = prepared_run_data_cache_key(run_plan)
@@ -286,6 +287,8 @@ class PreparedRunDataCache:
             kwargs: dict[str, Any] = {"provider": provider}
             if snapshot_read_cache is not None:
                 kwargs["snapshot_read_cache"] = snapshot_read_cache
+            if event_progress is not None:
+                kwargs["event_progress"] = event_progress
             self._items[key] = prepare_func(run_plan, **kwargs)
         return self._items[key]
 
@@ -305,17 +308,47 @@ def prepare_run_data(
     *,
     provider: RunDataProvider | None = None,
     snapshot_read_cache: SnapshotReadCache | None = None,
+    event_progress: Callable[[Mapping[str, object]], None] | None = None,
 ) -> PreparedRunData:
     tradable_series = run_plan.data.resolved_tradable_series
     indicator_requirements = _indicator_requirements_for_run_plan(run_plan)
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_detail",
+        status="started",
+        run_id=run_plan.run.id,
+        total_symbols=len(tradable_series),
+    )
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_indexes",
+        status="started",
+        run_id=run_plan.run.id,
+        index_count=len(tuple(dict.fromkeys((*run_plan.data.decision_series.indexes, *run_plan.data.benchmark_series.indexes)))),
+    )
     prepared_indexes_by_symbol = _prepare_index_data_by_symbol(
         run_plan,
         provider=provider,
         snapshot_read_cache=snapshot_read_cache,
     )
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_indexes",
+        status="completed",
+        run_id=run_plan.run.id,
+        index_count=len(prepared_indexes_by_symbol),
+    )
     trading_calendar = _trading_calendar_for_run(run_plan, prepared_indexes_by_symbol)
-    prepared_symbols = tuple(
-        _prepare_symbol_data(
+    prepared_symbol_items: list[PreparedSymbolData] = []
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_symbols",
+        status="started",
+        run_id=run_plan.run.id,
+        total_symbols=len(tradable_series),
+    )
+    for index, series in enumerate(tradable_series, start=1):
+        prepared_symbol = _prepare_symbol_data(
             run_plan,
             series=series,
             provider=provider,
@@ -323,23 +356,94 @@ def prepare_run_data(
             trading_calendar=trading_calendar,
             snapshot_read_cache=snapshot_read_cache,
         )
-        for series in tradable_series
+        prepared_symbol_items.append(prepared_symbol)
+        _emit_prepare_event(
+            event_progress,
+            stage="prepare_run_data_symbols",
+            status="running",
+            run_id=run_plan.run.id,
+            processed_symbol_count=index,
+            total_symbols=len(tradable_series),
+            symbol=series.symbol,
+            bar_count=len(prepared_symbol.bars),
+            indicator_snapshot_count=len(prepared_symbol.indicator_snapshots),
+            tradability_status_count=len(prepared_symbol.tradability_statuses),
+        )
+    prepared_symbols = tuple(prepared_symbol_items)
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_symbols",
+        status="completed",
+        run_id=run_plan.run.id,
+        total_symbols=len(tradable_series),
+        prepared_symbol_count=len(prepared_symbols),
     )
     prepared_by_symbol = {prepared.symbol: prepared for prepared in prepared_symbols}
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_industry_indexes",
+        status="started",
+        run_id=run_plan.run.id,
+        index_count=len(run_plan.data.industry_series.indexes),
+    )
     prepared_industry_indexes_by_symbol = _prepare_industry_index_data_by_symbol(
         run_plan,
         provider=provider,
         snapshot_read_cache=snapshot_read_cache,
+    )
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_industry_indexes",
+        status="completed",
+        run_id=run_plan.run.id,
+        index_count=len(prepared_industry_indexes_by_symbol),
+    )
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_industry_data",
+        status="started",
+        run_id=run_plan.run.id,
+        total_symbols=len(tradable_series),
     )
     industry_classification_result, industry_membership_results, memberships_by_symbol = _prepare_industry_data(
         run_plan,
         tradable_series=tradable_series,
         provider=provider,
     )
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_industry_data",
+        status="completed",
+        run_id=run_plan.run.id,
+        membership_result_count=len(industry_membership_results),
+        membership_symbol_count=len(memberships_by_symbol),
+    )
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_attribution_reference",
+        status="started",
+        run_id=run_plan.run.id,
+        symbol_count=len(prepared_by_symbol),
+    )
     attribution_reference_evidence_by_symbol_date = _prepare_attribution_reference_evidence_by_symbol_date(
         run_plan,
         symbols=tuple(prepared_by_symbol),
         snapshot_read_cache=snapshot_read_cache,
+    )
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_attribution_reference",
+        status="completed",
+        run_id=run_plan.run.id,
+        evidence_symbol_count=len(attribution_reference_evidence_by_symbol_date),
+    )
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_detail",
+        status="completed",
+        run_id=run_plan.run.id,
+        total_symbols=len(tradable_series),
+        prepared_symbol_count=len(prepared_symbols),
     )
 
     return PreparedRunData(
@@ -353,6 +457,15 @@ def prepare_run_data(
         trading_calendar=trading_calendar,
         attribution_reference_evidence_by_symbol_date=attribution_reference_evidence_by_symbol_date,
     )
+
+
+def _emit_prepare_event(
+    event_progress: Callable[[Mapping[str, object]], None] | None,
+    **event: object,
+) -> None:
+    if event_progress is None:
+        return
+    event_progress(event)
 
 
 def _indicator_requirements_for_run_plan(run_plan: RunPlan) -> tuple[IndicatorRequirement, ...]:

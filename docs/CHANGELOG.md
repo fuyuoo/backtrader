@@ -13,6 +13,20 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-25 — 新增 RunPlan 长跑进度日志
+
+- 需求：真实 standard study 的 full source RunPlan 运行时间较长，需要可观测的日志和进度后再重新跑。
+- 改动：
+  - `attbacktrader/cli/run_plan.py`：新增 `--progress-log` 和 `--progress-interval-days`，把 CLI / runner / engine 阶段写入 NDJSON，不污染 `--summary-json` stdout。
+  - `attbacktrader/runners/run_plan.py`：新增可选 `progress_callback`，记录数据准备、策略模板、引擎、结果组装和报告构建阶段。
+  - `attbacktrader/runners/data_preflight.py`：新增结构化 `event_progress`，让 stock pool auto filter 可记录 index 准备、industry index 准备和逐股票 preflight 进度。
+  - `attbacktrader/runners/prepared_data.py`：新增结构化 `event_progress`，记录 common index、逐股票 prepared data、industry data 和 attribution reference 准备进度。
+  - `attbacktrader/reports/writer.py`：artifact writer 新增写文件进度事件；`artifact_detail=full` 时 `result.json` 改为 compact manifest，不再重复持久化完整 `signal_audit`，完整信号仍写入专用 `signal_audit.json`。
+  - `attbacktrader/strategies/attribution.py`：`build_entry_attribution_context` 新增可选进度回调，记录 market、industry、cross-section、industry-relative 和逐股票 evidence 构建进度。
+  - `attbacktrader/engines/business/baoma.py`：Baoma v1 business engine 先输出 rows / previous rows 预处理进度，再按交易日进度输出 processed/total days、symbol slots、intent/trade/holding 数量。
+  - `tests/test_baoma_business_runner.py`、`tests/test_data_preflight.py`、`tests/test_entry_attribution.py`、`tests/test_prepared_run_data.py`、`tests/test_run_execution_summary.py`：覆盖日级进度事件、preflight/prepared data/entry attribution 结构化进度和 CLI progress log 写出。
+- 影响：长回测可以通过 progress NDJSON 文件实时判断是否卡在数据准备、引擎循环或 artifact 写出；失败会保留 `failed` 事件并抛出原异常。
+
 ## 2026-06-24 — 新增 Decision Event Table artifact 构建入口
 
 - 需求：继续推进真实 standard study 输入链路，让 `--run-full-study` 不再只能依赖手工准备的 `decision_event_table.json`。

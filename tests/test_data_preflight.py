@@ -63,6 +63,37 @@ def test_data_preflight_reports_successful_symbols(tmp_path: Path) -> None:
     assert report.symbol_results[0].tradability_coverage.status == "ok"
 
 
+def test_data_preflight_reports_structured_progress(tmp_path: Path) -> None:
+    bars = _bars("000001.SZ", date(2022, 1, 1), 1100)
+    provider = FakePreflightProvider({"000001.SZ": bars})
+    events = []
+
+    report = run_data_preflight(
+        _run_plan(tmp_path, symbols=("000001.SZ",)),
+        provider=provider,
+        event_progress=events.append,
+    )
+
+    stage_statuses = [(event["stage"], event["status"]) for event in events]
+    symbol_progress = [
+        event
+        for event in events
+        if event["stage"] == "data_preflight_symbols" and event["status"] == "running"
+    ]
+
+    assert report.status == "ok"
+    assert ("data_preflight", "started") in stage_statuses
+    assert ("data_preflight_indexes", "started") in stage_statuses
+    assert ("data_preflight_indexes", "completed") in stage_statuses
+    assert ("data_preflight_symbols", "started") in stage_statuses
+    assert symbol_progress[0]["processed_symbol_count"] == 1
+    assert symbol_progress[0]["symbol"] == "000001.SZ"
+    assert symbol_progress[0]["symbol_status"] == "ok"
+    assert events[-1]["stage"] == "data_preflight"
+    assert events[-1]["status"] == "completed"
+    assert events[-1]["preflight_status"] == "ok"
+
+
 def test_data_preflight_keeps_going_when_one_symbol_fails(tmp_path: Path) -> None:
     bars = _bars("000001.SZ", date(2022, 1, 1), 1100)
     provider = FakePreflightProvider({"000001.SZ": bars})

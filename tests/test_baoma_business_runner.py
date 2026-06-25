@@ -53,6 +53,39 @@ def test_baoma_business_runner_buys_at_open_from_previous_day_entry_signal() -> 
     assert entry_intent.signal_values["sizing"]["business_executable_quantity"] == 100
 
 
+def test_baoma_business_runner_reports_date_progress() -> None:
+    bars, frame, trade_dates = _baoma_fixture(
+        opens=(10.0, 12.0, 10.0),
+        closes=(10.0, 11.0, 10.0),
+        dea_values=(0.0, 0.1, 0.2),
+        ma60_values=(9.0, 9.0, 9.0),
+        ma25_values=(9.0, 9.0, 9.0),
+    )
+    progress_events = []
+
+    run_baoma_v1_business(
+        {SYMBOL: bars},
+        indicators_by_symbol={SYMBOL: frame},
+        config=_one_lot_config(),
+        progress_callback=progress_events.append,
+        progress_interval_days=2,
+    )
+
+    stage_statuses = [(event["stage"], event["status"]) for event in progress_events]
+    engine_events = [event for event in progress_events if event["stage"] == "baoma_engine"]
+
+    assert ("baoma_engine_rows", "started") in stage_statuses
+    assert ("baoma_engine_rows", "completed") in stage_statuses
+    assert ("baoma_engine_previous_rows", "completed") in stage_statuses
+    assert engine_events[0]["status"] == "started"
+    assert engine_events[0]["total_days"] == 3
+    progress = [event for event in engine_events if event["status"] == "running"]
+    assert [event["processed_days"] for event in progress] == [1, 2, 3]
+    assert progress[-1]["trade_date"] == trade_dates[-1].isoformat()
+    assert engine_events[-1]["status"] == "completed"
+    assert engine_events[-1]["processed_days"] == 3
+
+
 def test_baoma_business_runner_add_on_intent_carries_sizing_evidence() -> None:
     bars, frame, trade_dates = _baoma_fixture(
         opens=(10.0, 12.0, 11.0, 10.0),

@@ -80,6 +80,47 @@ def test_run_plan_cli_can_print_summary_json(monkeypatch, capsys) -> None:
     assert "signal_audit" not in payload
 
 
+def test_run_plan_cli_writes_progress_log(monkeypatch, capsys, tmp_path) -> None:
+    progress_log = tmp_path / "progress.ndjson"
+
+    monkeypatch.setattr(run_plan_cli, "load_run_plan", lambda _path: _run_plan())
+
+    def fake_execute(_run_plan, provider=None, progress_callback=None, progress_interval_days=50):
+        assert progress_interval_days == 7
+        progress_callback({"stage": "engine", "status": "started"})
+        progress_callback({"stage": "engine", "status": "completed"})
+        return _result()
+
+    monkeypatch.setattr(run_plan_cli, "execute_run_plan", fake_execute)
+
+    assert run_plan_cli.main(
+        [
+            "--config",
+            "dummy.yaml",
+            "--no-persist",
+            "--summary-json",
+            "--progress-log",
+            str(progress_log),
+            "--progress-interval-days",
+            "7",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    events = [json.loads(line) for line in progress_log.read_text(encoding="utf-8").splitlines()]
+    stage_statuses = [(event["stage"], event["status"]) for event in events]
+
+    assert payload["schema"] == "attbacktrader.run_execution_summary.v1"
+    assert ("load_run_plan", "started") in stage_statuses
+    assert ("load_run_plan", "completed") in stage_statuses
+    assert ("execute_run_plan", "started") in stage_statuses
+    assert ("engine", "started") in stage_statuses
+    assert ("engine", "completed") in stage_statuses
+    assert ("execute_run_plan", "completed") in stage_statuses
+    assert all("elapsed_seconds" in event for event in events)
+    assert all("timestamp_utc" in event for event in events)
+
+
 def _run_plan():
     return SimpleNamespace(
         run=SimpleNamespace(id="summary-test", from_date=date(2024, 1, 1), to_date=date(2024, 3, 31)),

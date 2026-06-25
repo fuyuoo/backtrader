@@ -54,6 +54,8 @@ att-scored-entry-allocation-tuning --mode smoke --run-full-study \
 - Full walk-forward runner：按 5Y train / 1Y test / 1Y step 调度 2020-2024 五个 fold，支持 smoke / standard trial schedule、decision cache identity 复用、completed artifact resume/skip，并显式记录 test window 只做样本外评估，不调参、不重拟合 score gate、不更新 Stage A search-space。
 - Full study CLI：`--run-full-study` 可从已缓存的 Strategy Decision Event Table 与 Stage A / Stage B trial 参数 JSON 运行 full walk-forward，并写出 full run JSON、完整报告包、Pareto frontier 和 balanced/aggressive/defensive 参数文件。
 - Complete scored allocation report package：可从 full walk-forward run 生成机器可读 JSON、中文 Markdown、Pareto frontier artifact，以及 balanced/aggressive/defensive 参数文件；报告分离 Stage A 预调优、Stage B 训练与 Stage B 样本外组合评估，输出 OOS scored recommendation、OOS unscored baseline、OOS funnel 与训练窗漏斗，并显式列出缺失的 market-stage / factor-combination 切片原因。
+- RunPlan 长任务进度日志：`att-run-plan --progress-log reports/.../run-progress.ndjson --progress-interval-days 25` 可把 CLI / runner / data preflight / prepared data / entry attribution context / Baoma engine 阶段写入 NDJSON；适合真实 full source RunPlan 长跑时持续观察 preflight 股票数、prepared data 股票数、entry attribution evidence 构建、Baoma rows 构建、处理交易日、股票槽位、intent、closed trades 和 open holdings 变化。
+- Full artifact 写盘：`artifact_detail=full` 仍会把完整信号写入 `signal_audit.json`；`result.json` 保持 compact manifest，避免把大型 `signal_audit` 在 result 中重复序列化，并通过 progress log 标记每个 JSON artifact 的 started/completed。
 - Stage A elite 试验用于缩小 Stage B 搜索空间，不作为最终组合收益证据。
 - Stage B 报告输出 Pareto frontier，并选择 `balanced` / `aggressive` / `defensive` 推荐参数，同时记录低交易数拒绝原因。
 - Simulation cache identity 包含 signal cache identity、fold id、parameter hash、portfolio-control hash 和 simulator version。

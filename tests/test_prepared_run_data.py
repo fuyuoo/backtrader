@@ -153,6 +153,33 @@ def test_prepare_run_data_returns_one_interface_for_snapshots_features_and_analy
     assert prepared.risk_group_by_symbol(level=1) == {"000001.SZ": "801780.SI"}
 
 
+def test_prepare_run_data_reports_structured_progress(tmp_path: Path) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    provider = FakePreparedDataProvider(bars)
+    run_plan = _run_plan(tmp_path)
+    events = []
+
+    prepared = prepare_run_data(run_plan, provider=provider, event_progress=events.append)
+
+    stage_statuses = [(event["stage"], event["status"]) for event in events]
+    symbol_progress = [
+        event
+        for event in events
+        if event["stage"] == "prepare_run_data_symbols" and event["status"] == "running"
+    ]
+
+    assert prepared.symbols == ("000001.SZ",)
+    assert ("prepare_run_data_detail", "started") in stage_statuses
+    assert ("prepare_run_data_indexes", "completed") in stage_statuses
+    assert ("prepare_run_data_symbols", "started") in stage_statuses
+    assert symbol_progress[0]["processed_symbol_count"] == 1
+    assert symbol_progress[0]["symbol"] == "000001.SZ"
+    assert symbol_progress[0]["bar_count"] > 0
+    assert ("prepare_run_data_attribution_reference", "completed") in stage_statuses
+    assert events[-1]["stage"] == "prepare_run_data_detail"
+    assert events[-1]["status"] == "completed"
+
+
 def test_prepared_run_data_cache_reuses_when_only_run_id_changes(tmp_path: Path) -> None:
     cache = PreparedRunDataCache()
     run_plan = _run_plan(tmp_path)

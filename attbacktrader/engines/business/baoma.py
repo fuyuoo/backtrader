@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 
@@ -160,17 +160,22 @@ def run_baoma_v1_business(
     stop_loss_method: BaomaMa60Stop | None = None,
     profit_exit_method: BaomaMa25ProfitExit | None = None,
     entry_attribution_context: EntryAttributionContext | None = None,
+    progress_callback: Callable[[Mapping[str, object]], None] | None = None,
+    progress_interval_days: int = 50,
 ) -> BaomaBusinessRunResult:
     """Run Baoma v1 execution rules without portfolio cash simulation."""
 
     if not bars_by_symbol:
         raise ValueError("bars_by_symbol cannot be empty")
+    if progress_interval_days <= 0:
+        raise ValueError("progress_interval_days must be positive")
 
     config = config or BaomaBusinessRunConfig()
     entry_method = entry_method or BaomaEntry()
     add_on_method = add_on_method or BaomaAddOn()
     stop_loss_method = stop_loss_method or BaomaMa60Stop()
     profit_exit_method = profit_exit_method or BaomaMa25ProfitExit()
+    _emit_baoma_event(progress_callback, stage="baoma_engine_prepare", status="started")
     requirements = _required_indicators(
         entry_method,
         add_on_method,
@@ -179,13 +184,32 @@ def run_baoma_v1_business(
         config=config,
     )
     symbols = tuple(bars_by_symbol.keys())
+    _emit_baoma_event(
+        progress_callback,
+        stage="baoma_engine_prepare",
+        status="requirements_resolved",
+        total_symbols=len(symbols),
+        required_indicator_count=len(requirements),
+    )
     rows_by_key = _rows_by_key(
         bars_by_symbol,
         indicators_by_symbol=dict(indicators_by_symbol or {}),
         indicator_requirements=requirements,
+        progress_callback=progress_callback,
     )
-    previous_rows_by_key = _previous_rows_by_key(rows_by_key)
+    previous_rows_by_key = _previous_rows_by_key(rows_by_key, progress_callback=progress_callback)
     dates = tuple(sorted({trade_date for _, trade_date in rows_by_key}))
+    total_days = len(dates)
+    total_symbols = len(symbols)
+    _emit_baoma_event(
+        progress_callback,
+        stage="baoma_engine_prepare",
+        status="completed",
+        total_symbols=total_symbols,
+        total_days=total_days,
+        row_count=len(rows_by_key),
+        previous_row_count=len(previous_rows_by_key),
+    )
 
     lifecycles: dict[str, ExecutionLifecycleComponent] = {}
     closed_counts_by_symbol: dict[str, int] = {}
@@ -199,7 +223,18 @@ def run_baoma_v1_business(
     scale_out_context_by_symbol: dict[str, _ScaleOutEntryContext] = {}
     scale_out_missing_recorded_by_symbol: dict[str, bool] = {}
 
-    for trade_date in dates:
+    _emit_baoma_progress(
+        progress_callback,
+        status="started",
+        processed_days=0,
+        total_days=total_days,
+        total_symbols=total_symbols,
+        trade_date=None,
+        intent_count=0,
+        closed_trade_count=0,
+        open_holding_count=0,
+    )
+    for day_index, trade_date in enumerate(dates, start=1):
         for symbol in symbols:
             row = rows_by_key.get((symbol, trade_date))
             if row is None:
@@ -475,6 +510,19 @@ def run_baoma_v1_business(
                 )
             lifecycle_snapshots.append(lifecycle.snapshot(trade_date=trade_date))
 
+        if day_index == 1 or day_index % progress_interval_days == 0 or day_index == total_days:
+            _emit_baoma_progress(
+                progress_callback,
+                status="running",
+                processed_days=day_index,
+                total_days=total_days,
+                total_symbols=total_symbols,
+                trade_date=trade_date,
+                intent_count=len(intents),
+                closed_trade_count=len(closed_trades),
+                open_holding_count=_open_holding_count(lifecycles),
+            )
+
     end_date = dates[-1]
     if config.force_exit_at_end:
         for symbol in symbols:
@@ -496,6 +544,17 @@ def run_baoma_v1_business(
         for symbol in symbols
         if (lifecycle := lifecycles.get(symbol)) is not None and lifecycle.total_quantity > 0
     )
+    _emit_baoma_progress(
+        progress_callback,
+        status="completed",
+        processed_days=total_days,
+        total_days=total_days,
+        total_symbols=total_symbols,
+        trade_date=end_date,
+        intent_count=len(intents),
+        closed_trade_count=len(closed_trades),
+        open_holding_count=len(open_positions),
+    )
     return BaomaBusinessRunResult(
         intents=tuple(intents),
         lifecycle_events=tuple(lifecycle_events),
@@ -504,6 +563,49 @@ def run_baoma_v1_business(
         open_positions=open_positions,
         end_run_results=tuple(end_run_results),
     )
+
+
+def _emit_baoma_progress(
+    progress_callback: Callable[[Mapping[str, object]], None] | None,
+    *,
+    status: str,
+    processed_days: int,
+    total_days: int,
+    total_symbols: int,
+    trade_date: date | None,
+    intent_count: int,
+    closed_trade_count: int,
+    open_holding_count: int,
+) -> None:
+    if progress_callback is None:
+        return
+    progress_callback(
+        {
+            "stage": "baoma_engine",
+            "status": status,
+            "processed_days": processed_days,
+            "total_days": total_days,
+            "total_symbols": total_symbols,
+            "processed_date_symbol_slots": processed_days * total_symbols,
+            "total_date_symbol_slots": total_days * total_symbols,
+            "trade_date": trade_date.isoformat() if trade_date is not None else None,
+            "intent_count": intent_count,
+            "closed_trade_count": closed_trade_count,
+            "open_holding_count": open_holding_count,
+        }
+    )
+
+
+def _emit_baoma_event(
+    progress_callback: Callable[[Mapping[str, object]], None] | None,
+    *,
+    stage: str,
+    status: str,
+    **fields: object,
+) -> None:
+    if progress_callback is None:
+        return
+    progress_callback({"stage": stage, "status": status, **fields})
 
 
 def _required_indicators(*methods: object, config: BaomaBusinessRunConfig) -> tuple[IndicatorRequirement, ...]:
@@ -526,9 +628,17 @@ def _rows_by_key(
     *,
     indicators_by_symbol: Mapping[str, IndicatorFrame],
     indicator_requirements: Sequence[IndicatorRequirement],
+    progress_callback: Callable[[Mapping[str, object]], None] | None = None,
 ) -> dict[tuple[str, date], MarketFeatureRow]:
     rows_by_key: dict[tuple[str, date], MarketFeatureRow] = {}
-    for symbol, bars in bars_by_symbol.items():
+    total_symbols = len(bars_by_symbol)
+    _emit_baoma_event(
+        progress_callback,
+        stage="baoma_engine_rows",
+        status="started",
+        total_symbols=total_symbols,
+    )
+    for index, (symbol, bars) in enumerate(bars_by_symbol.items(), start=1):
         symbol_bars = tuple(sorted(bars, key=lambda bar: bar.trade_date))
         if not symbol_bars:
             raise ValueError(f"bars cannot be empty for {symbol}")
@@ -552,22 +662,67 @@ def _rows_by_key(
         )
         for row in rows:
             rows_by_key[(row.symbol, row.trade_date)] = row
+        _emit_baoma_event(
+            progress_callback,
+            stage="baoma_engine_rows",
+            status="running",
+            processed_symbol_count=index,
+            total_symbols=total_symbols,
+            symbol=symbol,
+            symbol_bar_count=len(symbol_bars),
+            symbol_row_count=len(rows),
+            total_row_count=len(rows_by_key),
+        )
+    _emit_baoma_event(
+        progress_callback,
+        stage="baoma_engine_rows",
+        status="completed",
+        total_symbols=total_symbols,
+        total_row_count=len(rows_by_key),
+    )
     return rows_by_key
 
 
 def _previous_rows_by_key(
     rows_by_key: Mapping[tuple[str, date], MarketFeatureRow],
+    *,
+    progress_callback: Callable[[Mapping[str, object]], None] | None = None,
 ) -> dict[tuple[str, date], MarketFeatureRow]:
     previous: dict[tuple[str, date], MarketFeatureRow] = {}
     rows_by_symbol: dict[str, list[MarketFeatureRow]] = {}
+    _emit_baoma_event(
+        progress_callback,
+        stage="baoma_engine_previous_rows",
+        status="started",
+        row_count=len(rows_by_key),
+    )
     for row in rows_by_key.values():
         rows_by_symbol.setdefault(row.symbol, []).append(row)
 
-    for rows in rows_by_symbol.values():
+    total_symbols = len(rows_by_symbol)
+    for symbol_index, rows in enumerate(rows_by_symbol.values(), start=1):
         ordered_rows = tuple(sorted(rows, key=lambda row: row.trade_date))
-        for index, row in enumerate(ordered_rows):
-            if index > 0:
-                previous[(row.symbol, row.trade_date)] = ordered_rows[index - 1]
+        for row_index, row in enumerate(ordered_rows):
+            if row_index > 0:
+                previous[(row.symbol, row.trade_date)] = ordered_rows[row_index - 1]
+        symbol = ordered_rows[0].symbol if ordered_rows else None
+        _emit_baoma_event(
+            progress_callback,
+            stage="baoma_engine_previous_rows",
+            status="running",
+            processed_symbol_count=symbol_index,
+            total_symbols=total_symbols,
+            symbol=symbol,
+            symbol_row_count=len(ordered_rows),
+            previous_row_count=len(previous),
+        )
+    _emit_baoma_event(
+        progress_callback,
+        stage="baoma_engine_previous_rows",
+        status="completed",
+        total_symbols=total_symbols,
+        previous_row_count=len(previous),
+    )
     return previous
 
 

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
 
 from attbacktrader.analysis import AnalysisEvidence, enrich_backtest_report
 from attbacktrader.config import RunPlan
@@ -143,26 +143,54 @@ def execute_run_plan(
     provider: RunDataProvider | None = None,
     prepared_data_cache: PreparedRunDataCache | None = None,
     snapshot_read_cache: SnapshotReadCache | None = None,
+    progress_callback: Callable[[Mapping[str, object]], None] | None = None,
+    progress_interval_days: int = 50,
 ) -> RunPlanExecutionResult:
+    if progress_interval_days <= 0:
+        raise ValueError("progress_interval_days must be positive")
+    _emit_run_progress(progress_callback, stage="run_plan", status="started", run_id=run_plan.run.id)
+    _emit_run_progress(progress_callback, stage="auto_stock_pool_filter", status="started", run_id=run_plan.run.id)
     execution_run_plan, data_preflight_report, stock_pool_filter = _run_plan_with_auto_stock_pool_filter(
         run_plan,
         provider=provider,
+        progress_callback=progress_callback,
     )
+    _emit_run_progress(
+        progress_callback,
+        stage="auto_stock_pool_filter",
+        status="completed",
+        run_id=execution_run_plan.run.id,
+        symbol_count=len(execution_run_plan.data.resolved_tradable_series),
+    )
+    _emit_run_progress(progress_callback, stage="prepare_run_data", status="started", run_id=execution_run_plan.run.id)
     if prepared_data_cache is None:
         prepared_data = prepare_run_data(
             execution_run_plan,
             provider=provider,
             snapshot_read_cache=snapshot_read_cache,
+            event_progress=progress_callback,
         )
     else:
         prepared_data = prepared_data_cache.get_or_prepare(
             execution_run_plan,
             provider=provider,
             snapshot_read_cache=snapshot_read_cache,
+            event_progress=progress_callback,
         )
+    _emit_run_progress(
+        progress_callback,
+        stage="prepare_run_data",
+        status="completed",
+        run_id=execution_run_plan.run.id,
+        symbol_count=len(prepared_data.symbols),
+        adjustment=prepared_data.adjustment_label,
+    )
+    _emit_run_progress(progress_callback, stage="build_strategy_template", status="started", run_id=execution_run_plan.run.id)
     strategy_template = build_strategy_template(execution_run_plan.strategy)
+    _emit_run_progress(progress_callback, stage="build_strategy_template", status="completed", run_id=execution_run_plan.run.id)
 
     if execution_run_plan.execution.engine == "backtrader":
+        _emit_run_progress(progress_callback, stage="engine", status="started", run_id=execution_run_plan.run.id, engine="backtrader")
         risk_group_by_symbol = prepared_data.risk_group_by_symbol(
             level=getattr(strategy_template.sizing_method, "risk_group_level", 1)
         )
@@ -203,7 +231,35 @@ def execute_run_plan(
         execution_audit = engine_result.execution_audit
         lifecycle_events = engine_result.lifecycle_events
         lifecycle_snapshots = engine_result.lifecycle_snapshots
+        _emit_run_progress(progress_callback, stage="engine", status="completed", run_id=execution_run_plan.run.id, engine="backtrader")
     elif execution_run_plan.execution.engine == "baoma_v1_business":
+        _emit_run_progress(
+            progress_callback,
+            stage="engine",
+            status="started",
+            run_id=execution_run_plan.run.id,
+            engine="baoma_v1_business",
+        )
+        _emit_run_progress(
+            progress_callback,
+            stage="baoma_entry_attribution_context",
+            status="started",
+            run_id=execution_run_plan.run.id,
+            symbol_count=len(prepared_data.symbols),
+        )
+        entry_attribution_context = _baoma_post_trade_attribution_context(
+            execution_run_plan,
+            prepared_data,
+            progress_callback=progress_callback,
+        )
+        _emit_run_progress(
+            progress_callback,
+            stage="baoma_entry_attribution_context",
+            status="completed",
+            run_id=execution_run_plan.run.id,
+            evidence_count=len(entry_attribution_context.evidence_by_key),
+            enabled_factor_count=len(entry_attribution_context.enabled_factor_keys),
+        )
         engine_result = run_baoma_v1_business(
             prepared_data.bars_by_symbol,
             indicators_by_symbol=prepared_data.indicators_by_symbol,
@@ -212,7 +268,9 @@ def execute_run_plan(
             profit_exit_method=strategy_template.profit_taking_method,
             stop_loss_method=strategy_template.stop_loss_method,
             add_on_method=strategy_template.add_on_method,
-            entry_attribution_context=_baoma_post_trade_attribution_context(execution_run_plan, prepared_data),
+            entry_attribution_context=entry_attribution_context,
+            progress_callback=progress_callback,
+            progress_interval_days=progress_interval_days,
         )
         portfolio_result = _portfolio_result_from_baoma(engine_result)
         final_cash = None
@@ -222,7 +280,17 @@ def execute_run_plan(
         execution_audit = _execution_audit_from_baoma(engine_result)
         lifecycle_events = engine_result.lifecycle_events
         lifecycle_snapshots = engine_result.lifecycle_snapshots
+        _emit_run_progress(
+            progress_callback,
+            stage="engine",
+            status="completed",
+            run_id=execution_run_plan.run.id,
+            engine="baoma_v1_business",
+            intent_count=len(portfolio_result.intents),
+            closed_trade_count=len(portfolio_result.closed_trades),
+        )
     else:
+        _emit_run_progress(progress_callback, stage="engine", status="started", run_id=execution_run_plan.run.id, engine="business")
         risk_group_by_symbol = prepared_data.risk_group_by_symbol(
             level=getattr(strategy_template.sizing_method, "risk_group_level", 1)
         )
@@ -244,12 +312,22 @@ def execute_run_plan(
         execution_audit = ()
         lifecycle_events = engine_result.lifecycle_events
         lifecycle_snapshots = engine_result.lifecycle_snapshots
+        _emit_run_progress(progress_callback, stage="engine", status="completed", run_id=execution_run_plan.run.id, engine="business")
 
+    _emit_run_progress(progress_callback, stage="assemble_symbol_results", status="started", run_id=execution_run_plan.run.id)
     symbol_results = _symbol_results_from_portfolio(
         execution_run_plan,
         prepared_by_symbol=prepared_data.symbol_data_by_symbol,
         portfolio_result=portfolio_result,
     )
+    _emit_run_progress(
+        progress_callback,
+        stage="assemble_symbol_results",
+        status="completed",
+        run_id=execution_run_plan.run.id,
+        symbol_count=len(symbol_results),
+    )
+    _emit_run_progress(progress_callback, stage="build_reports", status="started", run_id=execution_run_plan.run.id)
     if equity_curve:
         base_report = build_report_from_equity_curve(
             equity_curve,
@@ -286,6 +364,8 @@ def execute_run_plan(
         sold_too_early_threshold=execution_run_plan.analysis.post_exit.sold_too_early_threshold,
         rebound_thresholds=execution_run_plan.analysis.post_exit.rebound_thresholds,
     )
+    _emit_run_progress(progress_callback, stage="build_reports", status="completed", run_id=execution_run_plan.run.id)
+    _emit_run_progress(progress_callback, stage="run_plan", status="completed", run_id=execution_run_plan.run.id)
 
     return RunPlanExecutionResult(
         run_id=execution_run_plan.run.id,
@@ -316,16 +396,29 @@ def execute_run_plan(
     )
 
 
+def _emit_run_progress(
+    progress_callback: Callable[[Mapping[str, object]], None] | None,
+    *,
+    stage: str,
+    status: str,
+    **fields: object,
+) -> None:
+    if progress_callback is None:
+        return
+    progress_callback({"stage": stage, "status": status, **fields})
+
+
 def _run_plan_with_auto_stock_pool_filter(
     run_plan: RunPlan,
     *,
     provider: RunDataProvider | None,
+    progress_callback: Callable[[Mapping[str, object]], None] | None = None,
 ) -> tuple[RunPlan, DataPreflightReport | None, StockPoolAutoFilterResult | None]:
     if run_plan.data.stock_pool_file is None:
         return run_plan, None, None
 
     preflight_run_plan = _run_plan_reusing_snapshots(run_plan)
-    preflight = run_data_preflight(preflight_run_plan, provider=provider)
+    preflight = run_data_preflight(preflight_run_plan, provider=provider, event_progress=progress_callback)
     stock_pool_filter = _stock_pool_filter_from_preflight(run_plan, preflight)
     if not stock_pool_filter.kept_symbols:
         raise ValueError("stock pool auto filter excluded all symbols")
@@ -554,7 +647,12 @@ def _entry_attribution_context(run_plan: RunPlan, prepared_data) -> EntryAttribu
     )
 
 
-def _baoma_post_trade_attribution_context(run_plan: RunPlan, prepared_data) -> EntryAttributionContext:
+def _baoma_post_trade_attribution_context(
+    run_plan: RunPlan,
+    prepared_data,
+    *,
+    progress_callback: Callable[[Mapping[str, object]], None] | None = None,
+) -> EntryAttributionContext:
     config = run_plan.analysis.entry_attribution
     entry_filter = _entry_attribution_filter_rule(config)
     selection = run_plan.analysis.resolved_attribution_factor_selection
@@ -584,6 +682,8 @@ def _baoma_post_trade_attribution_context(run_plan: RunPlan, prepared_data) -> E
         industry_kdj_threshold=config.industry_kdj_threshold,
         enabled_factor_keys=enabled_factor_keys,
         entry_filter=entry_filter,
+        progress_callback=progress_callback,
+        progress_stage="baoma_entry_attribution_context_build",
     )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_right
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from types import MappingProxyType
@@ -1682,14 +1682,29 @@ def build_entry_attribution_context(
     market_kdj_threshold: float = 13.0,
     enabled_factor_keys: Sequence[str] | None = None,
     entry_filter: EntryAttributionFilterRule | None = None,
+    progress_callback: Callable[[Mapping[str, object]], None] | None = None,
+    progress_stage: str = "entry_attribution_context",
 ) -> EntryAttributionContext:
     enabled_keys = frozenset(enabled_factor_keys if enabled_factor_keys is not None else entry_attribution_factor_keys())
     benchmark_bars_by_symbol = dict(benchmark_bars_by_symbol or {})
     industry_index_bars_by_symbol = dict(industry_index_bars_by_symbol or {})
     memberships_by_symbol = dict(memberships_by_symbol or {})
     attribution_reference_evidence_by_symbol_date = dict(attribution_reference_evidence_by_symbol_date or {})
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=progress_stage,
+        status="started",
+        symbol_count=len(bars_by_symbol),
+        enabled_factor_count=len(enabled_keys),
+    )
     market_evidence_by_date: dict[date, EntryAttributionEvidence] = {}
     market_symbols = tuple(dict.fromkeys((market_symbol, *benchmark_bars_by_symbol)))
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=f"{progress_stage}_market",
+        status="started",
+        market_symbol_count=len(market_symbols),
+    )
     for current_market_symbol in market_symbols:
         current_market_evidence = _market_trend_evidence_by_date(
             benchmark_bars_by_symbol.get(current_market_symbol, ()),
@@ -1709,7 +1724,20 @@ def build_entry_attribution_context(
             market_evidence_by_date.get(evidence_date),
             evidence,
         )
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=f"{progress_stage}_market",
+        status="completed",
+        market_symbol_count=len(market_symbols),
+        evidence_date_count=len(market_evidence_by_date),
+    )
     market_evidence_index = EntryAttributionEvidenceDateIndex.from_mapping(market_evidence_by_date)
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=f"{progress_stage}_industry",
+        status="started",
+        industry_index_count=len(industry_index_bars_by_symbol),
+    )
     industry_evidence_by_symbol = _industry_kdj_evidence_by_symbol(
         industry_index_bars_by_symbol,
         market_bars=benchmark_bars_by_symbol.get(market_symbol, ()),
@@ -1719,14 +1747,53 @@ def build_entry_attribution_context(
         symbol: EntryAttributionEvidenceDateIndex.from_mapping(evidence_by_date)
         for symbol, evidence_by_date in industry_evidence_by_symbol.items()
     }
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=f"{progress_stage}_industry",
+        status="completed",
+        industry_index_count=len(industry_index_bars_by_symbol),
+        evidence_symbol_count=len(industry_evidence_by_symbol),
+    )
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=f"{progress_stage}_cross_section",
+        status="started",
+        symbol_count=len(bars_by_symbol),
+    )
     symbol_cross_section_evidence_by_symbol = _symbol_cross_section_evidence_by_symbol(bars_by_symbol)
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=f"{progress_stage}_cross_section",
+        status="completed",
+        evidence_symbol_count=len(symbol_cross_section_evidence_by_symbol),
+    )
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=f"{progress_stage}_industry_relative",
+        status="started",
+        symbol_count=len(bars_by_symbol),
+    )
     symbol_industry_relative_evidence_by_symbol = _symbol_industry_relative_evidence_by_symbol(
         bars_by_symbol,
         memberships_by_symbol=memberships_by_symbol,
     )
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=f"{progress_stage}_industry_relative",
+        status="completed",
+        evidence_symbol_count=len(symbol_industry_relative_evidence_by_symbol),
+    )
 
     evidence_by_key: dict[tuple[str, date], EntryAttributionEvidence] = {}
-    for symbol, bars in sorted(bars_by_symbol.items()):
+    sorted_symbol_items = tuple(sorted(bars_by_symbol.items()))
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=f"{progress_stage}_symbols",
+        status="started",
+        total_symbols=len(sorted_symbol_items),
+    )
+    for symbol_index, (symbol, bars) in enumerate(sorted_symbol_items, start=1):
+        evidence_count_before_symbol = len(evidence_by_key)
         ordered_bars = tuple(sorted(bars, key=lambda value: value.trade_date))
         frame = indicators_by_symbol.get(symbol)
         ma_values_by_period = {
@@ -1774,12 +1841,46 @@ def build_entry_attribution_context(
             evidence = _filter_evidence(evidence, enabled_keys)
             if not evidence.is_empty():
                 evidence_by_key[(symbol, bar.trade_date)] = evidence
+        _emit_entry_attribution_progress(
+            progress_callback,
+            stage=f"{progress_stage}_symbols",
+            status="running",
+            processed_symbol_count=symbol_index,
+            total_symbols=len(sorted_symbol_items),
+            symbol=symbol,
+            bar_count=len(ordered_bars),
+            symbol_evidence_count=len(evidence_by_key) - evidence_count_before_symbol,
+            total_evidence_count=len(evidence_by_key),
+        )
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=f"{progress_stage}_symbols",
+        status="completed",
+        total_symbols=len(sorted_symbol_items),
+        total_evidence_count=len(evidence_by_key),
+    )
+    _emit_entry_attribution_progress(
+        progress_callback,
+        stage=progress_stage,
+        status="completed",
+        symbol_count=len(sorted_symbol_items),
+        total_evidence_count=len(evidence_by_key),
+    )
 
     return EntryAttributionContext(
         evidence_by_key=evidence_by_key,
         enabled_factor_keys=enabled_keys,
         entry_filter=entry_filter or EntryAttributionFilterRule(),
     )
+
+
+def _emit_entry_attribution_progress(
+    progress_callback: Callable[[Mapping[str, object]], None] | None,
+    **event: object,
+) -> None:
+    if progress_callback is None:
+        return
+    progress_callback(event)
 
 
 def _symbol_cross_section_evidence_by_symbol(
