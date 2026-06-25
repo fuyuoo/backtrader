@@ -750,11 +750,15 @@ def run_single_fold_stage_a_pre_tuning(
     fold: Mapping[str, Any],
     trial_parameter_sets: Sequence[Mapping[str, Any]],
     weight_keys: Sequence[str] | None = None,
+    progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
+    progress_interval_trials: int = 10,
 ) -> dict[str, Any]:
     """Run one-fold Stage A pre-tuning under broad trade-sample constraints."""
 
     if not trial_parameter_sets:
         raise ValueError("trial_parameter_sets cannot be empty")
+    if progress_interval_trials < 1:
+        raise ValueError("progress_interval_trials must be positive")
     fold_id = str(fold.get("fold_id") or "")
     if not fold_id:
         raise ValueError("fold.fold_id is required")
@@ -762,6 +766,16 @@ def run_single_fold_stage_a_pre_tuning(
     training_events = _decision_events_for_fold_window(decision_event_table, fold, window="train")
     if not training_events:
         raise ValueError(f"fold {fold_id} has no training decision events")
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "stage_a_pre_tuning",
+                "status": "started",
+                "fold_id": fold_id,
+                "trial_count": len(trial_parameter_sets),
+                "training_event_count": len(training_events),
+            }
+        )
 
     trials: list[dict[str, Any]] = []
     for index, trial_parameters in enumerate(trial_parameter_sets, start=1):
@@ -794,6 +808,17 @@ def run_single_fold_stage_a_pre_tuning(
                 "selected_entry_count": len(_as_sequence(simulation.get("executed_entries"))),
             }
         )
+        if progress_callback is not None and (index % progress_interval_trials == 0 or index == len(trial_parameter_sets)):
+            progress_callback(
+                {
+                    "stage": "stage_a_pre_tuning",
+                    "status": "running",
+                    "fold_id": fold_id,
+                    "completed_trials": index,
+                    "trial_count": len(trial_parameter_sets),
+                    "last_trial_id": trial_id,
+                }
+            )
 
     inferred_weight_keys = list(weight_keys or _infer_weight_keys(trials))
     if not inferred_weight_keys:
@@ -802,6 +827,16 @@ def run_single_fold_stage_a_pre_tuning(
     balanced_top = _balanced_top_trials(trials)
     elite_by_id = {str(trial["trial_id"]): trial for trial in [*pareto_frontier, *balanced_top]}
     elite_trials = list(elite_by_id.values())
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "stage_a_pre_tuning",
+                "status": "completed",
+                "fold_id": fold_id,
+                "trial_count": len(trials),
+                "elite_trial_count": len(elite_trials),
+            }
+        )
     return {
         "schema": SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA,
         "fold_id": fold_id,
@@ -835,11 +870,15 @@ def run_single_fold_stage_b_tuning(
     stage_b_search_space: Mapping[str, Any],
     trial_parameter_sets: Sequence[Mapping[str, Any]],
     minimum_train_trades_per_year: int | None = None,
+    progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
+    progress_interval_trials: int = 10,
 ) -> dict[str, Any]:
     """Run one-fold Stage B scored portfolio tuning under realistic constraints."""
 
     if not trial_parameter_sets:
         raise ValueError("trial_parameter_sets cannot be empty")
+    if progress_interval_trials < 1:
+        raise ValueError("progress_interval_trials must be positive")
     fold_id = str(fold.get("fold_id") or "")
     if not fold_id:
         raise ValueError("fold.fold_id is required")
@@ -850,6 +889,17 @@ def run_single_fold_stage_b_tuning(
     test_events = _decision_events_for_fold_window(decision_event_table, fold, window="test")
     if not test_events:
         raise ValueError(f"fold {fold_id} has no test decision events")
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "stage_b_tuning",
+                "status": "started",
+                "fold_id": fold_id,
+                "trial_count": len(trial_parameter_sets),
+                "training_event_count": len(training_events),
+                "test_event_count": len(test_events),
+            }
+        )
     baseline_simulation = simulate_scored_portfolio(
         training_events,
         scorer_config=_baseline_scorer_config(training_events),
@@ -895,6 +945,17 @@ def run_single_fold_stage_b_tuning(
                 "selected_entry_count": len(_as_sequence(simulation.get("executed_entries"))),
             }
         )
+        if progress_callback is not None and (index % progress_interval_trials == 0 or index == len(trial_parameter_sets)):
+            progress_callback(
+                {
+                    "stage": "stage_b_tuning",
+                    "status": "running",
+                    "fold_id": fold_id,
+                    "completed_trials": index,
+                    "trial_count": len(trial_parameter_sets),
+                    "last_trial_id": trial_id,
+                }
+            )
 
     gate_config = _stage_b_trade_count_gate(
         contract,
@@ -912,6 +973,17 @@ def run_single_fold_stage_b_tuning(
         portfolio_controls=portfolio_controls,
         score_gate=score_gate,
     )
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "stage_b_tuning",
+                "status": "completed",
+                "fold_id": fold_id,
+                "trial_count": len(trials),
+                "eligible_trial_count": len(eligible),
+                "rejected_trial_count": len(rejected),
+            }
+        )
     return {
         "schema": SINGLE_FOLD_STAGE_B_TUNING_SCHEMA,
         "fold_id": fold_id,
@@ -1018,11 +1090,15 @@ def run_full_walk_forward_tuning(
     stage_b_trial_parameter_sets: Sequence[Mapping[str, Any]],
     completed_artifacts: Mapping[str, str] | None = None,
     minimum_train_trades_per_year: int | None = None,
+    progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
+    progress_interval_trials: int = 10,
 ) -> dict[str, Any]:
     """Run or schedule the full 5Y/1Y walk-forward scored allocation flow."""
 
     if mode not in {"smoke", "standard"}:
         raise ValueError("mode must be smoke or standard")
+    if progress_interval_trials < 1:
+        raise ValueError("progress_interval_trials must be positive")
     cache_identity = _as_mapping(decision_event_table.get("cache_identity"))
     signal_cache_key = str(cache_identity.get("cache_key") or "")
     if not signal_cache_key:
@@ -1032,9 +1108,28 @@ def run_full_walk_forward_tuning(
     stage_b_scheduled = _scheduled_trials(contract, "stage_b", mode)
     completed = _as_mapping(completed_artifacts)
     fold_results: list[dict[str, Any]] = []
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "full_walk_forward_tuning",
+                "status": "started",
+                "mode": mode,
+                "fold_count": len(folds),
+                "stage_a_trial_count": len(stage_a_trial_parameter_sets),
+                "stage_b_trial_count": len(stage_b_trial_parameter_sets),
+            }
+        )
     for fold in folds:
         fold_item = _as_mapping(fold)
         fold_id = str(fold_item.get("fold_id") or "")
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "stage": "full_walk_forward_fold",
+                    "status": "started",
+                    "fold_id": fold_id,
+                }
+            )
         artifact_identity = _fold_artifact_identity(
             signal_cache_key=signal_cache_key,
             fold_id=fold_id,
@@ -1055,6 +1150,14 @@ def run_full_walk_forward_tuning(
                     "test_window": _test_window_boundary(test),
                 }
             )
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "stage": "full_walk_forward_fold",
+                        "status": "skipped_completed",
+                        "fold_id": fold_id,
+                    }
+                )
             continue
 
         stage_a_result = run_single_fold_stage_a_pre_tuning(
@@ -1062,6 +1165,8 @@ def run_full_walk_forward_tuning(
             contract=contract,
             fold=fold_item,
             trial_parameter_sets=stage_a_trial_parameter_sets,
+            progress_callback=progress_callback,
+            progress_interval_trials=progress_interval_trials,
         )
         stage_b_result = run_single_fold_stage_b_tuning(
             decision_event_table,
@@ -1070,6 +1175,8 @@ def run_full_walk_forward_tuning(
             stage_b_search_space=_as_mapping(stage_a_result.get("stage_b_search_space")),
             trial_parameter_sets=stage_b_trial_parameter_sets,
             minimum_train_trades_per_year=minimum_train_trades_per_year,
+            progress_callback=progress_callback,
+            progress_interval_trials=progress_interval_trials,
         )
         fold_results.append(
             {
@@ -1092,8 +1199,16 @@ def run_full_walk_forward_tuning(
                 "test_window": _test_window_boundary(test),
             }
         )
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "stage": "full_walk_forward_fold",
+                    "status": "completed",
+                    "fold_id": fold_id,
+                }
+            )
 
-    return {
+    result = {
         "schema": FULL_WALK_FORWARD_TUNING_RUN_SCHEMA,
         "mode": mode,
         "fold_count": len(fold_results),
@@ -1110,6 +1225,16 @@ def run_full_walk_forward_tuning(
         },
         "folds": fold_results,
     }
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "full_walk_forward_tuning",
+                "status": "completed",
+                "mode": mode,
+                "fold_count": len(fold_results),
+            }
+        )
+    return result
 
 
 def build_scored_allocation_report_package(run_result: Mapping[str, Any]) -> dict[str, Any]:

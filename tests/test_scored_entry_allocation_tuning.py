@@ -1146,6 +1146,7 @@ def test_scored_entry_allocation_tuning_cli_runs_full_study_and_writes_report_pa
     decision_table_path = tmp_path / "decision_event_table.json"
     stage_a_trials_path = tmp_path / "stage_a_trials.json"
     stage_b_trials_path = tmp_path / "stage_b_trials.json"
+    progress_path = tmp_path / "full-study-progress.ndjson"
     decision_table_path.write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
     stage_a_trials_path.write_text(json.dumps(_stage_a_trial_parameter_sets(), ensure_ascii=False), encoding="utf-8")
     stage_b_trials_path.write_text(json.dumps(_stage_b_walk_forward_trial_parameter_sets(), ensure_ascii=False), encoding="utf-8")
@@ -1166,9 +1167,14 @@ def test_scored_entry_allocation_tuning_cli_runs_full_study_and_writes_report_pa
             "0",
             "--output-dir",
             str(tmp_path / "full-study"),
+            "--progress-log",
+            str(progress_path),
+            "--progress-interval-trials",
+            "1",
         ]
     )
     stdout = json.loads(capsys.readouterr().out)
+    progress_events = [json.loads(line) for line in progress_path.read_text(encoding="utf-8").splitlines()]
 
     assert exit_code == 0
     assert stdout["mode"] == "smoke"
@@ -1179,6 +1185,17 @@ def test_scored_entry_allocation_tuning_cli_runs_full_study_and_writes_report_pa
     assert (tmp_path / "full-study" / "scored_allocation_report_package.json").exists()
     assert (tmp_path / "full-study" / "scored_allocation_report_package.zh.md").exists()
     assert (tmp_path / "full-study" / "balanced_parameters.json").exists()
+    assert any(event["stage"] == "full_walk_forward_fold" for event in progress_events)
+    assert any(
+        event["stage"] == "stage_a_pre_tuning" and event["status"] == "running"
+        for event in progress_events
+    )
+    assert any(
+        event["stage"] == "stage_b_tuning" and event["status"] == "running"
+        for event in progress_events
+    )
+    assert progress_events[-1]["stage"] == "full_study_cli"
+    assert progress_events[-1]["status"] == "completed"
 
 
 def _entry_event(

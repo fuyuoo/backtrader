@@ -122,7 +122,31 @@ def _run_full_study(args: argparse.Namespace, *, contract: dict[str, Any], outpu
     if args.mode not in {"smoke", "standard"}:
         raise ValueError("--run-full-study supports only --mode smoke or --mode standard")
 
+    progress = _ProgressLogger(Path(args.progress_log)) if args.progress_log else None
+    if progress is not None:
+        progress(
+            {
+                "stage": "full_study_cli",
+                "status": "started",
+                "mode": args.mode,
+            }
+        )
+        progress(
+            {
+                "stage": "load_decision_event_table",
+                "status": "started",
+                "path": args.decision_event_table,
+            }
+        )
     decision_event_table = _load_json_mapping(args.decision_event_table, "--decision-event-table")
+    if progress is not None:
+        progress(
+            {
+                "stage": "load_decision_event_table",
+                "status": "completed",
+                "event_count": decision_event_table.get("event_count"),
+            }
+        )
     stage_a_trials = _load_json_array_of_objects(args.stage_a_trials, "--stage-a-trials")
     stage_b_trials = _load_json_array_of_objects(args.stage_b_trials, "--stage-b-trials")
     completed_artifacts = (
@@ -131,7 +155,21 @@ def _run_full_study(args: argparse.Namespace, *, contract: dict[str, Any], outpu
         else None
     )
 
+    if progress is not None:
+        progress(
+            {
+                "stage": "write_contract",
+                "status": "started",
+            }
+        )
     _, _, contract_payload = write_scored_entry_allocation_tuning_contract(contract, output_dir=output_dir)
+    if progress is not None:
+        progress(
+            {
+                "stage": "write_contract",
+                "status": "completed",
+            }
+        )
     run_result = run_full_walk_forward_tuning(
         decision_event_table,
         contract=contract_payload,
@@ -140,10 +178,59 @@ def _run_full_study(args: argparse.Namespace, *, contract: dict[str, Any], outpu
         stage_b_trial_parameter_sets=stage_b_trials,
         completed_artifacts=completed_artifacts,
         minimum_train_trades_per_year=args.minimum_train_trades_per_year,
+        progress_callback=progress,
+        progress_interval_trials=args.progress_interval_trials,
     )
+    if progress is not None:
+        progress(
+            {
+                "stage": "write_full_walk_forward_run",
+                "status": "started",
+            }
+        )
     _, run_payload = write_full_walk_forward_tuning_run(run_result, output_dir=output_dir)
+    if progress is not None:
+        progress(
+            {
+                "stage": "write_full_walk_forward_run",
+                "status": "completed",
+            }
+        )
+        progress(
+            {
+                "stage": "build_report_package",
+                "status": "started",
+            }
+        )
     report_package = build_scored_allocation_report_package(run_result)
+    if progress is not None:
+        progress(
+            {
+                "stage": "build_report_package",
+                "status": "completed",
+            }
+        )
+        progress(
+            {
+                "stage": "write_report_package",
+                "status": "started",
+            }
+        )
     _, package_payload = write_scored_allocation_report_package(report_package, output_dir=output_dir)
+    if progress is not None:
+        progress(
+            {
+                "stage": "write_report_package",
+                "status": "completed",
+            }
+        )
+        progress(
+            {
+                "stage": "full_study_cli",
+                "status": "completed",
+                "mode": args.mode,
+            }
+        )
 
     payload = {
         "mode": args.mode,
@@ -381,6 +468,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--progress-log")
     parser.add_argument("--progress-interval-rows", type=int, default=100_000)
     parser.add_argument("--run-full-study", action="store_true")
+    parser.add_argument("--progress-interval-trials", type=int, default=10)
     parser.add_argument("--decision-event-table")
     parser.add_argument("--stage-a-trials")
     parser.add_argument("--stage-b-trials")
