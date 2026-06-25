@@ -1,0 +1,4 @@
+interface:
+  display_name: "RecomNext"
+  short_description: "基于当前量化工程证据推荐三项下一步行动和宏观方向选择"
+  default_prompt: "Use $recomnext to recommend the three next actions and macro direction for the current quant research context."
