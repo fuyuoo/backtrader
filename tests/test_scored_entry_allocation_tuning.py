@@ -1028,6 +1028,7 @@ def test_scored_entry_allocation_tuning_contract_writer_and_cli_dry_run(tmp_path
 def test_scored_entry_allocation_tuning_cli_builds_decision_event_table_from_run_artifacts(
     tmp_path: Path,
     capsys,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     stock_pool_path = tmp_path / "stock_pool.csv"
     stock_pool_path.write_text("ts_code,name\n000001.SZ,one\n000002.SZ,two\n", encoding="utf-8")
@@ -1077,6 +1078,15 @@ def test_scored_entry_allocation_tuning_cli_builds_decision_event_table_from_run
         ),
         encoding="utf-8",
     )
+    progress_path = tmp_path / "decision-progress.ndjson"
+    original_load_json = tuning_cli._load_json
+
+    def guarded_load_json(path: Path):
+        if Path(path) == signal_audit_path:
+            raise AssertionError("signal_audit must be streamed, not loaded in one read")
+        return original_load_json(path)
+
+    monkeypatch.setattr(tuning_cli, "_load_json", guarded_load_json)
 
     exit_code = tuning_cli.main(
         [
@@ -1087,9 +1097,14 @@ def test_scored_entry_allocation_tuning_cli_builds_decision_event_table_from_run
             str(run_plan_path),
             "--output-dir",
             str(tmp_path / "decision-table"),
+            "--progress-log",
+            str(progress_path),
+            "--progress-interval-rows",
+            "1",
         ]
     )
     stdout = json.loads(capsys.readouterr().out)
+    progress_events = [json.loads(line) for line in progress_path.read_text(encoding="utf-8").splitlines()]
 
     assert exit_code == 0
     assert stdout["decision_event_table"]["event_count"] == 2
@@ -1099,6 +1114,24 @@ def test_scored_entry_allocation_tuning_cli_builds_decision_event_table_from_run
         "end": "2020-12-31",
     }
     assert (tmp_path / "decision-table" / "decision_event_table.json").exists()
+    assert any(
+        event["stage"] == "signal_audit_to_decision_events" and event["status"] == "running"
+        for event in progress_events
+    )
+    assert progress_events[-1]["stage"] == "decision_event_table"
+    assert progress_events[-1]["status"] == "completed"
+    assert progress_events[-1]["event_count"] == 2
+
+
+def test_scored_entry_allocation_tuning_streams_pretty_json_array(tmp_path: Path) -> None:
+    signal_audit_path = tmp_path / "signal_audit.json"
+    rows = [
+        {"intent_type": "hold", "symbol": "000001.SZ"},
+        {"intent_type": "enter", "symbol": "000001.SZ"},
+    ]
+    signal_audit_path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    assert list(tuning_cli._iter_json_array_items(signal_audit_path)) == rows
 
 
 def test_scored_entry_allocation_tuning_cli_runs_full_study_and_writes_report_package(

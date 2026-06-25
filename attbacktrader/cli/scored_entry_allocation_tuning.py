@@ -6,6 +6,9 @@ import argparse
 import csv
 import hashlib
 import json
+import time
+from collections.abc import Iterator, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -53,25 +56,60 @@ def main(argv: list[str] | None = None) -> int:
 def _build_decision_event_table(args: argparse.Namespace, *, output_dir: Path) -> int:
     signal_audit_path = _required_path(args.signal_audit, "--signal-audit", context="--build-decision-event-table")
     run_plan_path = _required_path(args.run_plan, "--run-plan", context="--build-decision-event-table")
-    signal_audit = _load_json(signal_audit_path)
+    progress = _ProgressLogger(Path(args.progress_log)) if args.progress_log else None
+    if progress is not None:
+        progress(
+            {
+                "stage": "decision_event_table",
+                "status": "started",
+                "signal_audit": str(signal_audit_path),
+            }
+        )
+    signal_audit_rows = _iter_json_array_items(signal_audit_path)
     run_plan = _load_json_mapping(str(run_plan_path), "--run-plan", context="--build-decision-event-table")
     stock_pool_path = _stock_pool_file_from_args(args, run_plan=run_plan, run_plan_path=run_plan_path)
     stock_pool_order_by_symbol = _read_stock_pool_order_by_symbol(stock_pool_path)
     cache_inputs = _decision_cache_inputs_from_run_artifacts(
         run_plan,
-        signal_audit=signal_audit,
         stock_pool_path=stock_pool_path,
         stock_pool_order_by_symbol=stock_pool_order_by_symbol,
     )
     table = build_strategy_decision_event_table_from_signal_audit(
-        signal_audit,
+        signal_audit_rows,
         cache_inputs=cache_inputs,
         stock_pool_order_by_symbol=stock_pool_order_by_symbol,
+        progress_callback=progress,
+        progress_interval_rows=args.progress_interval_rows,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     decision_table_path = output_dir / "decision_event_table.json"
+    if progress is not None:
+        progress(
+            {
+                "stage": "write_decision_event_table",
+                "status": "started",
+                "event_count": table["event_count"],
+            }
+        )
     decision_table_path.write_text(json.dumps(to_jsonable(table), ensure_ascii=False, indent=2), encoding="utf-8")
+    if progress is not None:
+        progress(
+            {
+                "stage": "write_decision_event_table",
+                "status": "completed",
+                "event_count": table["event_count"],
+                "path": str(decision_table_path),
+            }
+        )
+        progress(
+            {
+                "stage": "decision_event_table",
+                "status": "completed",
+                "event_count": table["event_count"],
+                "path": str(decision_table_path),
+            }
+        )
     payload = {
         "decision_event_table": table,
         "artifacts": {"decision_event_table_json": str(decision_table_path)},
@@ -140,6 +178,85 @@ def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _iter_json_array_items(path: Path) -> Iterator[Any]:
+    decoder = json.JSONDecoder()
+    buffer = ""
+    eof = False
+
+    with path.open("r", encoding="utf-8-sig") as handle:
+
+        def read_more() -> bool:
+            nonlocal buffer, eof
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                eof = True
+                return False
+            buffer += chunk
+            return True
+
+        while True:
+            if not buffer and not read_more():
+                raise ValueError(f"--signal-audit points to an empty JSON file: {path}")
+            stripped = buffer.lstrip()
+            if stripped:
+                buffer = stripped
+                break
+            buffer = ""
+
+        if buffer[0] != "[":
+            if buffer[0] == "{":
+                raise ValueError(
+                    "--signal-audit must point to a full signal_audit JSON array, not a JSON object; "
+                    "compact signal_audit cannot build decision_event_table"
+                )
+            raise ValueError(f"--signal-audit must point to a JSON array: {path}")
+        buffer = buffer[1:]
+        expect_value = True
+
+        while True:
+            while True:
+                stripped = buffer.lstrip()
+                if stripped:
+                    buffer = stripped
+                    break
+                buffer = ""
+                if eof:
+                    raise ValueError(f"unterminated JSON array in --signal-audit: {path}")
+                read_more()
+
+            if buffer[0] == "]":
+                buffer = buffer[1:]
+                if buffer.strip():
+                    raise ValueError(f"trailing content after --signal-audit JSON array: {path}")
+                while not eof:
+                    if not read_more():
+                        break
+                    if buffer.strip():
+                        raise ValueError(f"trailing content after --signal-audit JSON array: {path}")
+                    buffer = ""
+                return
+
+            if not expect_value:
+                if buffer[0] != ",":
+                    raise ValueError(f"expected ',' or ']' in --signal-audit JSON array: {path}")
+                buffer = buffer[1:]
+                expect_value = True
+                continue
+
+            while True:
+                try:
+                    item, index = decoder.raw_decode(buffer)
+                except json.JSONDecodeError as exc:
+                    if eof:
+                        raise ValueError(f"invalid --signal-audit JSON array item in {path}: {exc.msg}") from exc
+                    read_more()
+                    continue
+                buffer = buffer[index:]
+                yield item
+                expect_value = False
+                break
+
+
 def _required_path(path_value: str | None, option_name: str, *, context: str = "--run-full-study") -> Path:
     if not path_value:
         raise ValueError(f"{option_name} is required when {context} is set")
@@ -186,7 +303,6 @@ def _read_stock_pool_order_by_symbol(path: Path) -> dict[str, int]:
 def _decision_cache_inputs_from_run_artifacts(
     run_plan: dict[str, Any],
     *,
-    signal_audit: Any,
     stock_pool_path: Path,
     stock_pool_order_by_symbol: dict[str, int],
 ) -> dict[str, Any]:
@@ -214,35 +330,13 @@ def _decision_cache_inputs_from_run_artifacts(
             "add_on_method": strategy.get("add_on_method"),
             "add_on_params": strategy.get("add_on_params") or {},
         },
-        "factor_field_set": _factor_field_set_from_signal_audit(signal_audit),
+        "factor_field_set": None,
         "date_range": {
             "start": run.get("from_date"),
             "end": run.get("to_date"),
         },
         "event_schema_version": 1,
     }
-
-
-def _factor_field_set_from_signal_audit(signal_audit: Any) -> list[str]:
-    if isinstance(signal_audit, dict) and signal_audit.get("schema") == "attbacktrader.compact_signal_audit.v1":
-        raise ValueError("--signal-audit requires full signal_audit; compact signal_audit cannot build decision_event_table")
-    if not isinstance(signal_audit, list):
-        raise ValueError("--signal-audit must point to a full signal_audit JSON array")
-    fields: set[str] = set()
-    for row in signal_audit:
-        if not isinstance(row, dict):
-            raise ValueError("full signal_audit rows must be JSON objects")
-        intent_type = str(row.get("intent_type") or "")
-        if intent_type not in {"enter", "exit", "exit_profit", "exit_loss", "add_on"}:
-            continue
-        signal_values = _mapping(row.get("signal_values"), "signal_audit.signal_values")
-        attribution = _mapping(signal_values.get("attribution"), "signal_audit.signal_values.attribution")
-        for bucket in ("values", "categories", "checks"):
-            fields.update(str(key) for key in _mapping(attribution.get(bucket), f"attribution.{bucket}"))
-        fields.update(str(key) for key in _mapping(signal_values.get("evidence"), "signal_values.evidence"))
-    if not fields:
-        raise ValueError("full signal_audit has no actionable decision evidence fields")
-    return sorted(fields)
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:
@@ -261,6 +355,21 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+class _ProgressLogger:
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._started = time.perf_counter()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+
+    def __call__(self, event: Mapping[str, Any]) -> None:
+        payload = dict(event)
+        payload["timestamp_utc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        payload["elapsed_seconds"] = round(time.perf_counter() - self._started, 3)
+        with self._path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(to_jsonable(payload), ensure_ascii=False, sort_keys=True) + "\n")
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plan scored entry allocation tuning")
     parser.add_argument("--mode", choices=("dry-run", "smoke", "standard", "sensitivity"), default="dry-run")
@@ -269,6 +378,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--signal-audit")
     parser.add_argument("--run-plan")
     parser.add_argument("--stock-pool-file")
+    parser.add_argument("--progress-log")
+    parser.add_argument("--progress-interval-rows", type=int, default=100_000)
     parser.add_argument("--run-full-study", action="store_true")
     parser.add_argument("--decision-event-table")
     parser.add_argument("--stage-a-trials")

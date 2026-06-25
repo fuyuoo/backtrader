@@ -13,6 +13,15 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-25 — Decision Event Table 流式构建与进度日志
+
+- 需求：真实 full source RunPlan 已生成 17GB+ `signal_audit.json`，继续推进 standard study 前需要可观测、低内存风险地构建 `decision_event_table.json`。
+- 改动：
+  - `attbacktrader/cli/scored_entry_allocation_tuning.py`：`--build-decision-event-table` 改为流式扫描 full `signal_audit.json` 顶层数组，新增 `--progress-log` 和 `--progress-interval-rows`，输出扫描行数、actionable 行数、事件数和写盘阶段。
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：`build_strategy_decision_event_table_from_signal_audit` 支持 iterable 行输入、进度回调，并可在构建阶段补齐 cache identity 的 factor field set。
+  - `tests/test_scored_entry_allocation_tuning.py`：覆盖 CLI 不再整体加载 signal audit、NDJSON 进度事件和 pretty JSON 数组流式读取。
+- 影响：真实 full `signal_audit.json` 不再需要一次性读入内存才能生成 Strategy Decision Event Table；compact signal audit 仍会明确失败。
+
 ## 2026-06-25 — 新增 RunPlan 长跑进度日志
 
 - 需求：真实 standard study 的 full source RunPlan 运行时间较长，需要可观测的日志和进度后再重新跑。

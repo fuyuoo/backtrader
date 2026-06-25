@@ -6,7 +6,7 @@ import hashlib
 import importlib
 import json
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -397,16 +397,42 @@ def build_strategy_decision_event_table_from_signal_audit(
     *,
     cache_inputs: Mapping[str, Any],
     stock_pool_order_by_symbol: Mapping[str, int],
+    progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
+    progress_interval_rows: int = 100_000,
 ) -> dict[str, Any]:
     """Build a Strategy Decision Event Table from a persisted full signal_audit JSON payload."""
 
     rows = _full_signal_audit_rows(signal_audit)
     events: list[dict[str, Any]] = []
+    factor_fields: set[str] = set()
+    scanned_count = 0
+    actionable_count = 0
+    if progress_interval_rows < 1:
+        raise ValueError("progress_interval_rows must be positive")
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "signal_audit_to_decision_events",
+                "status": "started",
+            }
+        )
     for row in rows:
+        scanned_count += 1
         item = _as_mapping(row)
         intent_type = _intent_type_value(item.get("intent_type", ""))
         if intent_type not in _ACTIONABLE_INTENTS:
+            if progress_callback is not None and scanned_count % progress_interval_rows == 0:
+                progress_callback(
+                    {
+                        "stage": "signal_audit_to_decision_events",
+                        "status": "running",
+                        "scanned_rows": scanned_count,
+                        "actionable_rows": actionable_count,
+                        "event_count": len(events),
+                    }
+                )
             continue
+        actionable_count += 1
         symbol = str(item.get("symbol") or "")
         trade_date = str(item.get("trade_date") or "")
         if not symbol or not trade_date:
@@ -414,7 +440,9 @@ def build_strategy_decision_event_table_from_signal_audit(
         stock_pool_order = stock_pool_order_by_symbol.get(symbol)
         if stock_pool_order is None:
             raise ValueError(f"missing stock pool order for signal_audit symbol: {symbol}")
-        evidence = _decision_evidence_from_signal_values(_as_mapping(item.get("signal_values")))
+        signal_values = _as_mapping(item.get("signal_values"))
+        _update_factor_fields_from_signal_values(factor_fields, signal_values)
+        evidence = _decision_evidence_from_signal_values(signal_values)
         events.append(
             {
                 "symbol": symbol,
@@ -427,7 +455,32 @@ def build_strategy_decision_event_table_from_signal_audit(
                 "evidence": evidence,
             }
         )
-    return build_strategy_decision_event_table(events, cache_inputs=cache_inputs)
+        if progress_callback is not None and scanned_count % progress_interval_rows == 0:
+            progress_callback(
+                {
+                    "stage": "signal_audit_to_decision_events",
+                    "status": "running",
+                    "scanned_rows": scanned_count,
+                    "actionable_rows": actionable_count,
+                    "event_count": len(events),
+                }
+            )
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "signal_audit_to_decision_events",
+                "status": "completed",
+                "scanned_rows": scanned_count,
+                "actionable_rows": actionable_count,
+                "event_count": len(events),
+            }
+        )
+    cache_inputs_with_fields = dict(cache_inputs)
+    if cache_inputs_with_fields.get("factor_field_set") is None:
+        if not factor_fields:
+            raise ValueError("full signal_audit has no actionable decision evidence fields")
+        cache_inputs_with_fields["factor_field_set"] = sorted(factor_fields)
+    return build_strategy_decision_event_table(events, cache_inputs=cache_inputs_with_fields)
 
 
 def score_entry_candidates(
@@ -2057,17 +2110,21 @@ def _market_context_for_intent(
     return context
 
 
-def _full_signal_audit_rows(signal_audit: Any) -> Sequence[Any]:
+def _full_signal_audit_rows(signal_audit: Any) -> Iterable[Any]:
     if isinstance(signal_audit, Mapping):
         if signal_audit.get("schema") == "attbacktrader.compact_signal_audit.v1":
             raise ValueError("Strategy Decision Event Table requires full signal_audit; compact signal_audit cannot be used")
         raise ValueError("full signal_audit must be a JSON array of intent rows")
-    if isinstance(signal_audit, (str, bytes)) or not isinstance(signal_audit, Sequence):
+    if isinstance(signal_audit, (str, bytes)) or not isinstance(signal_audit, Iterable):
         raise ValueError("full signal_audit must be a JSON array of intent rows")
-    invalid_count = sum(1 for row in signal_audit if not isinstance(row, Mapping))
-    if invalid_count:
-        raise ValueError("full signal_audit rows must be JSON objects")
     return signal_audit
+
+
+def _update_factor_fields_from_signal_values(fields: set[str], signal_values: Mapping[str, Any]) -> None:
+    attribution = _as_mapping(signal_values.get("attribution"))
+    for bucket in ("values", "categories", "checks"):
+        fields.update(str(key) for key in _as_mapping(attribution.get(bucket)))
+    fields.update(str(key) for key in _as_mapping(signal_values.get("evidence")))
 
 
 def _decision_evidence_from_signal_values(signal_values: Mapping[str, Any]) -> dict[str, Any]:
