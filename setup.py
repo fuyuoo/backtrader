@@ -162,6 +162,7 @@ setuptools.setup(
         'att-environment-fit=attbacktrader.cli.environment_fit:main',
         'att-single-factor-attribution=attbacktrader.cli.single_factor_attribution:main',
         'att-segmented-factor-contribution-matrix=attbacktrader.cli.segmented_factor_contribution_matrix:main',
+        'att-score-gate-counterfactual-funnel=attbacktrader.cli.score_gate_counterfactual_funnel:main',
         'att-bayesian-factor-discovery=attbacktrader.cli.bayesian_factor_discovery:main',
         'att-generate-entry-factor-validation-manifest=attbacktrader.cli.entry_factor_validation_manifest:main',
         'att-generate-entry-factor-pairwise-combination-manifest=attbacktrader.cli.entry_factor_pairwise_combination_manifest:main',

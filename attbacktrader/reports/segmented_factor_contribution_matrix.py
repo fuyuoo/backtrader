@@ -13,6 +13,16 @@ from typing import Any
 
 SEGMENTED_FACTOR_CONTRIBUTION_MATRIX_SCHEMA = "attbacktrader.segmented_factor_contribution_matrix.v1"
 
+ANNUAL_MATRIX_METRIC_DEFINITIONS: dict[str, dict[str, str]] = {
+    "sample_count": {"label_zh": "样本数", "format": "integer"},
+    "average_return_pct": {"label_zh": "平均单笔收益", "format": "percent"},
+    "win_rate": {"label_zh": "胜率", "format": "percent"},
+    "return_on_entry_value": {"label_zh": "资金收益率", "format": "percent"},
+    "max_return_pct": {"label_zh": "最大单笔盈利", "format": "percent"},
+    "min_return_pct": {"label_zh": "最大单笔亏损/回撤", "format": "percent"},
+}
+DEFAULT_ANNUAL_MATRIX_METRICS: tuple[str, ...] = tuple(ANNUAL_MATRIX_METRIC_DEFINITIONS)
+
 DEFAULT_FACTOR_CONTRIBUTION_SEGMENTS: tuple[dict[str, str], ...] = (
     {
         "segment_id": "2015_2016_high_volatility_bear_shock",
@@ -51,6 +61,7 @@ def build_segmented_factor_contribution_matrix(
     environment_fit: Mapping[str, Any] | str | Path,
     *,
     segments: Sequence[Mapping[str, Any]] | None = None,
+    annual_matrix_metrics: Sequence[str] | None = None,
     min_segment_sample_count: int = 30,
     min_total_sample_count: int = 100,
 ) -> dict[str, Any]:
@@ -63,6 +74,7 @@ def build_segmented_factor_contribution_matrix(
 
     source = _load_environment_fit(environment_fit)
     segment_defs = _normalize_segments(segments or DEFAULT_FACTOR_CONTRIBUTION_SEGMENTS)
+    annual_metric_defs = _normalize_annual_matrix_metrics(annual_matrix_metrics)
     trades = [
         _as_mapping(row)
         for row in _as_sequence(source.get("trade_contributions"))
@@ -84,6 +96,16 @@ def build_segmented_factor_contribution_matrix(
     )
     field_summaries = _field_summaries(bucket_rows, field_labels=field_labels)
     rankings = _rankings(bucket_rows)
+    annual_segment_defs = _calendar_year_segments_from_trades(trades)
+    annual_segment_overall = _segment_overall(trades, annual_segment_defs)
+    annual_bucket_rows = _factor_bucket_rows(
+        trades,
+        field_labels=field_labels,
+        segments=annual_segment_defs,
+        segment_overall=annual_segment_overall,
+        min_segment_sample_count=min_segment_sample_count,
+        min_total_sample_count=min_total_sample_count,
+    )
 
     return {
         "schema": SEGMENTED_FACTOR_CONTRIBUTION_MATRIX_SCHEMA,
@@ -97,19 +119,32 @@ def build_segmented_factor_contribution_matrix(
             "caveat_zh": "区间是研究镜头，不是自动市场识别；贡献统计是归因线索，不是因果结论。",
         },
         "segments": segment_defs,
+        "annual_segment_policy": {
+            "type": "entry_date_calendar_year",
+            "caveat_zh": "年度矩阵按入场年份切分；它用于观察年份稳定性，不代表自动市场阶段识别。",
+        },
+        "annual_segments": annual_segment_defs,
+        "annual_matrix_metrics": annual_metric_defs,
         "min_segment_sample_count": min_segment_sample_count,
         "min_total_sample_count": min_total_sample_count,
         "trade_count": len(trades),
         "field_count": len(field_labels),
         "factor_bucket_count": len(bucket_rows),
+        "annual_factor_bucket_count": len(annual_bucket_rows),
         "overall": overall,
         "segment_overall": segment_overall,
+        "annual_segment_overall": annual_segment_overall,
         "field_summaries": field_summaries,
         "factor_bucket_matrix": bucket_rows,
+        "annual_field_summaries": _field_summaries(annual_bucket_rows, field_labels=field_labels),
+        "annual_factor_bucket_matrix": annual_bucket_rows,
         "rankings": rankings,
+        "annual_rankings": _rankings(annual_bucket_rows),
         "ai_usage_rules": [
             "本报告只消费已落盘 environment_fit.trade_contributions，不重跑策略、不重新计算指标、不联网取数。",
             "segment_id 是人工研究区间；不要把它当作自动牛熊市识别结果。",
+            "annual_segments 是按入场年份生成的年度研究镜头；不要把单一年份优势当作稳定因子。",
+            "annual_matrix_metrics 只控制 Markdown 年度矩阵展示维度；JSON 中每个年度桶仍保留完整统计字段。",
             "assessment 是基于分区间贡献稳定性的候选标签；不能直接作为策略开关，需后续样本外组合验证。",
             "low_sample、insufficient_segment_coverage 等风险标签优先于收益排序。",
         ],
@@ -135,8 +170,12 @@ def render_segmented_factor_contribution_matrix_markdown_zh(
         f"| 交易样本 | {report.get('trade_count')} |",
         f"| 因子字段 | {report.get('field_count')} |",
         f"| 因子桶 | {report.get('factor_bucket_count')} |",
+        f"| 年度因子桶 | {report.get('annual_factor_bucket_count')} |",
+        f"| 年度矩阵指标 | {_annual_metric_labels(report)} |",
         f"| 全样本胜率 | {_format_percent(overall.get('win_rate'))} |",
-        f"| 全样本平均收益 | {_format_percent(overall.get('average_return_pct'))} |",
+        f"| 全样本平均单笔收益 | {_format_percent(overall.get('average_return_pct'))} |",
+        f"| 全样本最大单笔盈利 | {_format_percent(overall.get('max_return_pct'))} |",
+        f"| 全样本最大单笔亏损/回撤 | {_format_percent(overall.get('min_return_pct'))} |",
         f"| 全样本资金收益率 | {_format_percent(overall.get('return_on_entry_value'))} |",
         f"| 全样本净PnL | {_format_money(overall.get('net_pnl'))} |",
         "",
@@ -144,15 +183,18 @@ def render_segmented_factor_contribution_matrix_markdown_zh(
         "",
         "- 只读取 `environment_fit.trade_contributions` 中已落盘的事前环境字段和交易结果。",
         "- 区间按 `entry_date` 归属；跨区间持仓的收益归入入场所在区间。",
+        "- 平均单笔收益、最大单笔盈利、最大单笔亏损/回撤都来自入场到出场的 `return_pct`；不是持仓过程内 MAE/MFE。",
         "- `lift_vs_segment` 是该因子桶相对同区间全体交易的差值，不是因果贡献。",
+        "- 年度矩阵按 `entry_date` 的自然年份归属；单一年份优势只作为稳定性线索。",
+        "- 年度矩阵默认展示样本数、平均单笔收益、胜率、资金收益率、最大单笔盈利、最大单笔亏损/回撤，可用 CLI 参数裁剪展示维度。",
         "- 默认候选榜单只纳入 `entry_decision` 字段；包含 `entry_to_exit`、`exit` 或 `trade` 语义的字段仅作诊断。",
         "- `stable_positive` 表示多个有样本区间为正且相对区间有优势；`environment_specific` 表示更像阶段性因子。",
         "- 低样本和缺区间覆盖不删除，但必须作为风险处理。",
         "",
         "## 区间",
         "",
-        "| 区间 | 日期 | 样本 | 资金收益率 | 胜率 | 净PnL |",
-        "|---|---|---:|---:|---:|---:|",
+        "| 区间 | 日期 | 样本 | 平均单笔收益 | 最大单笔盈利 | 最大单笔亏损/回撤 | 资金收益率 | 胜率 |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for segment in _as_sequence(report.get("segment_overall")):
         item = _as_mapping(segment)
@@ -160,11 +202,15 @@ def render_segmented_factor_contribution_matrix_markdown_zh(
             f"| {item.get('label_zh') or item.get('segment_id')} | "
             f"{item.get('start')}~{item.get('end')} | "
             f"{item.get('sample_count')} | "
+            f"{_format_percent(item.get('average_return_pct'))} | "
+            f"{_format_percent(item.get('max_return_pct'))} | "
+            f"{_format_percent(item.get('min_return_pct'))} | "
             f"{_format_percent(item.get('return_on_entry_value'))} | "
-            f"{_format_percent(item.get('win_rate'))} | "
-            f"{_format_money(item.get('net_pnl'))} |"
+            f"{_format_percent(item.get('win_rate'))} |"
         )
 
+    lines.extend(_annual_overall_section(_as_sequence(report.get("annual_segment_overall"))))
+    lines.extend(_annual_matrix_sections(report, ranking_limit))
     lines.extend(_ranking_section("稳定正向候选", _as_sequence(_as_mapping(report.get("rankings")).get("stable_positive")), ranking_limit))
     lines.extend(_ranking_section("环境型候选", _as_sequence(_as_mapping(report.get("rankings")).get("environment_specific")), ranking_limit))
     lines.extend(_ranking_section("偏负向/风险候选", _as_sequence(_as_mapping(report.get("rankings")).get("mostly_negative")), ranking_limit))
@@ -351,6 +397,8 @@ def _stats(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "win_rate": len(wins) / len(returns) if returns else None,
         "average_return_pct": _average(returns),
         "median_return_pct": _percentile(returns, 0.5),
+        "max_return_pct": max(returns) if returns else None,
+        "min_return_pct": min(returns) if returns else None,
         "average_win_return_pct": _average(wins),
         "average_loss_return_pct": _average(losses),
         "financial_trade_count": len(contributions),
@@ -460,6 +508,9 @@ def _ranking_ref(row: Mapping[str, Any]) -> dict[str, Any]:
         "assessment": row.get("assessment"),
         "sample_count": summary.get("sample_count"),
         "return_on_entry_value": summary.get("return_on_entry_value"),
+        "average_return_pct": summary.get("average_return_pct"),
+        "max_return_pct": summary.get("max_return_pct"),
+        "min_return_pct": summary.get("min_return_pct"),
         "win_rate": summary.get("win_rate"),
         "net_pnl": summary.get("net_pnl"),
         "positive_segment_count": row.get("positive_segment_count"),
@@ -479,6 +530,9 @@ def _bucket_ref(row: Mapping[str, Any]) -> dict[str, Any]:
         "assessment": row.get("assessment"),
         "sample_count": summary.get("sample_count"),
         "return_on_entry_value": summary.get("return_on_entry_value"),
+        "average_return_pct": summary.get("average_return_pct"),
+        "max_return_pct": summary.get("max_return_pct"),
+        "min_return_pct": summary.get("min_return_pct"),
     }
 
 
@@ -562,6 +616,26 @@ def _date_in_segment(entry_date: str, segment: Mapping[str, Any]) -> bool:
     return bool(entry_date) and str(segment["start"]) <= entry_date <= str(segment["end"])
 
 
+def _calendar_year_segments_from_trades(trades: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    years = sorted({year for trade in trades if (year := _entry_year(trade)) is not None})
+    return [
+        {
+            "segment_id": f"year_{year}",
+            "label_zh": str(year),
+            "start": f"{year}-01-01",
+            "end": f"{year}-12-31",
+        }
+        for year in years
+    ]
+
+
+def _entry_year(trade: Mapping[str, Any]) -> int | None:
+    entry_date = str(trade.get("entry_date") or "")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", entry_date):
+        return None
+    return int(entry_date[:4])
+
+
 def _normalize_segments(segments: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -616,16 +690,156 @@ def _source_path(value: Mapping[str, Any] | str | Path) -> str | None:
     return str(_resolve_environment_fit_path(value))
 
 
+def _normalize_annual_matrix_metrics(metrics: Sequence[str] | None) -> list[dict[str, str]]:
+    metric_keys = list(metrics) if metrics else list(DEFAULT_ANNUAL_MATRIX_METRICS)
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for metric in metric_keys:
+        metric_key = str(metric)
+        if metric_key not in ANNUAL_MATRIX_METRIC_DEFINITIONS:
+            valid = ", ".join(ANNUAL_MATRIX_METRIC_DEFINITIONS)
+            raise ValueError(f"unsupported annual matrix metric: {metric_key}; valid metrics: {valid}")
+        if metric_key in seen:
+            continue
+        seen.add(metric_key)
+        definition = ANNUAL_MATRIX_METRIC_DEFINITIONS[metric_key]
+        normalized.append(
+            {
+                "metric": metric_key,
+                "label_zh": definition["label_zh"],
+                "format": definition["format"],
+            }
+        )
+    return normalized
+
+
+def _annual_metric_labels(report: Mapping[str, Any]) -> str:
+    metrics = _annual_metric_defs_from_report(report)
+    return "、".join(str(metric.get("label_zh")) for metric in metrics) if metrics else "-"
+
+
+def _annual_metric_defs_from_report(report: Mapping[str, Any]) -> list[dict[str, str]]:
+    rows = [_as_mapping(item) for item in _as_sequence(report.get("annual_matrix_metrics"))]
+    if rows:
+        return [
+            {
+                "metric": str(row.get("metric")),
+                "label_zh": str(row.get("label_zh") or row.get("metric")),
+                "format": str(row.get("format") or "percent"),
+            }
+            for row in rows
+            if row.get("metric")
+        ]
+    return _normalize_annual_matrix_metrics(None)
+
+
+def _annual_overall_section(rows: Sequence[Any]) -> list[str]:
+    lines = [
+        "",
+        "## 年度概览",
+        "",
+        "| 年份 | 样本 | 平均单笔收益 | 最大单笔盈利 | 最大单笔亏损/回撤 | 资金收益率 | 胜率 |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    if not rows:
+        lines.append("| 无 | - | - | - | - | - | - |")
+        return lines
+    for row in rows:
+        item = _as_mapping(row)
+        lines.append(
+            f"| {item.get('label_zh') or item.get('segment_id')} | "
+            f"{item.get('sample_count')} | "
+            f"{_format_percent(item.get('average_return_pct'))} | "
+            f"{_format_percent(item.get('max_return_pct'))} | "
+            f"{_format_percent(item.get('min_return_pct'))} | "
+            f"{_format_percent(item.get('return_on_entry_value'))} | "
+            f"{_format_percent(item.get('win_rate'))} |"
+        )
+    return lines
+
+
+def _annual_matrix_sections(report: Mapping[str, Any], limit: int) -> list[str]:
+    lines: list[str] = []
+    for metric_def in _annual_metric_defs_from_report(report):
+        lines.extend(_annual_matrix_section(report, limit, metric_def=metric_def))
+    return lines
+
+
+def _annual_matrix_section(
+    report: Mapping[str, Any],
+    limit: int,
+    *,
+    metric_def: Mapping[str, str],
+) -> list[str]:
+    metric = str(metric_def.get("metric") or "")
+    label_zh = str(metric_def.get("label_zh") or metric)
+    value_format = str(metric_def.get("format") or "percent")
+    segments = [_as_mapping(item) for item in _as_sequence(report.get("annual_segments"))]
+    matrix = [_as_mapping(item) for item in _as_sequence(report.get("annual_factor_bucket_matrix"))]
+    rows = [
+        row
+        for row in matrix
+        if row.get("field_usage") == "entry_decision" and row.get("assessment") == "stable_positive"
+    ]
+    lines = [
+        "",
+        f"## 年度因子矩阵（{label_zh}）",
+        "",
+    ]
+    if not segments or not rows:
+        lines.extend(
+            [
+                "| 因子桶 | 样本 | 正资金年/覆盖 |",
+                "|---|---:|---:|",
+                "| 无 | - | - |",
+            ]
+        )
+        return lines
+
+    year_headers = [str(segment.get("label_zh") or segment.get("segment_id")) for segment in segments]
+    lines.append("| 因子桶 | 样本 | 正资金年/覆盖 | " + " | ".join(year_headers) + " |")
+    lines.append("|---|---:|---:|" + "---:|" * len(year_headers))
+    for row in sorted(rows, key=_stable_rank_key, reverse=True)[:limit]:
+        segment_by_id = {
+            str(segment.get("segment_id")): _as_mapping(segment)
+            for segment in _as_sequence(row.get("segments"))
+        }
+        yearly_values = []
+        for segment in segments:
+            segment_stats = segment_by_id.get(str(segment.get("segment_id")), {})
+            if int(segment_stats.get("sample_count") or 0) <= 0:
+                yearly_values.append("-")
+            else:
+                yearly_values.append(_format_metric_value(segment_stats.get(metric), value_format=value_format))
+        lines.append(
+            f"| {row.get('label_zh')} | "
+            f"{_as_mapping(row.get('summary')).get('sample_count')} | "
+            f"{row.get('positive_segment_count')}/{row.get('supported_segment_count')} | "
+            + " | ".join(yearly_values)
+            + " |"
+        )
+    return lines
+
+
+def _format_metric_value(value: Any, *, value_format: str) -> str:
+    if value_format == "integer":
+        number = _optional_float(value)
+        return f"{int(number)}" if number is not None else "-"
+    if value_format == "money":
+        return _format_money(value)
+    return _format_percent(value)
+
+
 def _ranking_section(title: str, rows: Sequence[Any], limit: int) -> list[str]:
     lines = [
         "",
         f"## {title}",
         "",
-        "| 因子桶 | 评估 | 样本 | 资金收益率 | 胜率 | 正区间/覆盖 | 最好区间 | 最差区间 |",
-        "|---|---|---:|---:|---:|---:|---|---|",
+        "| 因子桶 | 评估 | 样本 | 平均单笔收益 | 最大单笔盈利 | 最大单笔亏损/回撤 | 资金收益率 | 正区间/覆盖 | 最好区间 | 最差区间 |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---|---|",
     ]
     if not rows:
-        lines.append("| 无 | - | - | - | - | - | - | - |")
+        lines.append("| 无 | - | - | - | - | - | - | - | - | - |")
         return lines
     for row in rows[:limit]:
         item = _as_mapping(row)
@@ -635,8 +849,10 @@ def _ranking_section(title: str, rows: Sequence[Any], limit: int) -> list[str]:
             f"| {item.get('label_zh')} | "
             f"{item.get('assessment')} | "
             f"{item.get('sample_count')} | "
+            f"{_format_percent(item.get('average_return_pct'))} | "
+            f"{_format_percent(item.get('max_return_pct'))} | "
+            f"{_format_percent(item.get('min_return_pct'))} | "
             f"{_format_percent(item.get('return_on_entry_value'))} | "
-            f"{_format_percent(item.get('win_rate'))} | "
             f"{item.get('positive_segment_count')}/{item.get('supported_segment_count')} | "
             f"{best.get('label_zh') or '-'} {_format_percent(best.get('return_on_entry_value'))} | "
             f"{worst.get('label_zh') or '-'} {_format_percent(worst.get('return_on_entry_value'))} |"

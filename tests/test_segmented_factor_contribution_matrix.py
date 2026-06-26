@@ -25,15 +25,41 @@ def test_segmented_factor_contribution_matrix_classifies_factor_environment_fit(
     assert report["trade_count"] == 12
     assert report["field_count"] == 3
     assert len(report["segment_overall"]) == 3
+    assert len(report["annual_segment_overall"]) == 3
+    assert report["annual_segments"][0]["segment_id"] == "year_2015"
+    assert report["annual_factor_bucket_count"] == report["factor_bucket_count"]
+    assert [item["metric"] for item in report["annual_matrix_metrics"]] == [
+        "sample_count",
+        "average_return_pct",
+        "win_rate",
+        "return_on_entry_value",
+        "max_return_pct",
+        "min_return_pct",
+    ]
     assert "## 稳定正向候选" in markdown
+    assert "## 年度概览" in markdown
+    assert "## 年度因子矩阵（样本数）" in markdown
+    assert "## 年度因子矩阵（平均单笔收益）" in markdown
+    assert "## 年度因子矩阵（胜率）" in markdown
+    assert "## 年度因子矩阵（资金收益率）" in markdown
+    assert "## 年度因子矩阵（最大单笔盈利）" in markdown
+    assert "## 年度因子矩阵（最大单笔亏损/回撤）" in markdown
+    assert "| 因子桶 | 样本 | 正资金年/覆盖 | 2015 | 2016 | 2017 |" in markdown
     assert "区间是研究镜头" in report["segment_policy"]["caveat_zh"]
+    assert "入场年份" in report["annual_segment_policy"]["caveat_zh"]
 
     bull = _bucket(report, "entry.trend_state", "bullish")
     assert bull["assessment"] == "stable_positive"
     assert bull["positive_segment_count"] == 3
     assert bull["outperform_segment_count"] == 3
     assert bull["summary"]["return_on_entry_value"] == pytest.approx(0.075)
+    assert bull["summary"]["average_return_pct"] == pytest.approx(0.075)
+    assert bull["summary"]["max_return_pct"] == pytest.approx(0.10)
+    assert bull["summary"]["min_return_pct"] == pytest.approx(0.05)
     assert bull["segments"][0]["lift_vs_segment"]["return_on_entry_value"] == pytest.approx(0.05)
+    annual_bull = _annual_bucket(report, "entry.trend_state", "bullish")
+    assert annual_bull["positive_segment_count"] == 3
+    assert annual_bull["segments"][0]["average_return_pct"] == pytest.approx(0.075)
 
     not_bull = _bucket(report, "entry.trend_state", "not_bullish")
     assert not_bull["assessment"] == "mostly_negative"
@@ -46,6 +72,9 @@ def test_segmented_factor_contribution_matrix_classifies_factor_environment_fit(
 
     stable_labels = [item["label_zh"] for item in report["rankings"]["stable_positive"]]
     assert "趋势状态=bullish" in stable_labels
+    stable_bull = next(item for item in report["rankings"]["stable_positive"] if item["label_zh"] == "趋势状态=bullish")
+    assert stable_bull["max_return_pct"] == pytest.approx(0.10)
+    assert stable_bull["min_return_pct"] == pytest.approx(0.05)
     assert not any("入场到出场阶段" in label for label in stable_labels)
     assert any(item["field_usage"] == "diagnostic_only" for item in report["rankings"]["diagnostic_only"])
 
@@ -72,6 +101,10 @@ def test_segmented_factor_contribution_matrix_cli_writes_outputs(tmp_path: Path,
             "2",
             "--min-total-sample-count",
             "4",
+            "--annual-matrix-metric",
+            "average_return_pct",
+            "--annual-matrix-metric",
+            "win_rate",
         ]
     )
     stdout = json.loads(capsys.readouterr().out)
@@ -79,11 +112,16 @@ def test_segmented_factor_contribution_matrix_cli_writes_outputs(tmp_path: Path,
     assert exit_code == 0
     assert stdout["schema"] == SEGMENTED_FACTOR_CONTRIBUTION_MATRIX_SCHEMA
     assert stdout["trade_count"] == 12
+    assert stdout["annual_matrix_metrics"] == ["average_return_pct", "win_rate"]
     assert (tmp_path / "out" / "segmented_factor_contribution_matrix.json").exists()
     assert (tmp_path / "out" / "segmented_factor_contribution_matrix.zh.md").exists()
 
     payload = json.loads((tmp_path / "out" / "segmented_factor_contribution_matrix.json").read_text(encoding="utf-8"))
     assert payload["artifacts"]["matrix_json"].endswith("segmented_factor_contribution_matrix.json")
+    markdown = (tmp_path / "out" / "segmented_factor_contribution_matrix.zh.md").read_text(encoding="utf-8")
+    assert "## 年度因子矩阵（平均单笔收益）" in markdown
+    assert "## 年度因子矩阵（胜率）" in markdown
+    assert "## 年度因子矩阵（样本数）" not in markdown
 
 
 def test_write_segmented_factor_contribution_matrix_returns_payload_with_artifacts(tmp_path: Path) -> None:
@@ -104,6 +142,14 @@ def _bucket(report: dict, field: str, value: str) -> dict:
     return next(
         row
         for row in report["factor_bucket_matrix"]
+        if row["field"] == field and row["value"] == value
+    )
+
+
+def _annual_bucket(report: dict, field: str, value: str) -> dict:
+    return next(
+        row
+        for row in report["annual_factor_bucket_matrix"]
         if row["field"] == field and row["value"] == value
     )
 

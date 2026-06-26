@@ -13,13 +13,23 @@
 - 影响：对其他模块的影响（可选）
 ```
 
-## 2026-06-25 — 新增 10 年分区间因子贡献矩阵
+## 2026-06-26 — 新增 Score Gate 反事实漏斗
 
-- 需求：把 2015-2024 十年样本切成几个区间，观察各入场因子桶在不同区间的贡献能力，用于判断因子更适合的环境。
+- 需求：先用年度矩阵筛“平均单笔收益 + 胜率 + 最大亏损”更实操的因子，再做 score gate 反事实漏斗，观察 gate 能挡掉多少亏损、漏掉多少盈利。
 - 改动：
-  - `attbacktrader/reports/segmented_factor_contribution_matrix.py`：新增 `segmented_factor_contribution_matrix.json/.zh.md` 报表构建，读取已落盘 `environment_fit.trade_contributions`，按入场日期默认切成 2015-2016、2017-2018、2019-2020、2021-2022、2023-2024 五个研究区间，输出各因子桶的区间收益、胜率、净 PnL、资金收益率、相对区间 lift、稳定正向/环境型/偏负向评估；默认候选榜单排除 `entry_to_exit`、`exit`、`trade` 等事后诊断字段。
-  - `attbacktrader/cli/segmented_factor_contribution_matrix.py`：新增 `att-segmented-factor-contribution-matrix` 命令，支持从 `environment_fit.enriched.json`、`environment_fit.json` 或所在目录生成矩阵，可传入自定义区间。
-  - `tests/test_segmented_factor_contribution_matrix.py`：覆盖稳定正向、环境型、偏负向分类、CLI 写盘和 artifact payload。
+  - `attbacktrader/reports/score_gate_counterfactual_funnel.py`：新增 `score_gate_counterfactual_funnel.json/.zh.md` 报表构建，读取已落盘 `environment_fit.trade_contributions` 和 `segmented_factor_contribution_matrix.json`，按样本数、正向年份、平均单笔收益、胜率、最大亏损筛正向 gate 候选，按负收益/低胜率等筛风险候选，并在 completed-trade 样本上输出 gate 通过/阻断、阻断亏损、漏掉盈利、年度漏斗和代表交易样本。
+  - `attbacktrader/cli/score_gate_counterfactual_funnel.py`：新增 `att-score-gate-counterfactual-funnel` 命令，支持配置正向因子筛选阈值、风险因子阈值、命中数要求、候选数量和样本数量。
+  - `tests/test_score_gate_counterfactual_funnel.py`：覆盖矩阵派生 gate、反事实漏斗、CLI 写盘和 artifact payload。
+  - `setup.py`、`attbacktrader/reports/__init__.py`、`docs/FEATURES.md`：导出新能力和命令说明。
+- 影响：该漏斗是已完成交易样本上的反事实过滤，不是现金再分配后的真实组合回测；结论只能用于判断 gate 是否值得进入 Scored Portfolio Backtest。
+
+## 2026-06-25 — 新增 10 年分区间与逐年因子贡献矩阵
+
+- 需求：把 2015-2024 十年样本切成几个区间，并补充逐年多指标矩阵，观察各入场因子桶在不同区间和不同年份的贡献能力，用于判断因子更适合的环境。
+- 改动：
+  - `attbacktrader/reports/segmented_factor_contribution_matrix.py`：新增 `segmented_factor_contribution_matrix.json/.zh.md` 报表构建，读取已落盘 `environment_fit.trade_contributions`，按入场日期默认切成 2015-2016、2017-2018、2019-2020、2021-2022、2023-2024 五个研究区间，输出各因子桶的平均单笔收益、最大单笔盈利、最大单笔亏损/回撤、胜率、净 PnL、资金收益率、相对区间 lift、稳定正向/环境型/偏负向评估；同时自动生成按自然年份切分的 `annual_segment_overall`、`annual_factor_bucket_matrix` 和 `annual_rankings`，Markdown 展示年度概览和稳定正向因子桶年度多指标矩阵，默认指标包括样本数、平均单笔收益、胜率、资金收益率、最大单笔盈利、最大单笔亏损/回撤；默认候选榜单排除 `entry_to_exit`、`exit`、`trade` 等事后诊断字段。
+  - `attbacktrader/cli/segmented_factor_contribution_matrix.py`：新增 `att-segmented-factor-contribution-matrix` 命令，支持从 `environment_fit.enriched.json`、`environment_fit.json` 或所在目录生成矩阵，可传入自定义区间，可用 `--annual-matrix-metric` 裁剪年度矩阵展示维度，并在摘要中输出年度因子桶数量与年度矩阵指标。
+  - `tests/test_segmented_factor_contribution_matrix.py`：覆盖稳定正向、环境型、偏负向分类、年度多指标矩阵、CLI 指标参数、写盘和 artifact payload。
   - `docs/FEATURES.md`：补充分区间因子贡献矩阵命令和口径说明。
 - 影响：该报告只消费已落盘归因证据，不重跑策略、不重新计算指标；区间是人工研究镜头，不是自动市场识别，结论不能直接作为策略开关。
 

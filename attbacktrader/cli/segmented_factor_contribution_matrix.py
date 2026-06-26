@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from attbacktrader.reports import (
+    ANNUAL_MATRIX_METRIC_DEFINITIONS,
     build_segmented_factor_contribution_matrix,
     render_segmented_factor_contribution_matrix_markdown_zh,
     safe_segmented_factor_contribution_matrix_dir_name,
@@ -24,6 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     report = build_segmented_factor_contribution_matrix(
         source_path,
         segments=segments,
+        annual_matrix_metrics=args.annual_matrix_metric,
         min_segment_sample_count=args.min_segment_sample_count,
         min_total_sample_count=args.min_total_sample_count,
     )
@@ -40,6 +42,11 @@ def main(argv: list[str] | None = None) -> int:
                         "trade_count": payload.get("trade_count"),
                         "field_count": payload.get("field_count"),
                         "factor_bucket_count": payload.get("factor_bucket_count"),
+                        "annual_factor_bucket_count": payload.get("annual_factor_bucket_count"),
+                        "annual_matrix_metrics": [
+                            item.get("metric")
+                            for item in (payload.get("annual_matrix_metrics") or [])
+                        ],
                         "artifacts": payload.get("artifacts"),
                     }
                 ),
@@ -64,6 +71,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="append",
         default=[],
         help="Optional custom segment as segment_id:start:end:label_zh; repeatable",
+    )
+    parser.add_argument(
+        "--annual-matrix-metric",
+        action="append",
+        choices=list(ANNUAL_MATRIX_METRIC_DEFINITIONS),
+        help=(
+            "Metric to render in annual factor matrices; repeatable. "
+            "Defaults to sample_count, average_return_pct, win_rate, return_on_entry_value, max_return_pct, min_return_pct."
+        ),
     )
     parser.add_argument("--min-segment-sample-count", type=int, default=30)
     parser.add_argument("--min-total-sample-count", type=int, default=100)
@@ -105,4 +121,3 @@ def _parse_segment(value: str) -> dict[str, Any]:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
