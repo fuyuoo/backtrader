@@ -75,6 +75,7 @@ datas/*.py
 .venv/
 .serena/
 data/snapshots/
+data/raw/
 /reports/
 examples/generated-entry-factor-validation/
 /my_strategy/data
