@@ -13,6 +13,16 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-27 — 全 A reference 支持按交易日分片输出
+
+- 需求：全量全 A 数据准备前，避免一次性写单个巨大 Parquet 或在内存里累积全部 reference rows，同时保留 rolling 指标和历史行业映射口径。
+- 改动：
+  - `attbacktrader/cli/prepare_attribution_reference.py`：新增 `--partition-by-trade-date` 和 `--emit-start-date`；分片输出必须配合 `--parquet-only`。
+  - `attbacktrader/data/snapshots/attribution_reference.py`：构建器支持 warmup 计算起点与输出起点分离，并按交易日写 `reference_values/trade_year=YYYY/trade_date=YYYY-MM-DD.parquet`；读取和发现快照兼容单文件与分片目录。
+  - `attbacktrader/reports/attribution_wide_samples.py`：reference snapshot loader 兼容分片目录。
+  - `tests/test_reference_snapshots.py`：覆盖分片输出、按日期读取和快照发现。
+- 影响：默认仍写旧单文件格式；显式分片时不生成 `reference_values.parquet`，读取端会读取 `reference_values/` 分片目录。
+
 ## 2026-06-27 — 全 A reference 准备支持 Parquet-only 输出
 
 - 需求：准备全量全 A 数据拉取时，避免 `reference.json` 体积过大，改用 Parquet 存储。

@@ -2845,6 +2845,7 @@ def _load_reference_snapshot(path_like: str | Path) -> dict[str, Any]:
     if path.is_dir():
         json_path = path / "reference.json"
         parquet_path = path / "reference_values.parquet"
+        partition_path = path / "reference_values"
         metadata_path = path / "metadata.json"
         metadata = _as_mapping(_load_json_if_exists(metadata_path)) if metadata_path.exists() else {}
         if parquet_path.exists():
@@ -2852,6 +2853,8 @@ def _load_reference_snapshot(path_like: str | Path) -> dict[str, Any]:
                 payload = _as_mapping(_load_json_if_exists(json_path))
                 metadata = _as_mapping(payload.get("metadata"))
             rows = _parquet_rows(parquet_path)
+        elif partition_path.exists():
+            rows = _parquet_rows(partition_path)
         elif json_path.exists():
             payload = _as_mapping(_load_json_if_exists(json_path))
             metadata = _as_mapping(payload.get("metadata")) or metadata
@@ -2873,7 +2876,13 @@ def _load_reference_snapshot(path_like: str | Path) -> dict[str, Any]:
 
 
 def _parquet_rows(path: Path) -> list[dict[str, Any]]:
-    frame = pd.read_parquet(path)
+    if path.is_dir():
+        parts = sorted(path.rglob("*.parquet"))
+        if not parts:
+            return []
+        frame = pd.concat((pd.read_parquet(part) for part in parts), ignore_index=True)
+    else:
+        frame = pd.read_parquet(path)
     records = frame.astype(object).where(pd.notna(frame), None).to_dict("records")
     return [
         {key: value for key, value in record.items() if value is not None}

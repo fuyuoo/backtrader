@@ -19,6 +19,7 @@ from attbacktrader.data.snapshots import (
     build_attribution_reference_snapshot_from_frame,
     load_or_fetch_all_industry_memberships,
     load_or_fetch_industry_memberships_for_symbols,
+    write_attribution_reference_day_partition,
     write_attribution_reference_snapshot,
 )
 
@@ -31,6 +32,21 @@ def main(argv: list[str] | None = None) -> int:
     run_defaults = _run_defaults_from_args(args)
     start_date = date.fromisoformat(args.start_date or run_defaults["start_date"])
     end_date = date.fromisoformat(args.end_date or run_defaults["end_date"])
+    emit_start_date = date.fromisoformat(args.emit_start_date) if args.emit_start_date is not None else None
+    output_dir = (
+        Path(args.output_dir)
+        if args.output_dir is not None
+        else attribution_reference_snapshot_dir(
+            args.snapshot_root,
+            reference_universe=args.reference_universe,
+            start_date=emit_start_date or start_date,
+            end_date=end_date,
+        )
+    )
+    if args.partition_by_trade_date:
+        partition_root = output_dir / "reference_values"
+        if partition_root.exists() and any(partition_root.rglob("*.parquet")):
+            raise FileExistsError(f"partition output already exists; use a new output dir or clean it first: {partition_root}")
     _LOGGER.info(
         "prepare attribution reference started: provider=%s input=%s start=%s end=%s run_dir=%s fetch_scope=%s",
         args.provider,
@@ -50,36 +66,36 @@ def main(argv: list[str] | None = None) -> int:
         len(emit_scope["pairs"]),
     )
     _LOGGER.info("building attribution reference snapshot")
+    day_rows_writer = None
+    if args.partition_by_trade_date:
+        day_rows_writer = lambda trade_date, rows: write_attribution_reference_day_partition(
+            rows,
+            output_dir,
+            trade_date=trade_date,
+        )
     snapshot = build_attribution_reference_snapshot_from_frame(
         frame,
         start_date=start_date,
         end_date=end_date,
+        emit_start_date=emit_start_date,
         reference_universe=args.reference_universe,
         min_reference_count=args.min_reference_count,
         emit_symbols=emit_scope["symbols"],
         emit_dates=emit_scope["dates"],
         emit_symbol_date_pairs=emit_scope["pairs"],
+        day_rows_writer=day_rows_writer,
     )
     _LOGGER.info(
         "snapshot built: rows=%s exceptions=%s",
         snapshot["row_count"],
         snapshot["metadata"]["exception_count"],
     )
-    output_dir = (
-        Path(args.output_dir)
-        if args.output_dir is not None
-        else attribution_reference_snapshot_dir(
-            args.snapshot_root,
-            reference_universe=args.reference_universe,
-            start_date=start_date,
-            end_date=end_date,
-        )
-    )
     _LOGGER.info("writing attribution reference snapshot: output_dir=%s", output_dir)
     metadata_path, reference_json_path, values_path = write_attribution_reference_snapshot(
         snapshot,
         output_dir,
         write_reference_json=not args.parquet_only,
+        write_values_parquet=not args.partition_by_trade_date,
     )
     _LOGGER.info(
         "prepare attribution reference completed: metadata=%s reference_json=%s values=%s",
@@ -94,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
                 "reference_universe": args.reference_universe,
                 "start_date": start_date.isoformat(),
                 "end_date": end_date.isoformat(),
+                "emit_start_date": emit_start_date.isoformat() if emit_start_date is not None else None,
                 "requested_start_date": args.start_date,
                 "requested_end_date": args.end_date,
                 "effective_start_date": start_date.isoformat(),
@@ -105,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
                 "emit_symbol_count": len(emit_scope["symbols"]),
                 "emit_date_count": len(emit_scope["dates"]),
                 "emit_pair_count": len(emit_scope["pairs"]),
+                "partition_by_trade_date": args.partition_by_trade_date,
                 "row_count": snapshot["row_count"],
                 "exception_count": snapshot["metadata"]["exception_count"],
                 "artifacts": {
@@ -153,6 +171,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--token-file", default=".secrets/tushare_token.txt")
     parser.add_argument("--start-date", default=None, help="YYYY-MM-DD")
+    parser.add_argument("--emit-start-date", default=None, help="YYYY-MM-DD; output rows from this date after warmup")
     parser.add_argument("--end-date", default=None, help="YYYY-MM-DD")
     parser.add_argument("--snapshot-root", default="data/snapshots")
     parser.add_argument("--reference-universe", default=DEFAULT_REFERENCE_UNIVERSE)
@@ -180,6 +199,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Write metadata.json and reference_values.parquet only; skip bulky reference.json.",
     )
     parser.add_argument(
+        "--partition-by-trade-date",
+        action="store_true",
+        help="Write reference_values/trade_year=YYYY/trade_date=YYYY-MM-DD.parquet partitions.",
+    )
+    parser.add_argument(
         "--raw-cache-dir",
         default=None,
         help="Optional parquet cache directory for per-trade-date raw Tushare reference API responses.",
@@ -196,6 +220,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         parser.error("--emit-run-entry-scope requires --run-dir")
     if args.run_warmup_trading_days < 0:
         parser.error("--run-warmup-trading-days must be greater than or equal to 0")
+    if args.partition_by_trade_date and not args.parquet_only:
+        parser.error("--partition-by-trade-date requires --parquet-only")
     return args
 
 

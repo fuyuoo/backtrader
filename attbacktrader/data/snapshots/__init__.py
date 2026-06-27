@@ -48,6 +48,7 @@ from .attribution_reference import (
     load_or_fetch_industry_memberships_for_symbols,
     read_attribution_reference_values_parquet,
     select_attribution_reference_snapshot_path,
+    write_attribution_reference_day_partition,
     write_attribution_reference_snapshot,
 )
 
@@ -68,6 +69,7 @@ __all__ = [
     "load_or_fetch_industry_memberships_for_symbols",
     "read_attribution_reference_values_parquet",
     "select_attribution_reference_snapshot_path",
+    "write_attribution_reference_day_partition",
     "snapshot_path_cache_key",
     "daily_bars_snapshot_path",
     "discover_index_bars_snapshot_paths",

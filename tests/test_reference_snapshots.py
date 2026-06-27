@@ -8,12 +8,14 @@ from attbacktrader.data.snapshots import (
     apply_industry_memberships_to_frame,
     attribution_reference_snapshot_dir,
     build_attribution_reference_snapshot_from_frame,
+    discover_attribution_reference_snapshot_paths,
     load_or_fetch_industry_memberships_for_symbols,
     discover_index_bars_snapshot_paths,
     discover_industry_index_bars_snapshot_paths,
     index_bars_snapshot_path,
     industry_index_bars_snapshot_path,
     read_index_bars_parquet,
+    read_attribution_reference_values_parquet,
     read_shenwan_classifications_parquet,
     read_stock_industry_memberships_parquet,
     shenwan_classification_snapshot_path,
@@ -308,6 +310,59 @@ def test_prepare_attribution_reference_cli_can_skip_reference_json(tmp_path, cap
     assert (output_dir / "metadata.json").exists()
     assert (output_dir / "reference_values.parquet").exists()
     assert not (output_dir / "reference.json").exists()
+
+
+def test_prepare_attribution_reference_cli_can_write_trade_date_partitions(tmp_path, capsys) -> None:
+    cli_input = tmp_path / "all_a.csv"
+    snapshot_root = tmp_path / "snapshots"
+    _all_a_feature_frame().to_csv(cli_input, index=False)
+
+    exit_code = prepare_attribution_reference_cli.main(
+        [
+            "--input",
+            str(cli_input),
+            "--start-date",
+            "2024-01-01",
+            "--emit-start-date",
+            "2024-03-28",
+            "--end-date",
+            "2024-03-29",
+            "--min-reference-count",
+            "2",
+            "--snapshot-root",
+            str(snapshot_root),
+            "--parquet-only",
+            "--partition-by-trade-date",
+        ]
+    )
+    stdout = json.loads(capsys.readouterr().out)
+    output_dir = snapshot_root / "attribution_reference" / "full_a_main_chinext_star" / "2024-03-28_2024-03-29"
+    metadata = json.loads((output_dir / "metadata.json").read_text(encoding="utf-8"))
+    rows = read_attribution_reference_values_parquet(
+        output_dir,
+        start_date=date(2024, 3, 29),
+        end_date=date(2024, 3, 29),
+    )
+    candidates = discover_attribution_reference_snapshot_paths(
+        snapshot_root,
+        start_date=date(2024, 3, 28),
+        end_date=date(2024, 3, 29),
+    )
+
+    assert exit_code == 0
+    assert stdout["artifacts"]["reference_json_path"] is None
+    assert stdout["partition_by_trade_date"] is True
+    assert not (output_dir / "reference_values.parquet").exists()
+    assert sorted(path.name for path in (output_dir / "reference_values").rglob("*.parquet")) == [
+        "trade_date=2024-03-28.parquet",
+        "trade_date=2024-03-29.parquet",
+    ]
+    assert metadata["start_date"] == "2024-03-28"
+    assert metadata["warmup_start_date"] == "2024-01-01"
+    assert metadata["partitioned_by_trade_date"] is True
+    assert rows
+    assert {row["trade_date"] for row in rows} == {"2024-03-29"}
+    assert candidates and candidates[-1].path == output_dir
 
 
 def test_prepare_attribution_reference_cli_fetches_tushare_provider(tmp_path, monkeypatch, capsys) -> None:

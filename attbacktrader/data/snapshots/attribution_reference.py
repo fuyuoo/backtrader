@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -119,9 +120,31 @@ def discover_attribution_reference_snapshot_paths(
         return ()
 
     candidates: list[AttributionReferenceSnapshotCandidate] = []
+    seen_paths: set[Path] = set()
     for values_path in sorted(root.rglob("reference_values.parquet")):
+        if values_path.parent in seen_paths:
+            continue
+        seen_paths.add(values_path.parent)
         candidate = _attribution_reference_snapshot_candidate(
             values_path.parent,
+            reference_universe=reference_universe,
+        )
+        if candidate is None:
+            continue
+        if start_date is not None and candidate.start_date > start_date:
+            continue
+        if end_date is not None and candidate.end_date < end_date:
+            continue
+        candidates.append(candidate)
+    for partition_root in sorted(path for path in root.rglob("reference_values") if path.is_dir()):
+        snapshot_path = partition_root.parent
+        if snapshot_path in seen_paths:
+            continue
+        if not any(partition_root.rglob("*.parquet")):
+            continue
+        seen_paths.add(snapshot_path)
+        candidate = _attribution_reference_snapshot_candidate(
+            snapshot_path,
             reference_universe=reference_universe,
         )
         if candidate is None:
@@ -170,22 +193,22 @@ def read_attribution_reference_values_parquet(
     cache: SnapshotReadCache | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     path = Path(snapshot_path)
-    values_path = path / "reference_values.parquet" if path.is_dir() else path
-    if not values_path.exists():
+    value_paths = _reference_values_parquet_paths(path, start_date=start_date, end_date=end_date)
+    if not value_paths:
         return ()
 
     if cache is not None:
         return cache.get_or_read(
             snapshot_path_cache_key(
                 "attribution_reference_values_parquet",
-                values_path,
+                path,
                 tuple(str(symbol) for symbol in symbols or ()),
                 tuple(str(field_key) for field_key in field_keys or ()),
                 start_date.isoformat() if start_date is not None else None,
                 end_date.isoformat() if end_date is not None else None,
             ),
             lambda: read_attribution_reference_values_parquet(
-                values_path,
+                path,
                 symbols=symbols,
                 field_keys=field_keys,
                 start_date=start_date,
@@ -193,11 +216,12 @@ def read_attribution_reference_values_parquet(
             ),
         )
 
-    frame = pd.read_parquet(values_path)
+    frames = [pd.read_parquet(values_path) for values_path in value_paths]
+    frame = frames[0] if len(frames) == 1 else pd.concat(frames, ignore_index=True)
     if frame.empty:
         return ()
     if "symbol" not in frame.columns or "trade_date" not in frame.columns or "field_key" not in frame.columns:
-        raise ValueError(f"reference values parquet lacks required columns: {values_path}")
+        raise ValueError(f"reference values parquet lacks required columns: {path}")
 
     if symbols:
         symbol_set = {str(symbol) for symbol in symbols}
@@ -219,6 +243,46 @@ def read_attribution_reference_values_parquet(
         {str(key): value for key, value in record.items() if value is not None}
         for record in records
     )
+
+
+def _reference_values_parquet_paths(
+    path: Path,
+    *,
+    start_date: date | None,
+    end_date: date | None,
+) -> tuple[Path, ...]:
+    if path.is_dir():
+        values_path = path / "reference_values.parquet"
+        if values_path.exists():
+            return (values_path,)
+        partition_root = path / "reference_values"
+        if not partition_root.exists():
+            return ()
+        candidates = sorted(partition_root.rglob("*.parquet"))
+        return tuple(
+            candidate
+            for candidate in candidates
+            if _partition_path_in_date_range(candidate, start_date=start_date, end_date=end_date)
+        )
+    return (path,) if path.exists() else ()
+
+
+def _partition_path_in_date_range(path: Path, *, start_date: date | None, end_date: date | None) -> bool:
+    trade_date = _partition_trade_date(path)
+    if trade_date is None:
+        return True
+    if start_date is not None and trade_date < start_date:
+        return False
+    if end_date is not None and trade_date > end_date:
+        return False
+    return True
+
+
+def _partition_trade_date(path: Path) -> date | None:
+    prefix = "trade_date="
+    if not path.stem.startswith(prefix):
+        return None
+    return _coerce_date(path.stem[len(prefix):])
 
 
 def decode_attribution_reference_cell(value: Any) -> Any:
@@ -263,11 +327,13 @@ def build_attribution_reference_snapshot_from_frame(
     *,
     start_date: date,
     end_date: date,
+    emit_start_date: date | None = None,
     reference_universe: str = DEFAULT_REFERENCE_UNIVERSE,
     min_reference_count: int = 100,
     emit_symbols: Sequence[str] | None = None,
     emit_dates: Sequence[date | str] | None = None,
     emit_symbol_date_pairs: Sequence[tuple[str, date | str]] | None = None,
+    day_rows_writer: Callable[[date, Sequence[Mapping[str, Any]]], None] | None = None,
 ) -> dict[str, Any]:
     """Build long-form attribution reference rows from daily all-A data."""
 
@@ -280,6 +346,11 @@ def build_attribution_reference_snapshot_from_frame(
     )
     if end_date < start_date:
         raise ValueError("end_date must be on or after start_date")
+    output_start_date = emit_start_date or start_date
+    if output_start_date < start_date:
+        raise ValueError("emit_start_date must be on or after start_date")
+    if output_start_date > end_date:
+        raise ValueError("emit_start_date must be on or before end_date")
     required = {"symbol", "trade_date", "close", "high", "low"}
     missing = sorted(required - set(frame.columns))
     if missing:
@@ -299,7 +370,9 @@ def build_attribution_reference_snapshot_from_frame(
     )
 
     rows: list[dict[str, Any]] = []
-    exceptions: list[dict[str, Any]] = []
+    exception_samples: list[dict[str, Any]] = []
+    exception_count = 0
+    row_count = 0
     percentile_specs = _percentile_specs()
     emit_symbol_set = {str(symbol) for symbol in emit_symbols or []}
     emit_date_set = {_coerce_date(value) for value in emit_dates or []}
@@ -311,6 +384,8 @@ def build_attribution_reference_snapshot_from_frame(
             emit_pair_dates.setdefault(pair_date, set()).add(str(symbol))
     day_count = int(data["trade_date"].nunique())
     for day_index, (trade_date, day) in enumerate(data.groupby("trade_date", sort=True), start=1):
+        if trade_date < output_start_date:
+            continue
         if emit_pair_dates and trade_date not in emit_pair_dates:
             continue
         if emit_date_set and trade_date not in emit_date_set:
@@ -329,10 +404,11 @@ def build_attribution_reference_snapshot_from_frame(
             emit_day = emit_day[emit_day["symbol"].astype(str).isin(emit_pair_dates[trade_date])]
         elif emit_symbol_set:
             emit_day = emit_day[emit_day["symbol"].astype(str).isin(emit_symbol_set)]
+        day_rows: list[dict[str, Any]] = []
         for _, record in emit_day.iterrows():
             symbol = str(record["symbol"])
             symbol_exclusions = exclusion_codes.get(record.name, [])
-            rows.extend(_field_rows_for_record(
+            day_rows.extend(_field_rows_for_record(
                 record,
                 symbol=symbol,
                 trade_date=trade_date,
@@ -343,22 +419,31 @@ def build_attribution_reference_snapshot_from_frame(
                 excluded_codes=symbol_exclusions,
             ))
             for code in symbol_exclusions:
-                exceptions.append({"symbol": symbol, "trade_date": trade_date.isoformat(), "code": code})
+                exception_count += 1
+                if len(exception_samples) < 1000:
+                    exception_samples.append({"symbol": symbol, "trade_date": trade_date.isoformat(), "code": code})
+        row_count += len(day_rows)
+        if day_rows_writer is None:
+            rows.extend(day_rows)
+        elif day_rows:
+            day_rows_writer(trade_date, day_rows)
         if day_index == 1 or day_index == day_count or day_index % 100 == 0:
             _LOGGER.info(
                 "reference snapshot day progress: %s/%s trade_date=%s rows=%s exceptions=%s",
                 day_index,
                 day_count,
                 trade_date.isoformat(),
-                len(rows),
-                len(exceptions),
+                row_count,
+                exception_count,
             )
 
     metadata = {
         "schema": ATTRIBUTION_REFERENCE_FIELDS_VERSION,
         "reference_universe": reference_universe,
-        "start_date": start_date.isoformat(),
+        "start_date": output_start_date.isoformat(),
         "end_date": end_date.isoformat(),
+        "warmup_start_date": start_date.isoformat() if output_start_date != start_date else None,
+        "emit_start_date": output_start_date.isoformat(),
         "generated_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "fields": [dict(item, timing="entry", source="attribution_reference_snapshot", missing_policy="missing") for item in FIELD_DEFINITIONS],
         "environment_fit_default_fields": [
@@ -383,14 +468,16 @@ def build_attribution_reference_snapshot_from_frame(
             else None
         ),
         "industry_membership_backfilled_count": industry_membership_backfilled_count,
-        "exception_count": len(exceptions),
-        "exceptions": exceptions[:1000],
+        "row_count": row_count,
+        "partitioned_by_trade_date": day_rows_writer is not None,
+        "exception_count": exception_count,
+        "exceptions": exception_samples,
     }
-    _LOGGER.info("reference snapshot build completed: rows=%s exceptions=%s", len(rows), len(exceptions))
+    _LOGGER.info("reference snapshot build completed: rows=%s exceptions=%s", row_count, exception_count)
     return {
         "metadata": metadata,
         "rows": rows,
-        "row_count": len(rows),
+        "row_count": row_count,
     }
 
 
@@ -502,6 +589,7 @@ def write_attribution_reference_snapshot(
     output_dir: str | Path,
     *,
     write_reference_json: bool = True,
+    write_values_parquet: bool = True,
 ) -> tuple[Path, Path | None, Path]:
     target_dir = Path(output_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -523,8 +611,31 @@ def write_attribution_reference_snapshot(
         if reference_json_path.exists():
             reference_json_path.unlink()
         reference_json_path = None
-    _LOGGER.info("writing reference parquet: path=%s rows=%s", values_path, len(rows))
-    frame = pd.DataFrame(rows)
+    if write_values_parquet:
+        _LOGGER.info("writing reference parquet: path=%s rows=%s", values_path, len(rows))
+        write_attribution_reference_values_parquet(rows, values_path)
+    else:
+        if values_path.exists():
+            values_path.unlink()
+        values_path = target_dir / "reference_values"
+    _LOGGER.info("reference snapshot files written")
+    return metadata_path, reference_json_path, values_path
+
+
+def write_attribution_reference_day_partition(
+    rows: Sequence[Mapping[str, Any]],
+    output_dir: str | Path,
+    *,
+    trade_date: date,
+) -> Path:
+    values_dir = Path(output_dir) / "reference_values" / f"trade_year={trade_date:%Y}"
+    return write_attribution_reference_values_parquet(rows, values_dir / f"trade_date={trade_date:%Y-%m-%d}.parquet")
+
+
+def write_attribution_reference_values_parquet(rows: Sequence[Mapping[str, Any]], path: str | Path) -> Path:
+    values_path = Path(path)
+    values_path.parent.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame(list(rows))
     if not frame.empty:
         for column in ("value", "bucket"):
             if column in frame.columns:
@@ -532,8 +643,7 @@ def write_attribution_reference_snapshot(
         if "exception_codes" in frame.columns:
             frame["exception_codes"] = frame["exception_codes"].map(lambda value: ";".join(str(item) for item in _as_sequence(value)))
     frame.to_parquet(values_path, index=False)
-    _LOGGER.info("reference snapshot files written")
-    return metadata_path, reference_json_path, values_path
+    return values_path
 
 
 def _active_membership_for(
