@@ -170,6 +170,8 @@ setuptools.setup(
         'att-run-entry-factor-validation-matrix=attbacktrader.cli.entry_factor_validation_matrix:main',
         'att-classify-entry-factor-validation=attbacktrader.cli.entry_factor_validation_classification:main',
         'att-scored-entry-allocation-tuning=attbacktrader.cli.scored_entry_allocation_tuning:main',
+        'att-entry-score-trade-sample-backtest=attbacktrader.cli.entry_score_trade_sample_backtest:main',
+        'att-entry-score-bayesian-walk-forward=attbacktrader.cli.entry_score_bayesian_walk_forward:main',
         'att-strategy-environment-profile=attbacktrader.cli.strategy_environment_profile:main',
         'att-review-brief=attbacktrader.cli.review_brief:main',
         'att-review-expand-samples=attbacktrader.cli.review_expand_samples:main',

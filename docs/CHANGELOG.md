@@ -13,6 +13,45 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-26 — 贝叶斯入场分数目标函数加入训练年覆盖惩罚
+
+- 需求：Slim 框架多 seed 验证出现部分测试年份 0 笔或极少笔，继续改目标函数，避免贝叶斯学出过严择时参数。
+- 改动：
+  - `attbacktrader/reports/entry_score_bayesian_walk_forward.py`：新增 `min_train_yearly_pass_count`，目标函数加入 `yearly_sample_penalty`，只按训练窗每一年通过数惩罚，不使用测试年信息；trial details 记录 `selected_count_by_year`、`min_selected_count_by_year` 和年度惩罚。
+  - `attbacktrader/cli/entry_score_bayesian_walk_forward.py`：新增 `--min-train-yearly-pass-count` 参数。
+  - `tests/test_entry_score_bayesian_walk_forward.py`：覆盖 CLI 参数透传和训练年通过数惩罚。
+  - `docs/FEATURES.md`：同步 walk-forward 目标函数和参数说明。
+- 影响：默认值为 0，不改变旧命令行为；设为正数时可降低训练窗年度覆盖不足导致的过严 score gate。
+
+## 2026-06-26 — 扩展入场打分负面因子
+
+- 需求：把 2023 失效诊断里显著负向的字段加入入场打分，作为减分项或准门槛项。
+- 改动：
+  - `attbacktrader/reports/entry_score_trade_sample_backtest.py`：默认打分框架新增弱20/60日动量、DEA水上持续天数、固定ATR止损适配、个股相对行业波动、个股/行业/中证500周线 KDJ 和中证500趋势等负面权重，并用大负分 interaction 表达准门槛组合。
+  - `tests/test_entry_score_trade_sample_backtest.py`：覆盖弱动量和市场/行业过热组合会被大幅扣分。
+  - `docs/FEATURES.md`：同步默认打分框架说明。
+- 影响：贝叶斯 walk-forward 会自动把这些新增因子权重和 interaction 权重纳入搜索空间；当前仍是 completed-trade 样本过滤，不是真实组合层硬风控。
+
+## 2026-06-26 — 新增贝叶斯因子分数 Walk-Forward
+
+- 需求：因子组合分数不再只用人工固定权重，而是用贝叶斯方法寻找各因子加减分权重，并使用 walk-forward 做训练窗调参、下一年样本外验证。
+- 改动：
+  - `attbacktrader/reports/entry_score_bayesian_walk_forward.py`：新增 `entry_score_bayesian_walk_forward.json/.zh.md` 报表构建，读取已落盘 `environment_fit.trade_contributions`，基于默认强趋势阴线回踩打分框架生成权重搜索空间，用 Optuna/TPE 在训练年份优化因子 bucket 权重、interaction 权重和最低入场分，再冻结参数评估下一年 OOS 样本。
+  - `attbacktrader/cli/entry_score_bayesian_walk_forward.py`：新增 `att-entry-score-bayesian-walk-forward` 命令，支持配置训练窗年数、测试年份范围、trial 数、随机种子、训练样本数/通过率约束、优化器和输出目录。
+  - `tests/test_entry_score_bayesian_walk_forward.py`：覆盖 walk-forward 构建、CLI 写盘、artifact payload 和 Optuna 缺失时显式失败。
+  - `setup.py`、`attbacktrader/reports/__init__.py`、`docs/FEATURES.md`：导出新能力和命令说明。
+- 影响：该报告是 completed-trade 样本上的权重寻优和样本外过滤验证，不包含未成交候选、现金竞争、真实持仓上限和每日容量约束；真实组合收益仍需 full signal_audit 或 Strategy Decision Event Table 驱动的 Scored Portfolio Backtest。
+
+## 2026-06-26 — 新增固定因子打分一年 trade-sample 验证
+
+- 需求：把“强趋势阴线回踩”的组合因子框架固化为加减分规则，按分数降序排序，设置最低入场分数，在无持仓上限口径下先回测一年。
+- 改动：
+  - `attbacktrader/reports/entry_score_trade_sample_backtest.py`：新增 `entry_score_trade_sample_backtest.json/.zh.md` 报表构建，读取已落盘 `environment_fit.trade_contributions`，按默认因子权重和 interaction 权重计算入场分数，输出分数达标/未达标样本、阈值扫描、月度表现、最高分交易、最差达标交易和被挡掉的盈利交易样本。
+  - `attbacktrader/cli/entry_score_trade_sample_backtest.py`：新增 `att-entry-score-trade-sample-backtest` 命令，支持选择年份、最低入场分数、输出目录和样本数量。
+  - `tests/test_entry_score_trade_sample_backtest.py`：覆盖默认打分过滤、CLI 写盘和 artifact payload。
+  - `setup.py`、`attbacktrader/reports/__init__.py`、`docs/FEATURES.md`：导出新能力和命令说明。
+- 影响：该验证是 completed-trade 样本上的 score gate，不包含未成交候选、现金竞争、真实持仓上限和每日容量约束；完整组合回测仍需要 full signal_audit 或 Strategy Decision Event Table。
+
 ## 2026-06-26 — 新增 Score Gate 反事实漏斗
 
 - 需求：先用年度矩阵筛“平均单笔收益 + 胜率 + 最大亏损”更实操的因子，再做 score gate 反事实漏斗，观察 gate 能挡掉多少亏损、漏掉多少盈利。

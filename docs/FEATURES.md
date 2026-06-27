@@ -89,6 +89,46 @@ att-score-gate-counterfactual-funnel \
 - `score_gate_counterfactual_funnel.json`
 - `score_gate_counterfactual_funnel.zh.md`
 
+认可一组固定因子加减分规则后，可先做单年 completed-trade 样本验证：
+
+```bash
+att-entry-score-trade-sample-backtest \
+  --environment-fit reports/baoma-v1-fixed-sample-2015-2024-maxhold800 \
+  --year 2024 \
+  --min-entry-score 4 \
+  --output-dir reports/entry-score-trade-sample-backtest-baoma-v1-fixed-sample-2024-score4
+```
+
+默认打分框架围绕“强趋势阴线回踩”：MA60 距离、DIF-DEA/MACD/DEA 强度、相对沪深300/行业强势、距60日高点、阴线实体、下影线、放量、MA60 斜率、ATR 分位和个股周线 KDJ 加分；贴 MA60、DIF/MACD 弱、缩量、弱20/60日动量、行业/市场周线极端、中证500弱环境、固定止损适配差等扣分；同时包含“强趋势共振”“强趋势近高”“弱20日且弱60日”“行业过热且中证500周线强”等 interaction 权重。输出：
+
+- `entry_score_trade_sample_backtest.json`
+- `entry_score_trade_sample_backtest.zh.md`
+
+该命令只读取 `environment_fit.trade_contributions`，不重跑策略、不重新计算指标；“无持仓上限”表示所有分数达标的已完成交易都保留，不做现金容量或持仓容量拒单。它不是完整候选级 Scored Portfolio Backtest，不能替代 full `signal_audit` / Strategy Decision Event Table 驱动的真实组合回测。
+
+如果需要让“各种因子的分数”由训练数据寻找，而不是固定人工权重，可运行贝叶斯 walk-forward 权重优化：
+
+```bash
+att-entry-score-bayesian-walk-forward \
+  --environment-fit reports/baoma-v1-fixed-sample-2015-2024-maxhold800 \
+  --first-train-year 2015 \
+  --last-test-year 2024 \
+  --train-years 5 \
+  --n-trials 80 \
+  --seed 42 \
+  --min-train-pass-rate 0.20 \
+  --min-train-sample-count 300 \
+  --min-train-yearly-pass-count 100 \
+  --output-dir reports/entry-score-bayesian-walk-forward-baoma-v1-fixed-sample-2015-2024
+```
+
+该命令默认使用 Optuna/TPE：每个 fold 只在训练年份优化因子 bucket 权重、interaction 权重和最低入场分，再冻结参数评估下一年；默认目标函数包含 OOS 不参与的训练窗通过率、总样本数和每个训练年份最低通过数惩罚，避免训练出某些年份极端空仓的参数；默认 fold 为 2015-2019→2020、2016-2020→2021、2017-2021→2022、2018-2022→2023、2019-2023→2024。输出：
+
+- `entry_score_bayesian_walk_forward.json`
+- `entry_score_bayesian_walk_forward.zh.md`
+
+目标函数以训练窗相对原始样本的入场金额收益率 lift、平均收益 lift、胜率 lift 为主，并对训练窗通过率/通过样本数不足进行惩罚，避免只挑极少数交易造成过拟合。该结果仍是 completed-trade 样本上的权重寻优和样本外过滤验证，不包含未成交候选、现金竞争、真实持仓上限和每日容量约束。
+
 ### 已覆盖能力
 
 - 生成 tuning 合同：列出 2015-2019→2020 至 2019-2023→2024 的 5 个 walk-forward fold。
@@ -107,6 +147,8 @@ att-score-gate-counterfactual-funnel \
 - Complete scored allocation report package：可从 full walk-forward run 生成机器可读 JSON、中文 Markdown、Pareto frontier artifact，以及 balanced/aggressive/defensive 参数文件；报告分离 Stage A 预调优、Stage B 训练与 Stage B 样本外组合评估，输出 OOS scored recommendation、OOS unscored baseline、OOS funnel 与训练窗漏斗，并显式列出缺失的 market-stage / factor-combination 切片原因。
 - 10 年分区间与逐年因子贡献矩阵：`att-segmented-factor-contribution-matrix` 读取已落盘 `environment_fit.trade_contributions`，不重跑策略、不重算指标，按人工研究区间输出每个因子桶的样本数、胜率、平均单笔收益、最大单笔盈利、最大单笔亏损/回撤、净 PnL、资金收益率、profit factor、相对区间 lift、最好/最差区间和 `stable_positive` / `environment_specific` / `mostly_negative` / low-sample 风险评估；同时按自然年份生成 `annual_segment_overall`、`annual_factor_bucket_matrix` 和 `annual_rankings`，Markdown 输出年度概览与稳定正向因子桶的多指标年度矩阵，默认指标包括样本数、平均单笔收益、胜率、资金收益率、最大单笔盈利、最大单笔亏损/回撤，可用 `--annual-matrix-metric` 裁剪展示维度。默认候选榜单只纳入 `entry_decision` 字段，`entry_to_exit`、`exit`、`trade` 等事后诊断字段仅保留在诊断区。这里的最大单笔亏损/回撤来自入场到出场 `return_pct`，不是持仓过程内 MAE。
 - Score Gate 反事实漏斗：`att-score-gate-counterfactual-funnel` 读取已落盘 `environment_fit.trade_contributions` 和 `segmented_factor_contribution_matrix.json`，不重跑策略、不重算指标，按年度矩阵筛选正向 gate 候选和风险候选，再在 completed-trade 样本上输出 gate 通过/阻断、阻断亏损交易、漏掉盈利交易、年度漏斗、候选因子命中影响和代表交易样本；该结果不是现金再分配后的真实组合收益，只用于决定 gate 是否值得进入 Scored Portfolio Backtest。
+- 固定因子打分一年验证：`att-entry-score-trade-sample-backtest` 读取已落盘 `environment_fit.trade_contributions`，用固定因子权重和 interaction 权重对单年 completed trades 计算入场分数，按最低入场分数输出达标/未达标样本、阈值扫描、月度表现和代表交易；该结果是无持仓上限 trade-sample score gate，不包含未成交候选和现金竞争。
+- 贝叶斯因子分数 Walk-Forward：`att-entry-score-bayesian-walk-forward` 读取已落盘 `environment_fit.trade_contributions`，用 Optuna/TPE 在每个训练窗优化因子 bucket 权重、interaction 权重和最低入场分，并把最佳参数冻结后评估下一年 OOS completed-trade 样本；报告输出 OOS 汇总、逐 fold 结果、最佳参数稳定性和代表交易。该能力用于判断权重组合是否具备滚动样本外稳定性，不替代真实组合层 Scored Portfolio Backtest。
 - RunPlan 长任务进度日志：`att-run-plan --progress-log reports/.../run-progress.ndjson --progress-interval-days 25` 可把 CLI / runner / data preflight / prepared data / entry attribution context / Baoma engine 阶段写入 NDJSON；适合真实 full source RunPlan 长跑时持续观察 preflight 股票数、prepared data 股票数、entry attribution evidence 构建、Baoma rows 构建、处理交易日、股票槽位、intent、closed trades 和 open holdings 变化。
 - Full artifact 写盘：`artifact_detail=full` 仍会把完整信号写入 `signal_audit.json`；`result.json` 保持 compact manifest，避免把大型 `signal_audit` 在 result 中重复序列化，并通过 progress log 标记每个 JSON artifact 的 started/completed。
 - Stage A elite 试验用于缩小 Stage B 搜索空间，不作为最终组合收益证据。
