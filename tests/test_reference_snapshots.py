@@ -281,6 +281,35 @@ def test_attribution_reference_snapshot_can_emit_only_target_entries() -> None:
     assert snapshot["metadata"]["emit_pair_count"] == 2
 
 
+def test_prepare_attribution_reference_cli_can_skip_reference_json(tmp_path, capsys) -> None:
+    cli_input = tmp_path / "all_a.csv"
+    _all_a_feature_frame().to_csv(cli_input, index=False)
+    output_dir = tmp_path / "parquet-only-reference"
+
+    exit_code = prepare_attribution_reference_cli.main(
+        [
+            "--input",
+            str(cli_input),
+            "--start-date",
+            "2024-01-01",
+            "--end-date",
+            "2024-03-29",
+            "--min-reference-count",
+            "2",
+            "--output-dir",
+            str(output_dir),
+            "--parquet-only",
+        ]
+    )
+    stdout = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert stdout["artifacts"]["reference_json_path"] is None
+    assert (output_dir / "metadata.json").exists()
+    assert (output_dir / "reference_values.parquet").exists()
+    assert not (output_dir / "reference.json").exists()
+
+
 def test_prepare_attribution_reference_cli_fetches_tushare_provider(tmp_path, monkeypatch, capsys) -> None:
     class FakeProvider:
         def __init__(self, token, *, rate_limit=None):

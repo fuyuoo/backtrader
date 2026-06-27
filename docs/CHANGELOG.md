@@ -13,6 +13,15 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-27 — 全 A reference 准备支持 Parquet-only 输出
+
+- 需求：准备全量全 A 数据拉取时，避免 `reference.json` 体积过大，改用 Parquet 存储。
+- 改动：
+  - `attbacktrader/cli/prepare_attribution_reference.py`：新增 `--parquet-only`，只写 `metadata.json` 和 `reference_values.parquet`。
+  - `attbacktrader/data/snapshots/attribution_reference.py`：快照写入支持跳过 `reference.json`，并清理同输出目录中的旧 `reference.json`。
+  - `tests/test_reference_snapshots.py`：覆盖 Parquet-only CLI 输出。
+- 影响：默认行为不变；只有显式加 `--parquet-only` 时不生成 `reference.json`。
+
 ## 2026-06-27 — 固定分数组合回测支持保守同日资金口径
 
 - 需求：第一版固定 score>=5 的 Scored Portfolio Backtest 先补保守执行顺序，避免同日卖出资金被立刻用于同日新买。

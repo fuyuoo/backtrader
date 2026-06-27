@@ -497,7 +497,12 @@ def apply_industry_memberships_to_frame(
     return data
 
 
-def write_attribution_reference_snapshot(snapshot: Mapping[str, Any], output_dir: str | Path) -> tuple[Path, Path, Path]:
+def write_attribution_reference_snapshot(
+    snapshot: Mapping[str, Any],
+    output_dir: str | Path,
+    *,
+    write_reference_json: bool = True,
+) -> tuple[Path, Path | None, Path]:
     target_dir = Path(output_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     metadata_path = target_dir / "metadata.json"
@@ -508,11 +513,16 @@ def write_attribution_reference_snapshot(snapshot: Mapping[str, Any], output_dir
     rows = list(_as_sequence(snapshot.get("rows")))
     _LOGGER.info("writing metadata json: path=%s", metadata_path)
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-    _LOGGER.info("writing reference json: path=%s rows=%s", reference_json_path, len(rows))
-    reference_json_path.write_text(
-        json.dumps({"metadata": metadata, "rows": rows}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    if write_reference_json:
+        _LOGGER.info("writing reference json: path=%s rows=%s", reference_json_path, len(rows))
+        reference_json_path.write_text(
+            json.dumps({"metadata": metadata, "rows": rows}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    else:
+        if reference_json_path.exists():
+            reference_json_path.unlink()
+        reference_json_path = None
     _LOGGER.info("writing reference parquet: path=%s rows=%s", values_path, len(rows))
     frame = pd.DataFrame(rows)
     if not frame.empty:

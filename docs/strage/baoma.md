@@ -77,7 +77,7 @@
 | `G-02` | 成本、税费、滑点尚未完全驱动 baoma 生命周期净口径 | 当前更适合作为前复权价差和交易样本分析，不适合当作真实资金收益结论 | 费用继续保留为配置项；后续从同一批成交记录派生毛/净视图，不单独重跑策略。 |
 | `G-03` | 期末强制清仓视图和剔除未完成视图仍需独立报告化 | 当前能看到 104 个期末未平仓，但双视图口径还不够清晰 | 进入稳定性分析前补；当前不要把未平仓混入完整交易胜率结论。 |
 | `G-04` | 环境因子还不够有区分度 | 当前环境报告能跑，但分组主要集中在少数字段，不能充分回答牛市/震荡/熊市适配 | 下一阶段只补环境因子，不重建归因框架。 |
-| `G-05` | 归因 reference 准备入口 | 已新增 `att-prepare-attribution-reference` 第一版，从已准备好的全 A 日频基础表生成 `reference.json`、`reference_values.parquet` 和 `metadata.json`；Tushare 大规模拉取后续接入该入口前置数据源 | 当前第一版先固化计算口径、分位桶、固定解释桶和异常记录，不在命令内强行联网拉取。 |
+| `G-05` | 归因 reference 准备入口 | 已新增 `att-prepare-attribution-reference` 第一版，从已准备好的全 A 日频基础表生成 `metadata.json`、`reference_values.parquet`，小样本可额外生成 `reference.json`；Tushare 大规模拉取后续接入该入口前置数据源 | 全量数据准备使用 `--parquet-only`，避免巨大 JSON 落盘。 |
 | `G-06` | Tushare reference 前置数据源 | 已新增 `att-prepare-attribution-reference --provider tushare`，可拉取 daily、daily_basic、stock_basic、suspend_d、namechange 并合成 reference 输入表；历史 ST 优先基于 namechange 有效区间判断 | 申万一级行业可通过 `--fetch-industry-memberships` 显式逐股缓存并按有效区间合并；默认不开启，避免全 A 首次准备时调用量过大。 |
 | `G-05` | 原始入场价与分批减仓后的剩余成本口径拆分 | 已修复；`ClosedTrade.entry_price` / `original_entry_price` 保留首笔入场价，`remaining_cost_basis_at_exit` 单独记录最终清仓前剩余成本 | `300803.SZ` 这类减仓后剩余成本为负的交易不再显示为负入场价；负值只出现在剩余成本字段，用于解释成本已被分批卖出覆盖。 |
 | `G-06` | 分批减仓事件作为可核验交易事件完整落盘 | 已修复；`BAOMA_SCALE_OUT_*` 已进入 `execution_audit.json`、`trade_lifecycle.json` 和人工核验样本 | full run 中 `execution_audit` 已包含分批减仓事件，并记录成交日、成交价、成交数量、事件后持仓数量和事件后剩余成本。 |
@@ -291,7 +291,7 @@ max_holding_count=800 归因重跑记录：
 33. 新增全 A 参考数据准备命令 `att-prepare-attribution-reference`：负责拉取或复用全 A daily_basic、历史 ST 状态或 namechange 降级数据、历史行业分类、停牌/上市天数/板块过滤所需参考数据，并计算保存全 A 横截面分位参考；该命令不跑回测，也不生成策略适配结论。
 34. `att-prepare-attribution-reference` 显式接收 `--start-date` 和 `--end-date`；日期范围需要覆盖 run 的 warmup 起点到回测结束日期，以支持 ATR、20/60 日收益波动率、近 20/60 日高低点等窗口指标。归因宽表只对实际入场信号日输出样本，warmup 区间仅用于计算参考指标。
 35. 全 A 参考快照存放在 `data/snapshots/attribution_reference/<reference_universe>/<start_date>_<end_date>/`，例如 `data/snapshots/attribution_reference/full_a_main_chinext_star/2022-10-01_2024-12-31/`；该目录属于 `Data Snapshot`，不属于 run-specific `reports/`。
-36. 全 A 参考快照中表格数据使用 Parquet，metadata/provenance/参数/字段版本/异常统计使用 JSON。
+36. 全 A 参考快照中表格数据使用 Parquet，metadata/provenance/参数/字段版本/异常统计使用 JSON；正式大样本使用 `--parquet-only`，`reference.json` 只保留给小样本调试。
 37. 全 A 横截面 percentile reference 在 `att-prepare-attribution-reference` 阶段预计算并保存；归因宽表生成阶段只读取并 join 已保存的 percentile/bucket，不临时重算分位。
 38. 当需要严格全 A 横截面时，`att-prepare-attribution-reference` 必须使用 `--reference-fetch-scope all` 拉取全 A 行情/基础字段，同时用 `--emit-run-entry-scope` 只输出本次 run 实际入场样本；不能用 run 股票池白名单作为 reference 截面。
 39. 第一版参考字段版本为 `attribution_reference_fields.v1`；metadata 必须记录字段清单、计算公式、分桶规则、reference universe 过滤规则、历史 ST 数据源策略、percentile 计算方法、生成时间和数据范围。后续改桶或新增字段时升级版本，不覆盖 v1 语义。

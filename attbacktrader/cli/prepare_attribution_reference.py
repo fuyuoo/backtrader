@@ -76,7 +76,11 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     _LOGGER.info("writing attribution reference snapshot: output_dir=%s", output_dir)
-    metadata_path, reference_json_path, values_path = write_attribution_reference_snapshot(snapshot, output_dir)
+    metadata_path, reference_json_path, values_path = write_attribution_reference_snapshot(
+        snapshot,
+        output_dir,
+        write_reference_json=not args.parquet_only,
+    )
     _LOGGER.info(
         "prepare attribution reference completed: metadata=%s reference_json=%s values=%s",
         metadata_path,
@@ -105,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
                 "exception_count": snapshot["metadata"]["exception_count"],
                 "artifacts": {
                     "metadata_path": str(metadata_path),
-                    "reference_json_path": str(reference_json_path),
+                    "reference_json_path": str(reference_json_path) if reference_json_path is not None else None,
                     "reference_values_parquet_path": str(values_path),
                 },
             },
@@ -170,6 +174,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--min-reference-count", type=int, default=100)
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--parquet-only",
+        action="store_true",
+        help="Write metadata.json and reference_values.parquet only; skip bulky reference.json.",
+    )
     parser.add_argument(
         "--raw-cache-dir",
         default=None,
