@@ -36,6 +36,7 @@ _TRIAL_SPECIFIC_CACHE_FIELDS = {
     "trial_id",
     "score_gate",
     "score_thresholds",
+    "minimum_score",
     "minimum_score_z",
     "minimum_score_quantile",
 }
@@ -512,6 +513,18 @@ def fit_training_score_gate_statistics(
 ) -> dict[str, Any]:
     """Fit score-gate statistics from training-window events only."""
 
+    if "minimum_score" in score_gate:
+        if "minimum_score_z" in score_gate or "minimum_score_quantile" in score_gate:
+            raise ValueError("minimum_score cannot be combined with z-score or quantile gates")
+        threshold = _float_required(score_gate, "minimum_score")
+        return {
+            "minimum_score": threshold,
+            "threshold": threshold,
+            "derived_from": "fixed_absolute",
+            "source_event_count": 0,
+            "source_window": "fixed_parameter",
+        }
+
     if not training_events:
         raise ValueError("training_events cannot be empty")
     _assert_no_test_window_threshold_source(training_events)
@@ -587,6 +600,14 @@ def simulate_scored_portfolio(
     board_lot_size = int(portfolio_controls.get("board_lot_size") or 100)
     if board_lot_size <= 0:
         raise ValueError("board_lot_size must be positive")
+    allow_same_day_exit_cash_reuse = _optional_bool(
+        portfolio_controls.get("allow_same_day_exit_cash_reuse", True),
+        "allow_same_day_exit_cash_reuse",
+    )
+    prefer_unheld_industries = _optional_bool(
+        portfolio_controls.get("prefer_unheld_industries", False),
+        "prefer_unheld_industries",
+    )
 
     normalized_events = [_normalize_decision_event(event) for event in events]
     scored = score_entry_candidates(
@@ -610,6 +631,8 @@ def simulate_scored_portfolio(
         industry_max_new_per_day=industry_max_new_per_day,
         cash_reserve_ratio=cash_reserve_ratio,
         board_lot_size=board_lot_size,
+        allow_same_day_exit_cash_reuse=allow_same_day_exit_cash_reuse,
+        prefer_unheld_industries=prefer_unheld_industries,
         unscored_baseline=unscored_baseline,
     )
 
@@ -1610,6 +1633,8 @@ def _simulate_scored_portfolio_from_normalized(
     industry_max_new_per_day: int | None,
     cash_reserve_ratio: float,
     board_lot_size: int,
+    allow_same_day_exit_cash_reuse: bool,
+    prefer_unheld_industries: bool,
     unscored_baseline: bool,
 ) -> dict[str, Any]:
     cash = float(initial_cash)
@@ -1634,6 +1659,7 @@ def _simulate_scored_portfolio_from_normalized(
         for event in daily_events:
             latest_prices[str(event["symbol"])] = float(event["price"])
 
+        entry_available_cash = cash
         for event in sorted(daily_events, key=lambda item: (item["stock_pool_order"], item["symbol"])):
             if event["intent_type"] == "enter":
                 continue
@@ -1642,6 +1668,8 @@ def _simulate_scored_portfolio_from_normalized(
                 continue
             proceeds = position["quantity"] * float(event["price"])
             cash += proceeds
+            if allow_same_day_exit_cash_reuse:
+                entry_available_cash += proceeds
             cash_movements.append(
                 {
                     "trade_date": trade_date,
@@ -1669,9 +1697,16 @@ def _simulate_scored_portfolio_from_normalized(
         funnel["raw_entry_candidates"] += len(entry_candidates)
         daily_new_count = 0
         daily_industry_counts: dict[str, int] = {}
+        held_industries = {str(position.get("industry")) for position in positions.values() if position.get("industry")}
         ranked_candidates = sorted(
             entry_candidates,
-            key=lambda event: _candidate_order_key(event, scores_by_key, unscored_baseline=unscored_baseline),
+            key=lambda event: _candidate_order_key(
+                event,
+                scores_by_key,
+                unscored_baseline=unscored_baseline,
+                held_industries=held_industries,
+                prefer_unheld_industries=prefer_unheld_industries,
+            ),
         )
         for event in ranked_candidates:
             scored_row = scores_by_key[(str(event["symbol"]), str(event["trade_date"]))]
@@ -1723,11 +1758,12 @@ def _simulate_scored_portfolio_from_normalized(
                 continue
             cost = quantity * float(event["price"])
             reserve_cash = total_value * cash_reserve_ratio
-            if cash - cost < reserve_cash:
+            if entry_available_cash - cost < reserve_cash:
                 _block_entry(event, scored_row, "INSUFFICIENT_CASH", blocked_entries, funnel, "cash_blocked_candidates")
                 continue
 
             cash -= cost
+            entry_available_cash -= cost
             total_buy_value += cost
             cash_movements.append(
                 {
@@ -1767,6 +1803,10 @@ def _simulate_scored_portfolio_from_normalized(
         "schema": "attbacktrader.scored_portfolio_simulation.v1",
         "unscored_baseline": unscored_baseline,
         "portfolio_controls": _jsonable(dict(portfolio_controls)),
+        "execution_policy": {
+            "allow_same_day_exit_cash_reuse": allow_same_day_exit_cash_reuse,
+            "prefer_unheld_industries": prefer_unheld_industries,
+        },
         "score_gate": _jsonable(scored_gate),
         "final_cash": cash,
         "final_value": final_value,
@@ -2402,6 +2442,12 @@ def _optional_positive_int(value: Any) -> int | None:
     return int(number)
 
 
+def _optional_bool(value: Any, key: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{key} must be a boolean")
+
+
 def _empty_funnel() -> dict[str, int]:
     return {
         "raw_entry_candidates": 0,
@@ -2423,11 +2469,16 @@ def _candidate_order_key(
     scores_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
     *,
     unscored_baseline: bool,
+    held_industries: set[str],
+    prefer_unheld_industries: bool,
 ) -> tuple[Any, ...]:
     scored_row = scores_by_key[(str(event["symbol"]), str(event["trade_date"]))]
+    industry_key = 0
+    if prefer_unheld_industries and event.get("industry"):
+        industry_key = 1 if str(event.get("industry")) in held_industries else 0
     if unscored_baseline:
-        return (int(event.get("stock_pool_order") or 0), str(event["symbol"]))
-    return (-float(scored_row["score"]), int(event.get("stock_pool_order") or 0), str(event["symbol"]))
+        return (industry_key, int(event.get("stock_pool_order") or 0), str(event["symbol"]))
+    return (industry_key, -float(scored_row["score"]), int(event.get("stock_pool_order") or 0), str(event["symbol"]))
 
 
 def _block_entry(

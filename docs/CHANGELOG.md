@@ -13,6 +13,15 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-27 — 固定分数组合回测支持保守同日资金口径
+
+- 需求：第一版固定 score>=5 的 Scored Portfolio Backtest 先补保守执行顺序，避免同日卖出资金被立刻用于同日新买。
+- 改动：
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：score gate 支持 `minimum_score` 固定绝对分数；组合模拟器新增 `allow_same_day_exit_cash_reuse` 组合控制，设为 `false` 时卖出资金当天入账但不参与当天新买现金检查；新增 `prefer_unheld_industries` 排序控制，优先选择当前持仓尚未覆盖的行业。
+  - `tests/test_scored_entry_allocation_tuning.py`：覆盖固定绝对分数门槛、保守口径下同日卖出资金不能买入新候选，以及当前未持仓行业优先排序。
+  - `CONTEXT.md`、`docs/FEATURES.md`：同步固定参数组合验证与保守同日资金口径说明。
+- 影响：默认仍保留旧模拟器行为；只有显式设置 `allow_same_day_exit_cash_reuse=false` 或 `prefer_unheld_industries=true` 的固定规则验证会使用新口径。
+
 ## 2026-06-26 — 贝叶斯入场分数目标函数加入训练年覆盖惩罚
 
 - 需求：Slim 框架多 seed 验证出现部分测试年份 0 笔或极少笔，继续改目标函数，避免贝叶斯学出过严择时参数。

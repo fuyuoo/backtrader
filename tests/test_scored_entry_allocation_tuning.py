@@ -387,6 +387,40 @@ def test_score_gate_statistics_are_fitted_from_training_window_and_reused_for_te
         )
 
 
+def test_absolute_score_gate_uses_fixed_threshold_without_training_distribution() -> None:
+    scorer_config = {"factor_weights": {"rank_bucket": {"weak": 4.0, "strong": 6.0}}}
+    events = [
+        _rank_event("000001.SZ", rank_bucket="weak", industry="bank", stock_pool_order=1),
+        _rank_event("000002.SZ", rank_bucket="strong", industry="tech", stock_pool_order=2),
+    ]
+
+    scored = score_entry_candidates(
+        events,
+        scorer_config=scorer_config,
+        training_events=[],
+        score_gate={"minimum_score": 5.0},
+    )
+
+    assert scored["score_gate"] == {
+        "minimum_score": 5.0,
+        "threshold": 5.0,
+        "derived_from": "fixed_absolute",
+        "source_event_count": 0,
+        "source_window": "fixed_parameter",
+    }
+    assert {row["symbol"]: row["score_gate_passed"] for row in scored["rows"]} == {
+        "000001.SZ": False,
+        "000002.SZ": True,
+    }
+
+    with pytest.raises(ValueError, match="minimum_score cannot be combined"):
+        fit_training_score_gate_statistics(
+            events,
+            scorer_config=scorer_config,
+            score_gate={"minimum_score": 5.0, "minimum_score_quantile": 0.5},
+        )
+
+
 def test_scored_portfolio_simulation_ranks_candidates_and_records_blockage_funnel() -> None:
     events = [
         _rank_event("000001.SZ", rank_bucket="a", industry="bank", stock_pool_order=1),
@@ -423,6 +457,75 @@ def test_scored_portfolio_simulation_ranks_candidates_and_records_blockage_funne
     assert result["blocked_entries"][0]["symbol"] == "000002.SZ"
     assert result["blocked_entries"][0]["blocked_by"] == "INDUSTRY_MAX_NEW_PER_DAY"
     assert result["equity_curve"][-1]["holding_count"] == 2
+
+
+def test_scored_portfolio_can_block_same_day_exit_cash_reuse() -> None:
+    events = [
+        _rank_event("000001.SZ", rank_bucket="top", industry="bank", stock_pool_order=1, trade_date="2020-01-02"),
+        _exit_event("000001.SZ", trade_date="2020-01-03", price=10.0, industry="bank"),
+        _rank_event("000002.SZ", rank_bucket="top", industry="tech", stock_pool_order=2, trade_date="2020-01-03"),
+    ]
+    controls = {
+        "initial_cash": 10_000,
+        "max_holding_count": 1,
+        "cash_reserve_ratio": 0.0,
+        "board_lot_size": 100,
+    }
+
+    legacy_result = simulate_scored_portfolio(
+        events,
+        scorer_config={"factor_weights": {"rank_bucket": {"top": 5.0}}},
+        training_events=[],
+        score_gate={"minimum_score": 5.0},
+        portfolio_controls=controls,
+    )
+    conservative_result = simulate_scored_portfolio(
+        events,
+        scorer_config={"factor_weights": {"rank_bucket": {"top": 5.0}}},
+        training_events=[],
+        score_gate={"minimum_score": 5.0},
+        portfolio_controls={**controls, "allow_same_day_exit_cash_reuse": False},
+    )
+
+    assert [entry["symbol"] for entry in legacy_result["executed_entries"]] == ["000001.SZ", "000002.SZ"]
+    assert [entry["symbol"] for entry in conservative_result["executed_entries"]] == ["000001.SZ"]
+    assert conservative_result["blocked_entries"][-1]["symbol"] == "000002.SZ"
+    assert conservative_result["blocked_entries"][-1]["blocked_by"] == "INSUFFICIENT_CASH"
+    assert conservative_result["execution_policy"]["allow_same_day_exit_cash_reuse"] is False
+
+
+def test_scored_portfolio_can_prefer_currently_unheld_industries() -> None:
+    events = [
+        _rank_event("000001.SZ", rank_bucket="mid", industry="bank", stock_pool_order=1, trade_date="2020-01-02"),
+        _rank_event("000002.SZ", rank_bucket="top", industry="bank", stock_pool_order=2, trade_date="2020-01-03"),
+        _rank_event("000003.SZ", rank_bucket="mid", industry="tech", stock_pool_order=3, trade_date="2020-01-03"),
+    ]
+    controls = {
+        "initial_cash": 30_000,
+        "max_holding_count": 3,
+        "max_new_positions_per_day": 1,
+        "cash_reserve_ratio": 0.0,
+        "board_lot_size": 100,
+    }
+
+    score_first = simulate_scored_portfolio(
+        events,
+        scorer_config={"factor_weights": {"rank_bucket": {"top": 9.0, "mid": 5.0}}},
+        training_events=[],
+        score_gate={"minimum_score": 5.0},
+        portfolio_controls=controls,
+    )
+    unheld_industry_first = simulate_scored_portfolio(
+        events,
+        scorer_config={"factor_weights": {"rank_bucket": {"top": 9.0, "mid": 5.0}}},
+        training_events=[],
+        score_gate={"minimum_score": 5.0},
+        portfolio_controls={**controls, "prefer_unheld_industries": True},
+    )
+
+    assert [entry["symbol"] for entry in score_first["executed_entries"]] == ["000001.SZ", "000002.SZ"]
+    assert [entry["symbol"] for entry in unheld_industry_first["executed_entries"]] == ["000001.SZ", "000003.SZ"]
+    assert unheld_industry_first["execution_policy"]["prefer_unheld_industries"] is True
 
 
 def test_fixed_parameter_scored_portfolio_smoke_run_consumes_decision_cache(tmp_path: Path) -> None:

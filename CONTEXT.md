@@ -204,6 +204,18 @@ _Avoid_: Multi-stock demo
 A portfolio backtest that scores eligible same-day entry candidates using pre-entry evidence, orders them before sizing, and lets ranked candidates compete for cash and holding capacity.
 _Avoid_: Trade-sample backtest, offline trade deletion, post-trade factor ranking
 
+**Fixed-Parameter Scored Portfolio Backtest**:
+A scored portfolio backtest that freezes the entry scorecard, score gate, and portfolio controls before the run, then validates the resulting portfolio behavior without retuning weights or thresholds on the evaluated window.
+_Avoid_: Walk-forward parameter tuning, completed-trade score screening, live rule promotion
+
+**Conservative Same-Day Cash Rule**:
+A scored portfolio execution policy where proceeds from exit signals on a decision date are recorded in cash but cannot fund new entries selected on that same decision date.
+_Avoid_: Same-day sell-proceeds reuse, optimistic cash recycling, hidden intraday ordering assumption
+
+**Unheld Industry Preference**:
+A scored portfolio ranking policy that prioritizes entry candidates from industries not currently represented in the portfolio before applying the usual score and tie-break ordering.
+_Avoid_: Industry hard gate, sector rotation signal, post-trade industry attribution
+
 **Scored Portfolio Objective**:
 An evaluation lens for comparing scored portfolio backtest variants using portfolio return, drawdown risk, benchmark excess return, risk-adjusted return, trade quality, turnover, exposure, concentration, and cross-period stability together.
 _Avoid_: Total-return-only ranking, trade-sample factor score, in-sample leaderboard
