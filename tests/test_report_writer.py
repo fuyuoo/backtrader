@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pandas as pd
+
 from attbacktrader.config import RunPlan
 from attbacktrader.data import DailyBar
 from attbacktrader.data.snapshots import read_daily_bars_csv
@@ -57,9 +59,9 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     run_plan_payload = _read_json(artifacts.run_plan_path)
     result_payload = _read_json(artifacts.result_path)
     report_payload = _read_json(artifacts.report_path)
-    trades_payload = _read_json(artifacts.trades_path)
-    signal_audit_payload = _read_json(artifacts.signal_audit_path)
-    sizing_audit_payload = _read_json(artifacts.sizing_audit_path)
+    trades_payload = pd.read_parquet(artifacts.trades_path)
+    signal_audit_payload = pd.read_parquet(artifacts.signal_audit_path)
+    sizing_audit_payload = pd.read_parquet(artifacts.sizing_audit_path)
     result_diagnostics_payload = _read_json(artifacts.result_diagnostics_path)
     trade_lifecycle_payload = _read_json(artifacts.trade_lifecycle_path)
     trade_attribution_payload = _read_json(artifacts.trade_attribution_path)
@@ -68,9 +70,9 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     strategy_environment_profile_payload = _read_json(artifacts.strategy_environment_profile_path)
     post_exit_analysis_payload = _read_json(artifacts.post_exit_analysis_path)
     evidence_validation_payload = _read_json(artifacts.evidence_validation_path)
-    equity_curve_payload = _read_json(artifacts.equity_curve_path)
-    positions_payload = _read_json(artifacts.positions_path)
-    execution_audit_payload = _read_json(artifacts.execution_audit_path)
+    equity_curve_payload = pd.read_parquet(artifacts.equity_curve_path)
+    positions_payload = pd.read_parquet(artifacts.positions_path)
+    execution_audit_payload = pd.read_parquet(artifacts.execution_audit_path)
     snapshots_payload = _read_json(artifacts.snapshots_path)
     data_preflight_payload = json.loads(artifacts.data_preflight_path.read_text(encoding="utf-8"))
     stock_pool_filter_payload = json.loads(artifacts.stock_pool_filter_path.read_text(encoding="utf-8"))
@@ -97,25 +99,29 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert "## 收益与风险" in report_chinese_markdown
     assert "## 交易质量" in report_chinese_markdown
     assert "## 执行成本" in report_chinese_markdown
-    assert trades_payload["schema"] == "attbacktrader.trades.v2"
-    assert trades_payload["run_id"] == "writer-test"
-    assert trades_payload["run_config"]["sizing"]["max_holding_count"] == 5
-    assert trades_payload["run_config"]["sizing"]["per_symbol_max_value"] == 200000
-    assert trades_payload["run_config"]["sizing"]["target_buy_value"] == 66000
-    assert len(trades_payload["closed_trades"]) == 2
-    assert {trade["trade_index"] for trade in trades_payload["closed_trades"]} == {1, 2}
+    assert artifacts.trades_path.name == "trades.parquet"
+    assert artifacts.signal_audit_path.name == "signal_audit.parquet"
+    assert artifacts.sizing_audit_path.name == "sizing_audit.parquet"
+    assert artifacts.equity_curve_path.name == "equity_curve.parquet"
+    assert artifacts.positions_path.name == "positions.parquet"
+    assert artifacts.execution_audit_path.name == "execution_audit.parquet"
+    closed_trades = trades_payload[trades_payload["record_type"] == "closed_trade"]
+    assert set(trades_payload["run_id"]) == {"writer-test"}
+    assert len(closed_trades) == 2
+    assert {int(trade_index) for trade_index in closed_trades["trade_index"]} == {1, 2}
     assert result_payload["run_config"]["sizing"]["max_holding_count"] == 5
+    assert result_payload["run_config"]["sizing"]["per_symbol_max_value"] == 200000
+    assert result_payload["run_config"]["sizing"]["target_buy_value"] == 66000
     assert run_plan_payload["output"]["artifact_detail"] == "compact"
-    assert signal_audit_payload["schema"] == "attbacktrader.compact_signal_audit.v1"
-    assert signal_audit_payload["raw_signal_audit_persisted"] is False
-    assert signal_audit_payload["total_count"] == len(result.signal_audit)
-    assert signal_audit_payload["samples"][0]["method_name"] == "kdj_oversold_entry"
-    assert "reason_code" in signal_audit_payload["samples"][0]
-    assert "signal_values" in signal_audit_payload["samples"][0]
-    assert "checks" in signal_audit_payload["samples"][0]["signal_values"]
-    assert "attribution" in signal_audit_payload["samples"][0]["signal_values"]
-    assert sizing_audit_payload
-    assert sizing_audit_payload[0]["sizing"]["method_name"] == "equal_weight"
+    assert len(signal_audit_payload) == len(result.signal_audit)
+    first_signal = signal_audit_payload.iloc[0].to_dict()
+    first_signal_values = json.loads(first_signal["signal_values"])
+    assert first_signal["method_name"] == "kdj_oversold_entry"
+    assert "reason_code" in first_signal
+    assert "checks" in first_signal_values
+    assert "attribution" in first_signal_values
+    assert not sizing_audit_payload.empty
+    assert json.loads(sizing_audit_payload.iloc[0]["sizing"])["method_name"] == "equal_weight"
     assert result_diagnostics_payload["symbols"][0]["symbol"] == "000001.SZ"
     assert result_diagnostics_payload["symbols"][0]["closed_trade_count"] == 2
     assert "portfolio_entry_contrasts" in result_diagnostics_payload
@@ -135,8 +141,8 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert "add_on_signal_count" in result_diagnostics_payload["symbols"][0]
     assert trade_lifecycle_payload["trade_count"] == 2
     closed_trades_by_index = {
-        trade["trade_index"]: trade
-        for trade in trades_payload["closed_trades"]
+        int(trade["trade_index"]): trade
+        for trade in closed_trades.to_dict(orient="records")
     }
     for lifecycle in trade_lifecycle_payload["lifecycles"]:
         closed_trade = closed_trades_by_index[lifecycle["trade_index"]]
@@ -196,9 +202,9 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert evidence_validation_payload["counts"]["post_exit_threshold_summary_count"] > 0
     assert evidence_validation_payload["counts"]["trade_review_trade_count"] == 2
     assert "trade_review_add_on_entry_count" in evidence_validation_payload["counts"]
-    assert equity_curve_payload[-1]["total_value"] == result.final_value
+    assert equity_curve_payload.iloc[-1]["total_value"] == result.final_value
     assert len(positions_payload) == len(result.position_snapshots)
-    assert any(event["event_type"] == "completed" for event in execution_audit_payload)
+    assert any(execution_audit_payload["event_type"] == "completed")
     assert snapshots_payload["data_windows"]["items"]
     assert snapshots_payload["data_windows"]["warmup_incomplete_count"] >= 0
     assert snapshots_payload["symbols"][0]["symbol"] == "000001.SZ"
@@ -237,7 +243,7 @@ def test_write_run_artifacts_can_persist_full_raw_audit_for_debugging(tmp_path: 
     )
 
     result_payload = _read_json(artifacts.result_path)
-    signal_audit_payload = _read_json(artifacts.signal_audit_path)
+    signal_audit_payload = pd.read_parquet(artifacts.signal_audit_path)
     stage_statuses = [
         (event["artifact"], event["status"])
         for event in progress_events
@@ -249,8 +255,8 @@ def test_write_run_artifacts_can_persist_full_raw_audit_for_debugging(tmp_path: 
     assert result_payload["run_id"] == "writer-test"
     assert result_payload["counts"]["signal_intent_count"] == len(result.signal_audit)
     assert "signal_audit" not in result_payload
-    assert isinstance(signal_audit_payload, list)
-    assert signal_audit_payload[0]["method_name"] == "kdj_oversold_entry"
+    assert len(signal_audit_payload) == len(result.signal_audit)
+    assert signal_audit_payload.iloc[0]["method_name"] == "kdj_oversold_entry"
     assert ("result", "started") in stage_statuses
     assert ("result", "completed") in stage_statuses
     assert ("signal_audit", "started") in stage_statuses

@@ -1204,6 +1204,8 @@ def test_scored_entry_allocation_tuning_cli_builds_decision_event_table_from_run
             str(progress_path),
             "--progress-interval-rows",
             "1",
+            "--decision-event-storage",
+            "json",
         ]
     )
     stdout = json.loads(capsys.readouterr().out)
@@ -1224,6 +1226,144 @@ def test_scored_entry_allocation_tuning_cli_builds_decision_event_table_from_run
     assert progress_events[-1]["stage"] == "decision_event_table"
     assert progress_events[-1]["status"] == "completed"
     assert progress_events[-1]["event_count"] == 2
+
+
+def test_scored_entry_allocation_tuning_cli_builds_decision_event_table_from_parquet_signal_audit(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    pd = pytest.importorskip("pandas")
+    stock_pool_path = tmp_path / "stock_pool.csv"
+    stock_pool_path.write_text("ts_code,name\n000001.SZ,one\n", encoding="utf-8")
+    run_plan_path = tmp_path / "run_plan.json"
+    run_plan_path.write_text(
+        json.dumps(
+            {
+                "run": {"id": "baoma-source", "from_date": "2020-01-01", "to_date": "2020-12-31"},
+                "data": {
+                    "snapshot_root": "data/snapshots",
+                    "provider": "tushare",
+                    "price_adjustment": "qfq",
+                    "stock_pool_file": str(stock_pool_path),
+                },
+                "strategy": {"template": "trend_template_v1", "entry_method": "baoma_entry"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    signal_audit_path = tmp_path / "signal_audit.parquet"
+    pd.DataFrame(
+        [
+            _signal_audit_row(
+                "enter",
+                "000001.SZ",
+                "2020-01-03",
+                price=10.5,
+                industry="801010.SI",
+                evidence={"symbol.ma.trend_state": "bullish"},
+            )
+        ]
+    ).assign(
+        signal_values=lambda frame: frame["signal_values"].map(
+            lambda value: json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        )
+    ).to_parquet(signal_audit_path, index=False)
+
+    exit_code = tuning_cli.main(
+        [
+            "--build-decision-event-table",
+            "--signal-audit",
+            str(signal_audit_path),
+            "--run-plan",
+            str(run_plan_path),
+            "--output-dir",
+            str(tmp_path / "decision-table"),
+        ]
+    )
+    stdout = json.loads(capsys.readouterr().out)
+    parquet_path = Path(stdout["artifacts"]["decision_events_parquet"])
+    loaded_table = tuning_cli._load_decision_event_table(
+        str(tmp_path / "decision-table" / "decision_event_table.json"),
+        "--decision-event-table",
+    )
+
+    assert exit_code == 0
+    assert stdout["decision_event_table"]["event_count"] == 1
+    assert parquet_path.exists()
+    assert loaded_table["events"][0]["evidence"]["symbol.ma.trend_state"] == "bullish"
+
+
+def test_scored_entry_allocation_tuning_cli_can_write_decision_events_parquet(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    pd = pytest.importorskip("pandas")
+    stock_pool_path = tmp_path / "stock_pool.csv"
+    stock_pool_path.write_text("ts_code,name\n000001.SZ,one\n", encoding="utf-8")
+    run_plan_path = tmp_path / "run_plan.json"
+    run_plan_path.write_text(
+        json.dumps(
+            {
+                "run": {"id": "baoma-source", "from_date": "2020-01-01", "to_date": "2020-12-31"},
+                "data": {
+                    "snapshot_root": "data/snapshots",
+                    "provider": "tushare",
+                    "price_adjustment": "qfq",
+                    "stock_pool_file": str(stock_pool_path),
+                },
+                "strategy": {"template": "trend_template_v1", "entry_method": "baoma_entry"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    signal_audit_path = tmp_path / "signal_audit.json"
+    signal_audit_path.write_text(
+        json.dumps(
+            [
+                _signal_audit_row(
+                    "enter",
+                    "000001.SZ",
+                    "2020-01-03",
+                    price=10.5,
+                    industry="801010.SI",
+                    evidence={"symbol.ma.trend_state": "bullish"},
+                )
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = tuning_cli.main(
+        [
+            "--build-decision-event-table",
+            "--signal-audit",
+            str(signal_audit_path),
+            "--run-plan",
+            str(run_plan_path),
+            "--output-dir",
+            str(tmp_path / "decision-table"),
+            "--decision-event-storage",
+            "parquet",
+        ]
+    )
+    stdout = json.loads(capsys.readouterr().out)
+    metadata = stdout["decision_event_table"]
+    parquet_path = Path(stdout["artifacts"]["decision_events_parquet"])
+    frame = pd.read_parquet(parquet_path)
+
+    assert exit_code == 0
+    assert metadata["event_count"] == 1
+    assert "events" not in metadata
+    assert metadata["event_storage"]["format"] == "parquet"
+    assert frame.loc[0, "symbol"] == "000001.SZ"
+    assert json.loads(frame.loc[0, "evidence_json"])["symbol.ma.trend_state"] == "bullish"
+    assert tuning_cli._load_decision_event_table(
+        str(tmp_path / "decision-table" / "decision_event_table.json"),
+        "--decision-event-table",
+    )["events"][0]["evidence"]["symbol.ma.trend_state"] == "bullish"
 
 
 def test_scored_entry_allocation_tuning_streams_pretty_json_array(tmp_path: Path) -> None:

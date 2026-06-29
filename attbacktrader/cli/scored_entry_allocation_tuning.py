@@ -65,7 +65,7 @@ def _build_decision_event_table(args: argparse.Namespace, *, output_dir: Path) -
                 "signal_audit": str(signal_audit_path),
             }
         )
-    signal_audit_rows = _iter_json_array_items(signal_audit_path)
+    signal_audit_rows = _iter_signal_audit_items(signal_audit_path)
     run_plan = _load_json_mapping(str(run_plan_path), "--run-plan", context="--build-decision-event-table")
     stock_pool_path = _stock_pool_file_from_args(args, run_plan=run_plan, run_plan_path=run_plan_path)
     stock_pool_order_by_symbol = _read_stock_pool_order_by_symbol(stock_pool_path)
@@ -83,16 +83,19 @@ def _build_decision_event_table(args: argparse.Namespace, *, output_dir: Path) -
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    decision_table_path = output_dir / "decision_event_table.json"
     if progress is not None:
         progress(
             {
                 "stage": "write_decision_event_table",
                 "status": "started",
                 "event_count": table["event_count"],
+                "storage": args.decision_event_storage,
             }
         )
-    decision_table_path.write_text(json.dumps(to_jsonable(table), ensure_ascii=False, indent=2), encoding="utf-8")
+    if args.decision_event_storage == "json":
+        decision_table_path, payload_table, artifacts = _write_decision_event_table_json(table, output_dir=output_dir)
+    else:
+        decision_table_path, payload_table, artifacts = _write_decision_event_table_parquet(table, output_dir=output_dir)
     if progress is not None:
         progress(
             {
@@ -100,6 +103,7 @@ def _build_decision_event_table(args: argparse.Namespace, *, output_dir: Path) -
                 "status": "completed",
                 "event_count": table["event_count"],
                 "path": str(decision_table_path),
+                "storage": args.decision_event_storage,
             }
         )
         progress(
@@ -108,14 +112,72 @@ def _build_decision_event_table(args: argparse.Namespace, *, output_dir: Path) -
                 "status": "completed",
                 "event_count": table["event_count"],
                 "path": str(decision_table_path),
+                "storage": args.decision_event_storage,
             }
         )
     payload = {
-        "decision_event_table": table,
-        "artifacts": {"decision_event_table_json": str(decision_table_path)},
+        "decision_event_table": payload_table,
+        "artifacts": artifacts,
     }
     print(json.dumps(to_jsonable(payload), ensure_ascii=False, indent=2))
     return 0
+
+
+def _write_decision_event_table_json(
+    table: Mapping[str, Any],
+    *,
+    output_dir: Path,
+) -> tuple[Path, dict[str, Any], dict[str, str]]:
+    decision_table_path = output_dir / "decision_event_table.json"
+    payload_table = to_jsonable(dict(table))
+    decision_table_path.write_text(json.dumps(payload_table, ensure_ascii=False, indent=2), encoding="utf-8")
+    return decision_table_path, payload_table, {"decision_event_table_json": str(decision_table_path)}
+
+
+def _write_decision_event_table_parquet(
+    table: Mapping[str, Any],
+    *,
+    output_dir: Path,
+) -> tuple[Path, dict[str, Any], dict[str, str]]:
+    import pandas as pd
+
+    metadata_path = output_dir / "decision_event_table.json"
+    events_path = output_dir / "decision_events.parquet"
+    events = list(table.get("events") or [])
+    rows = []
+    for event in events:
+        item = dict(event)
+        evidence = item.pop("evidence", {})
+        item["evidence_json"] = json.dumps(to_jsonable(evidence), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        rows.append(item)
+    frame = pd.DataFrame(
+        rows,
+        columns=[
+            "symbol",
+            "trade_date",
+            "intent_type",
+            "price",
+            "industry",
+            "stock_pool_order",
+            "tradable",
+            "evidence_json",
+        ],
+    )
+    frame.to_parquet(events_path, index=False, compression="zstd")
+    metadata = dict(table)
+    metadata.pop("events", None)
+    metadata["event_storage"] = {
+        "format": "parquet",
+        "path": events_path.name,
+        "compression": "zstd",
+        "evidence_column": "evidence_json",
+    }
+    payload_table = to_jsonable(metadata)
+    metadata_path.write_text(json.dumps(payload_table, ensure_ascii=False, indent=2), encoding="utf-8")
+    return metadata_path, payload_table, {
+        "decision_event_table_json": str(metadata_path),
+        "decision_events_parquet": str(events_path),
+    }
 
 
 def _run_full_study(args: argparse.Namespace, *, contract: dict[str, Any], output_dir: Path) -> int:
@@ -138,7 +200,7 @@ def _run_full_study(args: argparse.Namespace, *, contract: dict[str, Any], outpu
                 "path": args.decision_event_table,
             }
         )
-    decision_event_table = _load_json_mapping(args.decision_event_table, "--decision-event-table")
+    decision_event_table = _load_decision_event_table(args.decision_event_table, "--decision-event-table")
     if progress is not None:
         progress(
             {
@@ -263,6 +325,73 @@ def _load_json_array_of_objects(path_value: str | None, option_name: str) -> lis
 
 def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_decision_event_table(path_value: str | None, option_name: str) -> dict[str, Any]:
+    path = _required_path(path_value, option_name)
+    payload = _load_json_mapping(str(path), option_name)
+    event_storage = payload.get("event_storage")
+    if isinstance(event_storage, Mapping):
+        if event_storage.get("format") != "parquet":
+            raise ValueError(f"{option_name} has unsupported event_storage format: {event_storage.get('format')}")
+        parquet_path = _resolve_artifact_path(path, event_storage.get("path"), "event_storage.path")
+        payload["events"] = list(_iter_decision_event_parquet_items(parquet_path))
+    if not isinstance(payload.get("events"), list):
+        raise ValueError(f"{option_name} must contain events or Parquet event_storage: {path}")
+    return payload
+
+
+def _iter_signal_audit_items(path: Path) -> Iterator[Any]:
+    if path.suffix.lower() == ".parquet":
+        return _iter_parquet_mapping_items(path, nested_json_columns={"signal_values"})
+    return _iter_json_array_items(path)
+
+
+def _iter_decision_event_parquet_items(path: Path) -> Iterator[dict[str, Any]]:
+    for row in _iter_parquet_mapping_items(path, nested_json_columns={"evidence_json"}):
+        item = dict(row)
+        evidence = item.pop("evidence_json", None)
+        item["evidence"] = evidence if isinstance(evidence, Mapping) else {}
+        yield item
+
+
+def _iter_parquet_mapping_items(path: Path, *, nested_json_columns: set[str]) -> Iterator[dict[str, Any]]:
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise ImportError("Reading Parquet artifacts requires pyarrow to be installed.") from exc
+
+    if not path.exists():
+        raise ValueError(f"Parquet artifact does not exist: {path}")
+    parquet_file = pq.ParquetFile(path)
+    for batch in parquet_file.iter_batches(batch_size=100_000):
+        for row in batch.to_pylist():
+            yield {
+                str(key): _decode_parquet_cell(str(key), value, nested_json_columns=nested_json_columns)
+                for key, value in row.items()
+            }
+
+
+def _decode_parquet_cell(key: str, value: Any, *, nested_json_columns: set[str]) -> Any:
+    if value is None:
+        return None
+    if key not in nested_json_columns:
+        return value
+    if not isinstance(value, str) or not value:
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON payload in Parquet column {key}") from exc
+
+
+def _resolve_artifact_path(metadata_path: Path, value: Any, field_name: str) -> Path:
+    if not value:
+        raise ValueError(f"{field_name} is required for Parquet-backed artifact metadata: {metadata_path}")
+    path = Path(str(value))
+    if path.is_absolute():
+        return path
+    return metadata_path.parent / path
 
 
 def _iter_json_array_items(path: Path) -> Iterator[Any]:
@@ -467,6 +596,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--stock-pool-file")
     parser.add_argument("--progress-log")
     parser.add_argument("--progress-interval-rows", type=int, default=100_000)
+    parser.add_argument("--decision-event-storage", choices=("json", "parquet"), default="parquet")
     parser.add_argument("--run-full-study", action="store_true")
     parser.add_argument("--progress-interval-trials", type=int, default=10)
     parser.add_argument("--decision-event-table")

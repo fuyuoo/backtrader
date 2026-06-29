@@ -19,11 +19,11 @@ dry-run 会写出：
 - `scored_entry_allocation_tuning_contract.json`
 - `scored_entry_allocation_tuning_contract.md`
 
-已有 full `signal_audit.json`、对应 `run_plan.json` 和股票池文件时，可先构建 Strategy Decision Event Table：
+已有 full `signal_audit.parquet` 或历史 `signal_audit.json`、对应 `run_plan.json` 和股票池文件时，可先构建 Strategy Decision Event Table：
 
 ```bash
 att-scored-entry-allocation-tuning --build-decision-event-table \
-  --signal-audit reports/baoma-v1-full-source/signal_audit.json \
+  --signal-audit reports/baoma-v1-full-source/signal_audit.parquet \
   --run-plan reports/baoma-v1-full-source/run_plan.json \
   --progress-log reports/scored-entry-allocation-tuning/decision-event-table-progress.ndjson \
   --progress-interval-rows 100000 \
@@ -134,7 +134,7 @@ att-entry-score-bayesian-walk-forward \
 - 生成 tuning 合同：列出 2015-2019→2020 至 2019-2023→2024 的 5 个 walk-forward fold。
 - 声明 Stage A / Stage B 默认 trial budget、score gate、组合约束和证据用途。
 - Strategy Decision Event Table：可从策略输出的 `TradeIntent` 生成，只缓存 actionable decision intents 和 decision-time evidence；禁止缓存 completed trades、cash、positions、equity curve、trial score、selected buys。
-- Decision Event Table artifact builder：可从 full `signal_audit.json`、`run_plan.json` 和股票池顺序生成 `decision_event_table.json`；读取 full signal audit 时按顶层数组流式扫描，并可用 `--progress-log` / `--progress-interval-rows` 输出 `scanned_rows`、`actionable_rows` 和 `event_count`；compact signal audit 会明确失败，因为它只保留样本，不能还原完整候选漏斗。
+- Decision Event Table artifact builder：可从 full `signal_audit.parquet` 或历史 `signal_audit.json`、`run_plan.json` 和股票池顺序生成 `decision_event_table.json`；读取 JSON full signal audit 时按顶层数组流式扫描，读取 Parquet 时按 batch 扫描，并可用 `--progress-log` / `--progress-interval-rows` 输出 `scanned_rows`、`actionable_rows` 和 `event_count`；默认将事件明细写入 `decision_events.parquet`、元数据保留在小 JSON 中；compact signal audit 会明确失败，因为它只保留样本，不能还原完整候选漏斗。
 - Signal cache identity：包含数据快照、股票池、策略信号参数、因子字段集、日期区间和事件 schema；明确排除 scorer weights、trial id、score gate 与 score thresholds。
 - Outcome-Calibrated Entry Score：支持单因子 bucket 权重、负向软惩罚、双因子 interaction 权重、固定绝对 `minimum_score`、训练窗口 z-score 与 quantile score gate；Stage A 默认 `minimum_score_z=0.0` / `minimum_score_quantile=0.50`，Stage B 默认 `minimum_score_z=0.75` / `minimum_score_quantile=0.70`；阈值统计由训练窗拟合并复用于测试窗，测试窗候选不能参与阈值拟合；未声明为 bucket 的原始数值字段不直接参与打分。
 - Scored Portfolio Simulation：每个 trial 重新计算分数、排名、现金、持仓、equity curve、交易指标和 scored entry funnel；支持持仓上限、每日新开仓上限、行业每日新开仓上限、现金保留、board-lot、tradability 等约束。候选默认按分数降序排序，同分按股票池顺序和代码兜底；行业约束是同日新开仓阻塞条件，不单独先挑行业。可用 `prefer_unheld_industries=true` 优先选择当前持仓尚未覆盖的行业，再应用分数和 tie-break；可用 `allow_same_day_exit_cash_reuse=false` 采用保守同日资金口径：卖出资金当天入账，但不参与当天新买现金检查。
@@ -150,7 +150,7 @@ att-entry-score-bayesian-walk-forward \
 - 固定因子打分一年验证：`att-entry-score-trade-sample-backtest` 读取已落盘 `environment_fit.trade_contributions`，用固定因子权重和 interaction 权重对单年 completed trades 计算入场分数，按最低入场分数输出达标/未达标样本、阈值扫描、月度表现和代表交易；该结果是无持仓上限 trade-sample score gate，不包含未成交候选和现金竞争。
 - 贝叶斯因子分数 Walk-Forward：`att-entry-score-bayesian-walk-forward` 读取已落盘 `environment_fit.trade_contributions`，用 Optuna/TPE 在每个训练窗优化因子 bucket 权重、interaction 权重和最低入场分，并把最佳参数冻结后评估下一年 OOS completed-trade 样本；报告输出 OOS 汇总、逐 fold 结果、最佳参数稳定性和代表交易。该能力用于判断权重组合是否具备滚动样本外稳定性，不替代真实组合层 Scored Portfolio Backtest。
 - RunPlan 长任务进度日志：`att-run-plan --progress-log reports/.../run-progress.ndjson --progress-interval-days 25` 可把 CLI / runner / data preflight / prepared data / entry attribution context / Baoma engine 阶段写入 NDJSON；适合真实 full source RunPlan 长跑时持续观察 preflight 股票数、prepared data 股票数、entry attribution evidence 构建、Baoma rows 构建、处理交易日、股票槽位、intent、closed trades 和 open holdings 变化。
-- Full artifact 写盘：`artifact_detail=full` 仍会把完整信号写入 `signal_audit.json`；`result.json` 保持 compact manifest，避免把大型 `signal_audit` 在 result 中重复序列化，并通过 progress log 标记每个 JSON artifact 的 started/completed。
+- Full artifact 写盘：`artifact_detail=full` 会把完整信号和交易/权益/持仓/执行/仓位审计等大表写入 Parquet；`run_plan.json`、`result.json`、报告和索引类小文件继续保留 JSON；`result.json` 保持 compact manifest，避免重复大型明细，并通过 progress log 标记 artifact 的 started/completed。
 - Stage A elite 试验用于缩小 Stage B 搜索空间，不作为最终组合收益证据。
 - Stage B 报告输出 Pareto frontier，并选择 `balanced` / `aggressive` / `defensive` 推荐参数，同时记录低交易数拒绝原因。
 - Simulation cache identity 包含 signal cache identity、fold id、parameter hash、portfolio-control hash 和 simulator version。

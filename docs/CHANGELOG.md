@@ -13,6 +13,15 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-28 — 大表 artifact 改为 Parquet 存储
+
+- 需求：十年全 A RunPlan 已在写 `signal_audit.json` 时触发 MemoryError，后续不需要人工手读大表，统一优先使用 Parquet 降低体积和写盘内存压力。
+- 改动：
+  - `attbacktrader/reports/writer.py`：`trades`、`signal_audit`、`sizing_audit`、`equity_curve`、`positions`、`execution_audit` 改写为 zstd Parquet；`run_plan.json`、`result.json`、报告和索引类小文件继续保留 JSON。
+  - `attbacktrader/cli/scored_entry_allocation_tuning.py`：`--signal-audit` 支持读取 `.parquet`；`--build-decision-event-table` 默认把事件明细写入 `decision_events.parquet`，`decision_event_table.json` 仅保留元数据和事件文件路径；`--run-full-study` 可从 Parquet 事件存储读回。
+  - `tests/test_report_writer.py`、`tests/test_scored_entry_allocation_tuning.py`：覆盖大表 Parquet 写出、Parquet signal audit 输入和 Parquet decision events 读回。
+- 影响：历史 JSON signal audit 仍可作为输入读取；新的真实长跑不再写巨型 `signal_audit.json`。
+
 ## 2026-06-27 — 全 A reference 支持按交易日分片输出
 
 - 需求：全量全 A 数据准备前，避免一次性写单个巨大 Parquet 或在内存里累积全部 reference rows，同时保留 rolling 指标和历史行业映射口径。

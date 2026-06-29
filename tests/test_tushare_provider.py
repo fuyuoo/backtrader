@@ -943,6 +943,28 @@ def test_tushare_tradability_frames_map_limit_and_suspend_state() -> None:
     assert statuses[2].is_suspended is True
 
 
+def test_tushare_tradability_frames_treat_non_positive_limits_as_missing() -> None:
+    statuses = _tradability_statuses_from_frames(
+        symbol="000001.SZ",
+        limit_frame=pd.DataFrame(
+            [
+                {"ts_code": "000001.SZ", "trade_date": "20240102", "up_limit": 0.0, "down_limit": 0.0},
+            ]
+        ),
+        close_frame=pd.DataFrame(
+            [
+                {"ts_code": "000001.SZ", "trade_date": "20240102", "close": 10.0},
+            ]
+        ),
+        suspend_frame=pd.DataFrame(),
+    )
+
+    assert statuses[0].up_limit is None
+    assert statuses[0].down_limit is None
+    assert statuses[0].is_limit_up is False
+    assert statuses[0].is_limit_down is False
+
+
 def test_tushare_rate_limit_config_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ATT_TUSHARE_REQUESTS_PER_MINUTE", "45")
     monkeypatch.setenv("ATT_TUSHARE_RETRY_ATTEMPTS", "7")

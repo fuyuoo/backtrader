@@ -92,9 +92,9 @@ def write_run_artifacts(
         report_path=output_dir / "report.json",
         report_markdown_path=output_dir / "report.md",
         report_chinese_markdown_path=output_dir / "report.zh.md",
-        trades_path=output_dir / "trades.json",
-        signal_audit_path=output_dir / "signal_audit.json",
-        sizing_audit_path=output_dir / "sizing_audit.json",
+        trades_path=output_dir / "trades.parquet",
+        signal_audit_path=output_dir / "signal_audit.parquet",
+        sizing_audit_path=output_dir / "sizing_audit.parquet",
         result_diagnostics_path=output_dir / "result_diagnostics.json",
         trade_lifecycle_path=output_dir / "trade_lifecycle.json",
         trade_lifecycle_chinese_markdown_path=output_dir / "trade_lifecycle.zh.md",
@@ -110,9 +110,9 @@ def write_run_artifacts(
         post_exit_analysis_path=output_dir / "post_exit_analysis.json",
         post_exit_analysis_chinese_markdown_path=output_dir / "post_exit_analysis.zh.md",
         evidence_validation_path=output_dir / "evidence_validation.json",
-        equity_curve_path=output_dir / "equity_curve.json",
-        positions_path=output_dir / "positions.json",
-        execution_audit_path=output_dir / "execution_audit.json",
+        equity_curve_path=output_dir / "equity_curve.parquet",
+        positions_path=output_dir / "positions.parquet",
+        execution_audit_path=output_dir / "execution_audit.parquet",
         snapshots_path=output_dir / "snapshots.json",
         data_preflight_path=output_dir / "data_preflight.json",
         stock_pool_filter_path=output_dir / "stock_pool_filter.json",
@@ -120,7 +120,6 @@ def write_run_artifacts(
     )
 
     artifact_detail = getattr(run_plan.output, "artifact_detail", "compact")
-    signal_audit_sample_limit = int(getattr(run_plan.output, "signal_audit_sample_limit", 200))
     run_config = _run_config_trace(run_plan)
     trade_lifecycle = _trade_lifecycle(result)
 
@@ -140,29 +139,20 @@ def write_run_artifacts(
         render_backtest_report_markdown_zh(run_plan, result),
         encoding="utf-8",
     )
-    _write_json_artifact(
+    _write_parquet_artifact(
         progress_callback,
         "trades",
         artifact_paths.trades_path,
-        {
-            "schema": "attbacktrader.trades.v2",
-            "run_id": result.run_id,
-            "run_config": run_config,
-            "closed_trades": _closed_trades_with_lifecycle_indexes(result.closed_trades, trade_lifecycle),
-            "open_positions": result.open_positions,
-        },
+        _trade_rows(result, trade_lifecycle),
+        batch_size=1_000_000,
     )
-    _write_json_artifact(
+    _write_parquet_artifact(
         progress_callback,
         "signal_audit",
         artifact_paths.signal_audit_path,
-        _signal_audit_payload(
-            result,
-            artifact_detail=artifact_detail,
-            sample_limit=signal_audit_sample_limit,
-        ),
+        result.signal_audit,
     )
-    _write_json_artifact(progress_callback, "sizing_audit", artifact_paths.sizing_audit_path, _sizing_audit(result))
+    _write_parquet_artifact(progress_callback, "sizing_audit", artifact_paths.sizing_audit_path, _sizing_audit(result))
     _write_json_artifact(
         progress_callback,
         "result_diagnostics",
@@ -223,9 +213,9 @@ def write_run_artifacts(
         encoding="utf-8",
     )
     _write_json_artifact(progress_callback, "evidence_validation", artifact_paths.evidence_validation_path, _evidence_validation(result))
-    _write_json_artifact(progress_callback, "equity_curve", artifact_paths.equity_curve_path, result.equity_curve)
-    _write_json_artifact(progress_callback, "positions", artifact_paths.positions_path, result.position_snapshots)
-    _write_json_artifact(progress_callback, "execution_audit", artifact_paths.execution_audit_path, result.execution_audit)
+    _write_parquet_artifact(progress_callback, "equity_curve", artifact_paths.equity_curve_path, result.equity_curve)
+    _write_parquet_artifact(progress_callback, "positions", artifact_paths.positions_path, result.position_snapshots)
+    _write_parquet_artifact(progress_callback, "execution_audit", artifact_paths.execution_audit_path, result.execution_audit)
     _write_json_artifact(progress_callback, "snapshots", artifact_paths.snapshots_path, _snapshot_index(result))
     _write_json_artifact(progress_callback, "data_preflight", artifact_paths.data_preflight_path, result.data_preflight_report)
     _write_json_artifact(progress_callback, "stock_pool_filter", artifact_paths.stock_pool_filter_path, result.stock_pool_filter)
@@ -347,8 +337,9 @@ def _result_payload(result: RunPlanExecutionResult, *, artifact_detail: str, run
             "post_exit_analysis_summary": _post_exit_analysis_summary(result),
             "attribution_factor_selection": result.attribution_factor_selection,
             "raw_detail_note": (
-                "Full high-volume detail is persisted in dedicated artifacts such as signal_audit.json, "
-                "trades.json, execution_audit.json, and trade_lifecycle.json. result.json remains compact "
+                "Full high-volume tabular detail is persisted in dedicated Parquet artifacts such as "
+                "signal_audit.parquet, trades.parquet, execution_audit.parquet, equity_curve.parquet, "
+                "positions.parquet, and sizing_audit.parquet. result.json remains compact "
                 "to avoid duplicating large payloads."
             ),
         }
@@ -557,6 +548,26 @@ def _closed_trades_with_lifecycle_indexes(closed_trades, trade_lifecycle) -> lis
     return records
 
 
+def _trade_rows(result: RunPlanExecutionResult, trade_lifecycle) -> list[dict[str, Any]]:
+    rows = [
+        {
+            "record_type": "closed_trade",
+            "run_id": result.run_id,
+            **trade,
+        }
+        for trade in _closed_trades_with_lifecycle_indexes(result.closed_trades, trade_lifecycle)
+    ]
+    rows.extend(
+        {
+            "record_type": "open_position",
+            "run_id": result.run_id,
+            **to_jsonable(position),
+        }
+        for position in result.open_positions
+    )
+    return rows
+
+
 def _trade_identity(trade: Any) -> tuple[Any, ...]:
     return (
         _trade_field(trade, "symbol"),
@@ -699,6 +710,95 @@ def _write_json_artifact(
         status="completed",
         byte_count=path.stat().st_size,
     )
+
+
+def _write_parquet_artifact(
+    progress_callback: Callable[[Mapping[str, object]], None] | None,
+    artifact: str,
+    path: Path,
+    records,
+    *,
+    batch_size: int = 100_000,
+) -> None:
+    _emit_artifact_progress(progress_callback, artifact=artifact, path=path, status="started")
+    row_count = _write_parquet_records(path, records, batch_size=batch_size)
+    _emit_artifact_progress(
+        progress_callback,
+        artifact=artifact,
+        path=path,
+        status="completed",
+        byte_count=path.stat().st_size,
+        row_count=row_count,
+    )
+
+
+def _write_parquet_records(path: Path, records, *, batch_size: int) -> int:
+    try:
+        import pandas as pd
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise ImportError("Parquet artifacts require pandas and pyarrow to be installed.") from exc
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    writer = None
+    columns: list[str] | None = None
+    row_count = 0
+    batch: list[dict[str, Any]] = []
+
+    def flush() -> None:
+        nonlocal batch, columns, row_count, writer
+        if not batch:
+            return
+        frame = pd.DataFrame(batch)
+        if columns is None:
+            columns = list(frame.columns)
+        else:
+            extra_columns = sorted(set(frame.columns) - set(columns))
+            if extra_columns:
+                raise ValueError(
+                    f"Parquet artifact schema changed after the first batch for {path}: {extra_columns}"
+                )
+            frame = frame.reindex(columns=columns)
+        table = pa.Table.from_pandas(frame, preserve_index=False)
+        if writer is None:
+            writer = pq.ParquetWriter(path, table.schema, compression="zstd")
+        writer.write_table(table)
+        row_count += len(frame)
+        batch = []
+
+    try:
+        for record in records:
+            batch.append(_parquet_record(record))
+            if len(batch) >= batch_size:
+                flush()
+        if writer is None and not batch:
+            pd.DataFrame().to_parquet(path, index=False, compression="zstd")
+        else:
+            flush()
+    finally:
+        if writer is not None:
+            writer.close()
+
+    return row_count
+
+
+def _parquet_record(record: Any) -> dict[str, Any]:
+    payload = to_jsonable(record)
+    if not isinstance(payload, Mapping):
+        return {"value_json": _compact_json(payload)}
+    return {str(key): _parquet_cell(value) for key, value in payload.items()}
+
+
+def _parquet_cell(value: Any) -> Any:
+    value = to_jsonable(value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return _compact_json(value)
+
+
+def _compact_json(value: Any) -> str:
+    return json.dumps(to_jsonable(value), ensure_ascii=False, separators=(",", ":"))
 
 
 def _emit_artifact_progress(

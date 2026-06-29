@@ -1002,8 +1002,8 @@ def _limit_by_date(frame: Any) -> dict[date, tuple[float | None, float | None]]:
 
     return {
         _parse_tushare_date(str(row.trade_date)): (
-            _optional_float(row.up_limit),
-            _optional_float(row.down_limit),
+            _optional_limit_price(row.up_limit),
+            _optional_limit_price(row.down_limit),
         )
         for row in frame.itertuples(index=False)
     }
@@ -1048,6 +1048,13 @@ def _optional_float(value: Any) -> float | None:
         return None
 
     return float(value)
+
+
+def _optional_limit_price(value: Any) -> float | None:
+    price = _optional_float(value)
+    if price is None or price <= 0:
+        return None
+    return price
 
 
 def _format_tushare_date(value: date) -> str:
