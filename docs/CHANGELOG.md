@@ -13,6 +13,15 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-06-29 — 入场归因证据改为信号日口径
+
+- 需求：策略语义是 T-1 满足入场条件、T 日买入，归因/过滤/打分证据不能使用 T 日收盘后才知道的信息。
+- 改动：
+  - `attbacktrader/strategies/attribution.py`：`with_entry_attribution_controls` 支持显式 `evidence_date`。
+  - `attbacktrader/engines/business/portfolio.py`、`attbacktrader/engines/business/baoma.py`、`attbacktrader/engines/backtrader/strategy_bridge.py`：入场和加仓归因改用上一交易日证据；出场归因仍用当前交易日证据。
+  - `tests/test_entry_attribution.py`、`tests/test_baoma_business_runner.py`：补充 T-1 证据回归覆盖。
+- 影响：旧的土壤/种子 Scored Portfolio 结果需要重建 decision event table 后重跑，不能继续当作严格实盘口径证据。
+
 ## 2026-06-28 — 大表 artifact 改为 Parquet 存储
 
 - 需求：十年全 A RunPlan 已在写 `signal_audit.json` 时触发 MemoryError，后续不需要人工手读大表，统一优先使用 Parquet 降低体积和写盘内存压力。

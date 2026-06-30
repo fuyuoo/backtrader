@@ -154,6 +154,7 @@ class TrendTemplateV1BacktraderStrategy(bt.Strategy):
                 self._entry_attribution_context,
                 symbol=self._symbol,
                 trade_date=trade_date,
+                evidence_date=previous_row.trade_date if previous_row is not None else None,
             )
             if entry_intent.intent_type == TradeIntentType.ENTER:
                 sizing_decision = self._sizing_method.size_entry(
@@ -354,6 +355,7 @@ class TrendTemplateV1BacktraderStrategy(bt.Strategy):
             self._entry_attribution_context,
             symbol=self._symbol,
             trade_date=trade_date,
+            evidence_date=previous_row.trade_date if previous_row is not None else None,
         )
         if add_on_intent.intent_type != TradeIntentType.ADD_ON:
             self._intents.append(add_on_intent)
@@ -623,6 +625,7 @@ class TrendTemplateV1PortfolioBacktraderStrategy(bt.Strategy):
                     self._entry_attribution_context,
                     symbol=symbol,
                     trade_date=trade_date,
+                    evidence_date=previous_row.trade_date if previous_row is not None else None,
                 )
                 if entry_intent.intent_type == TradeIntentType.ENTER:
                     sizing_decision = self._sizing_method.size_entry(
@@ -827,6 +830,7 @@ class TrendTemplateV1PortfolioBacktraderStrategy(bt.Strategy):
                 self._entry_attribution_context,
                 symbol=symbol,
                 trade_date=trade_date,
+                evidence_date=previous_row.trade_date if previous_row is not None else None,
             )
             if add_on_intent.intent_type != TradeIntentType.ADD_ON:
                 self._intents.append(add_on_intent)
@@ -1189,10 +1193,17 @@ def _intent_with_entry_attribution(
     *,
     symbol: str,
     trade_date: date,
+    evidence_date: date | None = None,
 ) -> TradeIntent:
     if context is None:
         return intent
-    return with_entry_attribution_controls(intent, context, symbol=symbol, trade_date=trade_date)
+    return with_entry_attribution_controls(
+        intent,
+        context,
+        symbol=symbol,
+        trade_date=trade_date,
+        evidence_date=evidence_date,
+    )
 
 
 def _add_on_enabled(add_on_method) -> bool:

@@ -488,8 +488,14 @@ def test_business_engine_injects_entry_attribution_into_entry_intent() -> None:
 
     entry_intent = next(intent for intent in result.strategy_result.intents if intent.intent_type == TradeIntentType.ENTER)
     attribution = entry_intent.signal_values["attribution"]
+    signal_day_evidence = context.evidence_for("000001.SZ", bars[-2].trade_date)
+    buy_day_evidence = context.evidence_for("000001.SZ", bars[-1].trade_date)
 
+    assert signal_day_evidence is not None
+    assert buy_day_evidence is not None
     assert attribution["checks"]["symbol.ma.price_above_ma25"] is True
+    assert attribution["values"]["symbol.ma.ma25"] == signal_day_evidence.values["symbol.ma.ma25"]
+    assert attribution["values"]["symbol.ma.ma25"] != buy_day_evidence.values["symbol.ma.ma25"]
     assert attribution["values"]["symbol.ma.ma25"] > 0
     assert attribution["categories"]["sizing.risk_group"] == "801780.SI"
 

@@ -198,6 +198,49 @@ def test_baoma_business_runner_applies_entry_attribution_filter_before_buy() -> 
     assert [event for event in result.lifecycle_events if event.side == "buy"] == []
 
 
+def test_baoma_business_runner_filters_entry_with_signal_day_attribution() -> None:
+    bars, frame, trade_dates = _baoma_fixture(
+        opens=(10.0, 12.0, 10.0),
+        closes=(10.0, 11.0, 10.0),
+        dea_values=(0.0, 0.1, 0.2),
+        ma60_values=(9.0, 9.0, 9.0),
+        ma25_values=(9.0, 9.0, 9.0),
+    )
+    context = EntryAttributionContext(
+        evidence_by_key={
+            (SYMBOL, trade_dates[1]): EntryAttributionEvidence(
+                categories={"market.hs300.trend_state": "bearish"}
+            ),
+            (SYMBOL, trade_dates[2]): EntryAttributionEvidence(
+                categories={"market.hs300.trend_state": "bullish"}
+            ),
+        },
+        enabled_factor_keys=frozenset({"market.hs300.trend_state"}),
+        entry_filter=EntryAttributionFilterRule(
+            enabled=True,
+            conditions=(
+                EntryAttributionFilterCondition(
+                    field="market.hs300.trend_state",
+                    value="bearish",
+                    action="keep",
+                ),
+            ),
+        ),
+    )
+
+    result = run_baoma_v1_business(
+        {SYMBOL: bars},
+        indicators_by_symbol={SYMBOL: frame},
+        config=_one_lot_config(),
+        entry_attribution_context=context,
+    )
+
+    entry_intent = next(intent for intent in result.intents if intent.reason_code == "BAOMA_ENTRY_TRIGGERED")
+
+    assert entry_intent.signal_values["attribution"]["categories"]["market.hs300.trend_state"] == "bearish"
+    assert [event for event in result.lifecycle_events if event.side == "buy"]
+
+
 def test_baoma_business_runner_exits_at_close_and_injects_lifecycle_cost_for_ma25_profit_exit() -> None:
     bars, frame, trade_dates = _baoma_fixture(
         opens=(10.0, 12.0, 10.0, 10.0, 9.8),

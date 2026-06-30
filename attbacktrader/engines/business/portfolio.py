@@ -112,6 +112,7 @@ def run_trend_template_v1_portfolio_business(
                     entry_attribution_context,
                     symbol=symbol,
                     trade_date=trade_date,
+                    evidence_date=previous_row.trade_date if previous_row is not None else None,
                 )
                 if entry_intent.intent_type != TradeIntentType.ENTER:
                     intents.append(entry_intent)
@@ -263,6 +264,7 @@ def run_trend_template_v1_portfolio_business(
                 entry_attribution_context,
                 symbol=symbol,
                 trade_date=trade_date,
+                evidence_date=previous_row.trade_date if previous_row is not None else None,
             )
             if add_on_intent.intent_type != TradeIntentType.ADD_ON:
                 intents.append(add_on_intent)
@@ -470,10 +472,17 @@ def _intent_with_entry_attribution(
     *,
     symbol: str,
     trade_date: date,
+    evidence_date: date | None = None,
 ) -> TradeIntent:
     if context is None:
         return intent
-    return with_entry_attribution_controls(intent, context, symbol=symbol, trade_date=trade_date)
+    return with_entry_attribution_controls(
+        intent,
+        context,
+        symbol=symbol,
+        trade_date=trade_date,
+        evidence_date=evidence_date,
+    )
 
 
 def _blocked_intent(intent: TradeIntent, blocked_by: str) -> TradeIntent:

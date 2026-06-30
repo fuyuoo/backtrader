@@ -268,6 +268,7 @@ def run_baoma_v1_business(
                     entry_attribution_context,
                     symbol=symbol,
                     trade_date=trade_date,
+                    evidence_date=previous_row.trade_date if previous_row is not None else None,
                 )
                 if entry_intent.intent_type != TradeIntentType.ENTER:
                     intents.append(entry_intent)
@@ -1085,6 +1086,7 @@ def _evaluate_add_on(
         entry_attribution_context,
         symbol=symbol,
         trade_date=trade_date,
+        evidence_date=previous_row.trade_date if previous_row is not None else None,
     )
 
 
@@ -1094,10 +1096,14 @@ def _intent_with_attribution(
     *,
     symbol: str,
     trade_date: date,
+    evidence_date: date | None = None,
 ) -> TradeIntent:
     if context is None:
         return intent
-    controlled_intent = with_entry_attribution_evidence(intent, context.evidence_for(symbol, trade_date))
+    controlled_intent = with_entry_attribution_evidence(
+        intent,
+        context.evidence_for(symbol, evidence_date or trade_date),
+    )
     return apply_entry_attribution_filter(controlled_intent, context.entry_filter)
 
 

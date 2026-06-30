@@ -1629,11 +1629,15 @@ def with_entry_attribution_controls(
     *,
     symbol: str,
     trade_date: date,
+    evidence_date: date | None = None,
 ) -> TradeIntent:
     if context is None:
         return intent
 
-    controlled_intent = with_entry_attribution_evidence(intent, context.evidence_for(symbol, trade_date))
+    controlled_intent = with_entry_attribution_evidence(
+        intent,
+        context.evidence_for(symbol, evidence_date or trade_date),
+    )
     controlled_intent = with_enabled_entry_attribution_factors(
         controlled_intent,
         context.enabled_factor_keys or frozenset(),
