@@ -5,12 +5,19 @@ from pathlib import Path
 
 import pytest
 
+from attbacktrader.cli import dynamic_stock_pool as dynamic_stock_pool_cli
 from attbacktrader.cli import stock_pool as stock_pool_cli
 from attbacktrader.data.stock_pool import (
+    DynamicStockPool,
+    DynamicStockPoolEntry,
     IndexConstituent,
+    dynamic_stock_pool_entries_from_index_constituents,
     fixed_stock_pool_members_from_index_constituents,
+    fixed_stock_pool_members_from_dynamic_entries,
     latest_index_constituents,
+    read_dynamic_stock_pool_parquet,
     read_fixed_stock_pool_csv,
+    write_dynamic_stock_pool_parquet,
     write_fixed_stock_pool_csv,
 )
 
@@ -111,6 +118,66 @@ def test_write_fixed_stock_pool_csv_round_trips(tmp_path: Path) -> None:
     assert loaded == members
 
 
+def test_dynamic_stock_pool_membership_uses_latest_snapshot_not_after_as_of_date() -> None:
+    entries = dynamic_stock_pool_entries_from_index_constituents(
+        {
+            "HS300": (
+                IndexConstituent("000001.SZ", "399300.SZ", date(2024, 1, 1), 1.0),
+                IndexConstituent("000002.SZ", "399300.SZ", date(2024, 1, 3), 1.0),
+            ),
+            "CSI500": (
+                IndexConstituent("000003.SZ", "000905.SH", date(2024, 1, 2), 1.0),
+            ),
+        }
+    )
+    pool = DynamicStockPool(entries)
+
+    assert pool.as_of_symbols(date(2023, 12, 31)) == ()
+    assert pool.as_of_symbols(date(2024, 1, 1)) == ("000001.SZ",)
+    assert pool.as_of_symbols(date(2024, 1, 2)) == ("000001.SZ", "000003.SZ")
+    assert pool.as_of_symbols(date(2024, 1, 3)) == ("000002.SZ", "000003.SZ")
+
+    membership = pool.membership("000003.SZ", date(2024, 1, 3))
+
+    assert membership.is_member is True
+    assert membership.active_sources == ("CSI500",)
+    assert membership.source_snapshot_dates == {
+        "CSI500": date(2024, 1, 2),
+        "HS300": date(2024, 1, 3),
+    }
+
+
+def test_dynamic_stock_pool_parquet_round_trips(tmp_path: Path) -> None:
+    pool_path = tmp_path / "dynamic.parquet"
+    entries = (
+        DynamicStockPoolEntry(date(2024, 1, 1), "000001.SZ", "399300.SZ", "HS300", 1.0),
+        DynamicStockPoolEntry(date(2024, 1, 2), "000002.SZ", "000905.SH", "CSI500", None),
+    )
+
+    write_dynamic_stock_pool_parquet(entries, pool_path)
+    loaded = read_dynamic_stock_pool_parquet(pool_path)
+
+    assert loaded.entries == entries
+    assert loaded.as_of_symbols(date(2024, 1, 2)) == ("000001.SZ", "000002.SZ")
+
+
+def test_fixed_stock_pool_members_from_dynamic_entries_merges_sources() -> None:
+    members = fixed_stock_pool_members_from_dynamic_entries(
+        (
+            DynamicStockPoolEntry(date(2024, 1, 1), "000001.SZ", "399300.SZ", "HS300", 1.0),
+            DynamicStockPoolEntry(date(2024, 1, 2), "000001.SZ", "000905.SH", "CSI500", 1.0),
+            DynamicStockPoolEntry(date(2024, 1, 1), "000002.SZ", "399300.SZ", "HS300", 1.0),
+        ),
+        stock_names={"000001.SZ": "平安银行", "000002.SZ": "万科A"},
+        freeze_date=date(2024, 12, 31),
+    )
+
+    assert [(member.symbol, member.name, member.source_index) for member in members] == [
+        ("000001.SZ", "平安银行", "CSI500+HS300"),
+        ("000002.SZ", "万科A", "HS300"),
+    ]
+
+
 def test_stock_pool_cli_generates_fixed_pool_csv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     output_path = tmp_path / "baoma.csv"
 
@@ -151,3 +218,60 @@ def test_stock_pool_cli_generates_fixed_pool_csv(tmp_path: Path, monkeypatch: py
         ("600519.SH", "CSI500"),
     ]
     assert '"member_count": 2' in capsys.readouterr().out
+
+
+def test_dynamic_stock_pool_cli_generates_parquet_and_union_csv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    dynamic_path = tmp_path / "dynamic.parquet"
+    union_path = tmp_path / "union.csv"
+    metadata_path = tmp_path / "dynamic.json"
+
+    class FakeProvider:
+        def __init__(self, token: str, **kwargs) -> None:
+            self.token = token
+
+        def fetch_stock_names(self):
+            return {"000001.SZ": "平安银行", "000002.SZ": "万科A", "000003.SZ": "招商银行"}
+
+        def fetch_index_constituents(self, *, index_symbol, start_date, end_date):
+            if index_symbol == "399300.SZ":
+                return (
+                    IndexConstituent("000001.SZ", index_symbol, date(2024, 1, 1), 1.0),
+                    IndexConstituent("000002.SZ", index_symbol, date(2024, 1, 3), 1.0),
+                )
+            return (
+                IndexConstituent("000003.SZ", index_symbol, date(2024, 1, 2), 1.0),
+            )
+
+    monkeypatch.setattr(dynamic_stock_pool_cli, "read_tushare_token", lambda path: "test-token")
+    monkeypatch.setattr(dynamic_stock_pool_cli, "TushareProvider", FakeProvider)
+
+    exit_code = dynamic_stock_pool_cli.main(
+        [
+            "--start-date",
+            "2024-01-01",
+            "--end-date",
+            "2024-01-03",
+            "--output-parquet",
+            str(dynamic_path),
+            "--union-output",
+            str(union_path),
+            "--metadata-output",
+            str(metadata_path),
+            "--json",
+        ]
+    )
+
+    assert exit_code == 0
+    pool = read_dynamic_stock_pool_parquet(dynamic_path)
+    assert pool.as_of_symbols(date(2024, 1, 2)) == ("000001.SZ", "000003.SZ")
+    assert [member.symbol for member in read_fixed_stock_pool_csv(union_path)] == [
+        "000001.SZ",
+        "000002.SZ",
+        "000003.SZ",
+    ]
+    assert '"union_member_count": 3' in capsys.readouterr().out
+    assert metadata_path.read_text(encoding="utf-8")

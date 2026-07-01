@@ -196,6 +196,7 @@ setuptools.setup(
         'att-run-data-drilldown-batch=attbacktrader.cli.run_data_drilldown_batch:main',
         'att-run-data-overview=attbacktrader.cli.run_data_overview:main',
         'att-validate-run-regression=attbacktrader.cli.validate_run_regression:main',
+        'att-generate-dynamic-stock-pool=attbacktrader.cli.dynamic_stock_pool:main',
         'att-tushare-backtest=attbacktrader.cli.tushare_backtest:main',
     ]},
 

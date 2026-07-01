@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from attbacktrader.data import DailyBar
+from attbacktrader.data import DailyBar, DynamicStockPool, DynamicStockPoolEntry
 from attbacktrader.engines.business import (
     BaomaBusinessRunConfig,
     SecondScaleOutConfirmationRule,
@@ -51,6 +51,80 @@ def test_baoma_business_runner_buys_at_open_from_previous_day_entry_signal() -> 
     assert entry_intent.signal_values["sizing"]["price"] == pytest.approx(10.0)
     assert entry_intent.signal_values["sizing"]["requested_quantity"] == 100
     assert entry_intent.signal_values["sizing"]["business_executable_quantity"] == 100
+
+
+def test_baoma_business_runner_dynamic_stock_pool_allows_entry_on_signal_day_membership() -> None:
+    bars, frame, trade_dates = _baoma_fixture(
+        opens=(10.0, 12.0, 10.0),
+        closes=(10.0, 11.0, 10.0),
+        dea_values=(0.0, 0.1, 0.2),
+        ma60_values=(9.0, 9.0, 9.0),
+        ma25_values=(9.0, 9.0, 9.0),
+    )
+    pool = DynamicStockPool(
+        (
+            DynamicStockPoolEntry(trade_dates[1], SYMBOL, "399300.SZ", "HS300", 1.0),
+        )
+    )
+
+    result = run_baoma_v1_business(
+        {SYMBOL: bars},
+        indicators_by_symbol={SYMBOL: frame},
+        config=_one_lot_config(),
+        dynamic_stock_pool=pool,
+    )
+
+    buy_events = [event for event in result.lifecycle_events if event.side == "buy"]
+    entry_intent = next(intent for intent in result.intents if intent.reason_code == "BAOMA_ENTRY_TRIGGERED")
+
+    assert len(buy_events) == 1
+    assert buy_events[0].trade_date == trade_dates[2]
+    assert entry_intent.signal_values["signal_trade_date"] == trade_dates[1].isoformat()
+    assert entry_intent.signal_values["dynamic_stock_pool"] == {
+        "enabled": True,
+        "passed": True,
+        "as_of_date": trade_dates[1].isoformat(),
+        "active_sources": ["HS300"],
+        "source_snapshot_dates": {"HS300": trade_dates[1].isoformat()},
+    }
+
+
+def test_baoma_business_runner_dynamic_stock_pool_blocks_entry_when_signal_day_is_not_member() -> None:
+    bars, frame, trade_dates = _baoma_fixture(
+        opens=(10.0, 12.0, 10.0),
+        closes=(10.0, 11.0, 10.0),
+        dea_values=(0.0, 0.1, 0.2),
+        ma60_values=(9.0, 9.0, 9.0),
+        ma25_values=(9.0, 9.0, 9.0),
+    )
+    pool = DynamicStockPool(
+        (
+            DynamicStockPoolEntry(trade_dates[1], "000002.SZ", "399300.SZ", "HS300", 1.0),
+        )
+    )
+
+    result = run_baoma_v1_business(
+        {SYMBOL: bars},
+        indicators_by_symbol={SYMBOL: frame},
+        config=_one_lot_config(),
+        dynamic_stock_pool=pool,
+    )
+
+    filtered_intent = next(intent for intent in result.intents if intent.reason_code == "DYNAMIC_STOCK_POOL_FILTERED")
+
+    assert [event for event in result.lifecycle_events if event.side == "buy"] == []
+    assert filtered_intent.intent_type == TradeIntentType.AVOID
+    assert filtered_intent.blocked_by == "DYNAMIC_STOCK_POOL"
+    assert filtered_intent.signal_values["signal_trade_date"] == trade_dates[1].isoformat()
+    assert filtered_intent.signal_values["dynamic_stock_pool"] == {
+        "enabled": True,
+        "passed": False,
+        "as_of_date": trade_dates[1].isoformat(),
+        "active_sources": [],
+        "source_snapshot_dates": {"HS300": trade_dates[1].isoformat()},
+        "blocked_by": "DYNAMIC_STOCK_POOL",
+        "original_reason_code": "BAOMA_ENTRY_TRIGGERED",
+    }
 
 
 def test_baoma_business_runner_reports_date_progress() -> None:

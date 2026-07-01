@@ -77,6 +77,9 @@ from attbacktrader.strategies import EntryAttributionEvidence, attribution_decla
 from attbacktrader.strategies.bindings import required_indicators_for_strategy_config
 
 
+MAX_EXISTING_BAR_GAP_DAYS = 14
+
+
 @dataclass(frozen=True)
 class DailyBarsLoadResult:
     bars: tuple[DailyBar, ...]
@@ -1178,12 +1181,11 @@ def _fetch_missing_tradable_bars(
             (start_date, end_date),
         )
 
-    existing_dates = tuple(sorted({bar.trade_date for bar in existing_bars}))
-    missing_ranges: list[tuple[date, date]] = []
-    if existing_dates[0] > start_date:
-        missing_ranges.append((start_date, existing_dates[0] - timedelta(days=1)))
-    if existing_dates[-1] < end_date:
-        missing_ranges.append((existing_dates[-1] + timedelta(days=1), end_date))
+    missing_ranges = _missing_bar_ranges(
+        tuple(sorted({bar.trade_date for bar in existing_bars})),
+        start_date=start_date,
+        end_date=end_date,
+    )
 
     fetched_bars: list[DailyBar] = []
     for start_date, end_date in missing_ranges:
@@ -1199,6 +1201,29 @@ def _fetch_missing_tradable_bars(
             )
         )
     return tuple(fetched_bars), tuple(missing_ranges)
+
+
+def _missing_bar_ranges(
+    existing_dates: tuple[date, ...],
+    *,
+    start_date: date,
+    end_date: date,
+) -> list[tuple[date, date]]:
+    relevant_dates = tuple(date_value for date_value in existing_dates if start_date <= date_value <= end_date)
+    if not relevant_dates:
+        return [(start_date, end_date)]
+
+    missing_ranges: list[tuple[date, date]] = []
+    if relevant_dates[0] > start_date:
+        missing_ranges.append((start_date, relevant_dates[0] - timedelta(days=1)))
+
+    for previous_date, next_date in zip(relevant_dates, relevant_dates[1:]):
+        if (next_date - previous_date).days > MAX_EXISTING_BAR_GAP_DAYS:
+            missing_ranges.append((previous_date + timedelta(days=1), next_date - timedelta(days=1)))
+
+    if relevant_dates[-1] < end_date:
+        missing_ranges.append((relevant_dates[-1] + timedelta(days=1), end_date))
+    return missing_ranges
 
 
 def _fetch_tradable_bars_for_range(

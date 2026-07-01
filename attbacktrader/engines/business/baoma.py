@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 
-from attbacktrader.data import DailyBar
+from attbacktrader.data import DailyBar, DynamicStockPool
 from attbacktrader.engines.business.lifecycle import (
     ExecutionLifecycleComponent,
     LifecycleClosedTrade,
@@ -160,6 +160,7 @@ def run_baoma_v1_business(
     stop_loss_method: BaomaMa60Stop | None = None,
     profit_exit_method: BaomaMa25ProfitExit | None = None,
     entry_attribution_context: EntryAttributionContext | None = None,
+    dynamic_stock_pool: DynamicStockPool | None = None,
     progress_callback: Callable[[Mapping[str, object]], None] | None = None,
     progress_interval_days: int = 50,
 ) -> BaomaBusinessRunResult:
@@ -273,6 +274,17 @@ def run_baoma_v1_business(
                 if entry_intent.intent_type != TradeIntentType.ENTER:
                     intents.append(entry_intent)
                     continue
+
+                if dynamic_stock_pool is not None:
+                    pool_intent = _apply_dynamic_stock_pool_gate(
+                        entry_intent,
+                        dynamic_stock_pool,
+                        fallback_evidence_date=previous_row.trade_date if previous_row is not None else None,
+                    )
+                    if pool_intent.intent_type != TradeIntentType.ENTER:
+                        intents.append(pool_intent)
+                        continue
+                    entry_intent = pool_intent
 
                 quantity = config.buy_quantity_for_price(float(row.bar.open))
                 if _open_holding_count(lifecycles) >= config.max_holding_count:
@@ -1105,6 +1117,69 @@ def _intent_with_attribution(
         context.evidence_for(symbol, evidence_date or trade_date),
     )
     return apply_entry_attribution_filter(controlled_intent, context.entry_filter)
+
+
+def _apply_dynamic_stock_pool_gate(
+    intent: TradeIntent,
+    dynamic_stock_pool: DynamicStockPool,
+    *,
+    fallback_evidence_date: date | None,
+) -> TradeIntent:
+    evidence_date = _entry_signal_trade_date(intent) or fallback_evidence_date
+    signal_values = dict(intent.signal_values)
+    if evidence_date is None:
+        signal_values["dynamic_stock_pool"] = {
+            "enabled": True,
+            "passed": False,
+            "blocked_by": "DYNAMIC_STOCK_POOL",
+            "missing_reason": "evidence_date_unavailable",
+            "original_reason_code": intent.reason_code,
+        }
+        return replace(
+            intent,
+            intent_type=TradeIntentType.AVOID,
+            reason_code="DYNAMIC_STOCK_POOL_FILTERED",
+            signal_values=signal_values,
+            blocked_by="DYNAMIC_STOCK_POOL",
+        )
+
+    membership = dynamic_stock_pool.membership(intent.symbol, evidence_date)
+    signal_values["dynamic_stock_pool"] = {
+        "enabled": True,
+        "passed": membership.is_member,
+        "as_of_date": evidence_date.isoformat(),
+        "active_sources": list(membership.active_sources),
+        "source_snapshot_dates": {
+            source: snapshot_date.isoformat()
+            for source, snapshot_date in sorted(membership.source_snapshot_dates.items())
+        },
+    }
+    if membership.is_member:
+        return replace(intent, signal_values=signal_values)
+
+    signal_values["dynamic_stock_pool"]["blocked_by"] = "DYNAMIC_STOCK_POOL"
+    signal_values["dynamic_stock_pool"]["original_reason_code"] = intent.reason_code
+    return replace(
+        intent,
+        intent_type=TradeIntentType.AVOID,
+        reason_code="DYNAMIC_STOCK_POOL_FILTERED",
+        signal_values=signal_values,
+        blocked_by="DYNAMIC_STOCK_POOL",
+    )
+
+
+def _entry_signal_trade_date(intent: TradeIntent) -> date | None:
+    raw_value = intent.signal_values.get("signal_trade_date")
+    if not raw_value:
+        return None
+    if isinstance(raw_value, date):
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            return date.fromisoformat(raw_value[:10])
+        except ValueError:
+            return None
+    return None
 
 
 def _collect_new_closed_trades(

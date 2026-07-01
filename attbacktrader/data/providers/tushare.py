@@ -161,13 +161,13 @@ class TushareProvider:
         if end_date < start_date:
             raise ValueError("end_date must be on or after start_date")
 
-        frame = self._call_tushare(
+        frame = self._fetch_date_windowed(
             self._ts.pro_bar,
             api_name="pro_bar",
+            start_date=start_date,
+            end_date=end_date,
             ts_code=symbol,
             api=self._pro,
-            start_date=_format_tushare_date(start_date),
-            end_date=_format_tushare_date(end_date),
             freq="D",
             asset="E",
             adj=adjustment,

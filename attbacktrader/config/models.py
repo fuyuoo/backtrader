@@ -69,9 +69,11 @@ class DataConfig(FrozenModel):
     provider: Literal["tushare"] = "tushare"
     price_adjustment: Literal["qfq", "hfq"] = DEFAULT_PRICE_ADJUSTMENT
     refresh_snapshots: bool = True
+    refresh_before_stock_pool_filter: bool = False
     symbols: tuple[str, ...] = ()
     tradable_series: tuple[TradableSeriesConfig, ...] = ()
     stock_pool_file: Path | None = None
+    dynamic_stock_pool_file: Path | None = None
     decision_series: SeriesSelection = Field(default_factory=SeriesSelection)
     benchmark_series: SeriesSelection = Field(default_factory=SeriesSelection)
     industry_series: IndustrySeriesConfig = Field(default_factory=IndustrySeriesConfig)

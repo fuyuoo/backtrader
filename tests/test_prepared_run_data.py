@@ -706,6 +706,44 @@ def test_prepare_run_data_incrementally_fills_existing_bar_snapshot(tmp_path: Pa
     assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_provenance.details["warmup_incomplete"] is True
 
 
+def test_prepare_run_data_incrementally_fills_internal_bar_snapshot_gap(tmp_path: Path) -> None:
+    run_plan = _ma_run_plan(tmp_path)
+    run_plan = run_plan.model_copy(
+        update={"data": run_plan.data.model_copy(update={"refresh_snapshots": True})}
+    )
+    warmup_start = date(2023, 10, 3)
+    bars = _trend_bars_from(
+        "000001.SZ",
+        start_date=warmup_start,
+        count=(run_plan.run.to_date - warmup_start).days + 1,
+    )
+    existing_bars = tuple(
+        bar
+        for bar in bars
+        if bar.trade_date <= date(2023, 10, 20) or bar.trade_date >= date(2024, 3, 1)
+    )
+    provider = FakePreparedDataProvider(bars)
+    bar_path = tradable_bars_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=warmup_start,
+        end_date=run_plan.run.to_date,
+        asset_type="stock",
+        adjustment="qfq",
+    )
+    write_daily_bars_parquet(existing_bars, bar_path)
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+    snapshot_path = prepared.symbol_data_by_symbol["000001.SZ"].snapshot_path
+
+    assert provider.daily_bar_ranges == [
+        ("000001.SZ", date(2023, 10, 21), date(2024, 2, 29), "qfq"),
+    ]
+    assert read_daily_bars_parquet(snapshot_path) == bars
+    assert len(prepared.bars_by_symbol["000001.SZ"]) == (run_plan.run.to_date - run_plan.run.from_date).days + 1
+    assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_provenance.action == "incremental_filled"
+
+
 def test_prepare_run_data_discovers_broader_bar_snapshot_without_provider(tmp_path: Path) -> None:
     run_plan = _ma_run_plan(tmp_path)
     warmup_start = date(2023, 10, 3)

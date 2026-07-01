@@ -13,6 +13,16 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-07-01 — RunPlan 支持动态指数成分股入场门槛
+
+- 需求：2005-2014 回测不能用 2026 年固定沪深300/中证500成分股池；股票池需要按历史成分股快照变化。
+- 改动：
+  - `attbacktrader/data/stock_pool.py`：新增动态股票池模型、PIT as-of membership 查询、Parquet 读写和历史并集 CSV 生成。
+  - `attbacktrader/cli/dynamic_stock_pool.py`：新增 `att-generate-dynamic-stock-pool`，默认生成 HS300(`399300.SZ`) + CSI500(`000905.SH`) 的动态成分股 Parquet 和历史并集 CSV。
+  - `attbacktrader/config/models.py`、`attbacktrader/runners/run_plan.py`、`attbacktrader/engines/business/baoma.py`：RunPlan 支持 `data.dynamic_stock_pool_file`，Baoma 入场用 T-1 `signal_trade_date` 做动态成分股门槛；新增 `data.refresh_before_stock_pool_filter`，用于首次跑历史窗口时先刷新快照再做股票池预检。
+  - `docs/baoma-v1-score5-date-contract.md`：记录 T-1 证据日与动态成分股池的使用契约。
+- 影响：`stock_pool_file` 只负责准备历史并集行情；真正的“当时是否属于沪深300/中证500”由 `dynamic_stock_pool_file` 在入场时判断。
+
 ## 2026-06-29 — 入场归因证据改为信号日口径
 
 - 需求：策略语义是 T-1 满足入场条件、T 日买入，归因/过滤/打分证据不能使用 T 日收盘后才知道的信息。

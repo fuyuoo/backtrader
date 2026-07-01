@@ -10,6 +10,19 @@
 
 ### 命令入口
 
+生成历史动态指数成分股股票池时，使用动态 Parquet 作为入场门槛，历史并集 CSV 作为行情准备 universe：
+
+```bash
+att-generate-dynamic-stock-pool \
+  --start-date 2005-01-01 \
+  --end-date 2014-12-31 \
+  --output-parquet reports/pre2015-2005-2014/input/hs300-csi500-dynamic-constituents-2005-2014.parquet \
+  --union-output reports/pre2015-2005-2014/input/hs300-csi500-dynamic-union-2005-2014.csv \
+  --metadata-output reports/pre2015-2005-2014/input/hs300-csi500-dynamic-constituents-2005-2014.json
+```
+
+RunPlan 中 `data.stock_pool_file` 指向历史并集 CSV，`data.dynamic_stock_pool_file` 指向动态 Parquet。Baoma 入场会用 T-1 `signal_trade_date` 做 point-in-time 成分股判断，避免把未来纳入指数的股票提前放入样本。首次跑新的历史窗口时，建议设置 `data.refresh_before_stock_pool_filter: true`，让自动股票池预检先刷新行情/指标快照再判断 kept，避免被旧的空快照误排。
+
 ```bash
 att-scored-entry-allocation-tuning --mode dry-run --output-dir reports/scored-entry-allocation-tuning
 ```

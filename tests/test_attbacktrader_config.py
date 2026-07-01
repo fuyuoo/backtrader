@@ -315,6 +315,19 @@ def test_stock_pool_file_resolves_to_stock_tradable_series(tmp_path: Path) -> No
     assert [series.price_adjustment for series in run_plan.data.resolved_tradable_series] == ["qfq", "qfq"]
 
 
+def test_dynamic_stock_pool_file_does_not_count_as_tradable_scope_source() -> None:
+    raw_config = minimal_config()
+    raw_config["data"]["dynamic_stock_pool_file"] = "reports/input/hs300-csi500-dynamic.parquet"
+    raw_config["data"]["refresh_before_stock_pool_filter"] = True
+
+    run_plan = RunPlan.from_mapping(raw_config)
+
+    assert run_plan.data.symbols == ("000001.SZ",)
+    assert run_plan.data.dynamic_stock_pool_file == Path("reports/input/hs300-csi500-dynamic.parquet")
+    assert run_plan.data.refresh_before_stock_pool_filter is True
+    assert [series.symbol for series in run_plan.data.resolved_tradable_series] == ["000001.SZ"]
+
+
 def test_tradable_scope_sources_are_mutually_exclusive() -> None:
     raw_config = minimal_config()
     raw_config["data"]["stock_pool_file"] = "examples/stock-pools/baoma-fixed-sample.csv"

@@ -340,6 +340,7 @@ _Avoid_: Report recalculation, hindsight indicator calculation
 
 **Entry Signal Date**:
 The trading date whose completed bar provides the entry decision evidence for an entry that executes on the following trading date. For a trade executed on day T, the entry signal date is T-1 in the Baoma entry flow.
+Older scored-portfolio artifacts may only expose `trade_date`; in those artifacts `trade_date` should be read as the buy/execution date, not proof that the signal date was the same day.
 _Avoid_: Entry execution date, same-day open evidence, post-entry evidence
 
 **Entry Attribution Configuration**:

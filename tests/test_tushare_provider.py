@@ -64,6 +64,53 @@ def test_tushare_provider_fetches_qfq_daily_bars_by_default(monkeypatch: pytest.
     assert bars[0].close == 8.88
 
 
+def test_tushare_provider_splits_stock_daily_pro_bar_by_configured_date_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+    fake_api = object()
+
+    def pro_bar(**kwargs) -> pd.DataFrame:
+        calls.append(kwargs)
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "trade_date": kwargs["start_date"],
+                    "open": 8.76,
+                    "high": 8.91,
+                    "low": 8.69,
+                    "close": 8.88,
+                    "vol": 900,
+                }
+            ]
+        )
+
+    monkeypatch.setitem(sys.modules, "tushare", SimpleNamespace(pro_api=lambda token: fake_api, pro_bar=pro_bar))
+
+    provider = TushareProvider(
+        "test-token",
+        rate_limit=TushareRateLimitConfig(requests_per_minute=600, date_window_days=2),
+        sleeper=lambda seconds: None,
+    )
+    bars = provider.fetch_daily_bars(
+        symbol="000001.SZ",
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 1, 5),
+    )
+
+    assert [(call["start_date"], call["end_date"]) for call in calls] == [
+        ("20240101", "20240102"),
+        ("20240103", "20240104"),
+        ("20240105", "20240105"),
+    ]
+    assert all(call["api"] is fake_api for call in calls)
+    assert all(call["adj"] == "qfq" for call in calls)
+    assert all(call["freq"] == "D" for call in calls)
+    assert all(call["asset"] == "E" for call in calls)
+    assert len(bars) == 3
+
+
 def test_tushare_provider_retries_transient_rate_limit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {"index_daily": 0}
     sleeps = []

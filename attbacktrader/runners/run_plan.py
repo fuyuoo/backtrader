@@ -8,6 +8,7 @@ from pathlib import Path
 
 from attbacktrader.analysis import AnalysisEvidence, enrich_backtest_report
 from attbacktrader.config import RunPlan
+from attbacktrader.data import DynamicStockPool, read_dynamic_stock_pool_parquet
 from attbacktrader.data.providers import RunDataProvider
 from attbacktrader.data.quality import DataQualityIssue
 from attbacktrader.data.snapshots import SnapshotProvenance, SnapshotReadCache
@@ -162,6 +163,19 @@ def execute_run_plan(
         run_id=execution_run_plan.run.id,
         symbol_count=len(execution_run_plan.data.resolved_tradable_series),
     )
+    dynamic_stock_pool = _load_dynamic_stock_pool(execution_run_plan)
+    if dynamic_stock_pool is not None and execution_run_plan.execution.engine != "baoma_v1_business":
+        raise ValueError("data.dynamic_stock_pool_file is only supported with execution.engine=baoma_v1_business")
+    if dynamic_stock_pool is not None:
+        _emit_run_progress(
+            progress_callback,
+            stage="dynamic_stock_pool",
+            status="loaded",
+            run_id=execution_run_plan.run.id,
+            symbol_count=len(dynamic_stock_pool.symbols),
+            source_count=len(dynamic_stock_pool.source_labels),
+            source_labels=list(dynamic_stock_pool.source_labels),
+        )
     _emit_run_progress(progress_callback, stage="prepare_run_data", status="started", run_id=execution_run_plan.run.id)
     if prepared_data_cache is None:
         prepared_data = prepare_run_data(
@@ -269,6 +283,7 @@ def execute_run_plan(
             stop_loss_method=strategy_template.stop_loss_method,
             add_on_method=strategy_template.add_on_method,
             entry_attribution_context=entry_attribution_context,
+            dynamic_stock_pool=dynamic_stock_pool,
             progress_callback=progress_callback,
             progress_interval_days=progress_interval_days,
         )
@@ -408,6 +423,12 @@ def _emit_run_progress(
     progress_callback({"stage": stage, "status": status, **fields})
 
 
+def _load_dynamic_stock_pool(run_plan: RunPlan) -> DynamicStockPool | None:
+    if run_plan.data.dynamic_stock_pool_file is None:
+        return None
+    return read_dynamic_stock_pool_parquet(run_plan.data.dynamic_stock_pool_file)
+
+
 def _run_plan_with_auto_stock_pool_filter(
     run_plan: RunPlan,
     *,
@@ -417,7 +438,7 @@ def _run_plan_with_auto_stock_pool_filter(
     if run_plan.data.stock_pool_file is None:
         return run_plan, None, None
 
-    preflight_run_plan = _run_plan_reusing_snapshots(run_plan)
+    preflight_run_plan = _stock_pool_preflight_run_plan(run_plan)
     preflight = run_data_preflight(preflight_run_plan, provider=provider, event_progress=progress_callback)
     stock_pool_filter = _stock_pool_filter_from_preflight(run_plan, preflight)
     if not stock_pool_filter.kept_symbols:
@@ -448,6 +469,12 @@ def _run_plan_reusing_snapshots(run_plan: RunPlan) -> RunPlan:
             "data": run_plan.data.model_copy(update={"refresh_snapshots": False}),
         }
     )
+
+
+def _stock_pool_preflight_run_plan(run_plan: RunPlan) -> RunPlan:
+    if run_plan.data.refresh_before_stock_pool_filter:
+        return run_plan
+    return _run_plan_reusing_snapshots(run_plan)
 
 
 def _stock_pool_filter_from_preflight(
