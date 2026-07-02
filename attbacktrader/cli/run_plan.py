@@ -31,12 +31,15 @@ def main(argv: list[str] | None = None) -> int:
             run_plan = run_plan.model_copy(
                 update={"execution": run_plan.execution.model_copy(update={"engine": args.engine})}
             )
+        if args.offline_data:
+            run_plan = _force_offline_data_mode(run_plan)
         _emit_cli_progress(
             progress_logger,
             stage="load_run_plan",
             status="completed",
             run_id=run_plan.run.id,
             engine=run_plan.execution.engine,
+            data_mode="offline" if args.offline_data else "configured",
         )
 
         provider = None
@@ -115,6 +118,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--output-root", default=None, help="Override output.report_root for persisted artifacts")
     parser.add_argument("--no-persist", action="store_true", help="Run without writing reports/{run_id} artifacts")
+    parser.add_argument(
+        "--offline-data",
+        action="store_true",
+        help=(
+            "Force data.refresh_snapshots=false and run without a Tushare provider. "
+            "Missing snapshots fail instead of being fetched."
+        ),
+    )
     parser.add_argument("--progress-log", default=None, help="Write NDJSON progress events to this file")
     parser.add_argument(
         "--progress-interval-days",
@@ -129,6 +140,19 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     if args.progress_interval_days <= 0:
         parser.error("--progress-interval-days must be positive")
     return args
+
+
+def _force_offline_data_mode(run_plan):
+    return run_plan.model_copy(
+        update={
+            "data": run_plan.data.model_copy(
+                update={
+                    "refresh_snapshots": False,
+                    "refresh_before_stock_pool_filter": False,
+                }
+            )
+        }
+    )
 
 
 def _execute_run_plan(

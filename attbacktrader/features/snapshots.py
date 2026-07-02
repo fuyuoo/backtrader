@@ -321,7 +321,15 @@ def merge_indicator_snapshots(
     return tuple(sorted(merged_by_key.values(), key=_snapshot_sort_key))
 
 
-def read_indicator_snapshots_parquet(path: str | Path) -> tuple[IndicatorSnapshot, ...]:
+def read_indicator_snapshots_parquet(path: str | Path, *, cache: Any | None = None) -> tuple[IndicatorSnapshot, ...]:
+    if cache is not None:
+        from attbacktrader.data.snapshots.read_cache import snapshot_path_cache_key
+
+        return cache.get_or_read(
+            snapshot_path_cache_key("indicator_snapshots_parquet", path),
+            lambda: read_indicator_snapshots_parquet(path),
+        )
+
     try:
         import pandas as pd
     except ImportError as exc:

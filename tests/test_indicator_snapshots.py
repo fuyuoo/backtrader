@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from attbacktrader.data import DailyBar
-from attbacktrader.data.snapshots import read_daily_bars_csv
+from attbacktrader.data.snapshots import SnapshotReadCache, read_daily_bars_csv
 from attbacktrader.features import (
     IndicatorSnapshotMetadata,
     IndicatorRequirement,
@@ -54,6 +54,34 @@ def test_indicator_snapshots_round_trip_and_join_with_bars(tmp_path: Path) -> No
 
     result = TrendTemplateV1().run_single_symbol_rows(rows)
     assert len(result.closed_trades) == 2
+
+
+def test_indicator_snapshots_parquet_read_cache_reuses_by_path(tmp_path: Path) -> None:
+    path = indicator_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=date(2024, 1, 2),
+        end_date=date(2024, 1, 3),
+    )
+    original = (
+        IndicatorSnapshot("000001.SZ", date(2024, 1, 2), ma20=1.0),
+        IndicatorSnapshot("000001.SZ", date(2024, 1, 3), ma20=2.0),
+    )
+    updated = (
+        IndicatorSnapshot("000001.SZ", date(2024, 1, 2), ma20=10.0),
+        IndicatorSnapshot("000001.SZ", date(2024, 1, 3), ma20=20.0),
+    )
+    write_indicator_snapshots_parquet(original, path)
+    cache = SnapshotReadCache()
+
+    first = read_indicator_snapshots_parquet(path, cache=cache)
+    write_indicator_snapshots_parquet(updated, path)
+    second = read_indicator_snapshots_parquet(path, cache=cache)
+    fresh = read_indicator_snapshots_parquet(path, cache=SnapshotReadCache())
+
+    assert first is second
+    assert first == original
+    assert fresh == updated
 
 
 def test_macd_indicator_snapshots_round_trip(tmp_path: Path) -> None:

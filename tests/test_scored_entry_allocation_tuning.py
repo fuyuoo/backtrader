@@ -264,6 +264,14 @@ def test_strategy_decision_event_table_can_be_built_from_full_signal_audit_json(
     assert table["events"][0]["industry"] == "801010.SI"
     assert table["events"][0]["stock_pool_order"] == 7
     assert table["events"][0]["evidence"]["symbol.ma.trend_state"] == "bullish"
+    assert table["build_profile"] == {
+        "schema": "attbacktrader.strategy_decision_event_table_build_profile.v1",
+        "source": "full_signal_audit",
+        "scanned_rows": 3,
+        "actionable_rows": 2,
+        "event_count": 2,
+        "factor_field_count": 4,
+    }
     assert "completed_trade_id" not in table["events"][0]
 
 

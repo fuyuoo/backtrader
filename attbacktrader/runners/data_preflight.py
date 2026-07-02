@@ -12,8 +12,8 @@ from attbacktrader.config import RunPlan, TradableSeriesConfig
 from attbacktrader.config.models import SeriesSelection
 from attbacktrader.data.providers import RunDataProvider
 from attbacktrader.data.quality import DataQualityIssue
-from attbacktrader.data.snapshots import SnapshotProvenance
-from attbacktrader.features import IndicatorRequirement
+from attbacktrader.data.snapshots import SnapshotProvenance, SnapshotReadCache
+from attbacktrader.features import IndicatorRequirement, indicator_spec
 from attbacktrader.runners.prepared_data import (
     PreparedIndexData,
     PreparedSymbolData,
@@ -106,6 +106,7 @@ def run_data_preflight(
     run_plan: RunPlan,
     *,
     provider: RunDataProvider | None = None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
     max_symbols: int | None = None,
     indicator_alarm_threshold: float = 0.05,
     progress: Callable[[int, int, str, str], None] | None = None,
@@ -136,7 +137,11 @@ def run_data_preflight(
         run_id=run_plan.run.id,
         index_count=len(index_symbols),
     )
-    prepared_indexes, index_results = _prepare_common_indexes(run_plan, provider=provider)
+    prepared_indexes, index_results = _prepare_common_indexes(
+        run_plan,
+        provider=provider,
+        snapshot_read_cache=snapshot_read_cache,
+    )
     _emit_preflight_event(
         event_progress,
         stage="data_preflight_indexes",
@@ -152,7 +157,11 @@ def run_data_preflight(
         run_id=run_plan.run.id,
         index_count=len(run_plan.data.industry_series.indexes),
     )
-    _, industry_index_results = _prepare_common_industry_indexes(run_plan, provider=provider)
+    _, industry_index_results = _prepare_common_industry_indexes(
+        run_plan,
+        provider=provider,
+        snapshot_read_cache=snapshot_read_cache,
+    )
     _emit_preflight_event(
         event_progress,
         stage="data_preflight_industry_indexes",
@@ -182,6 +191,7 @@ def run_data_preflight(
             indicator_requirements=indicator_requirements,
             indicator_alarm_threshold=indicator_alarm_threshold,
             trading_calendar=trading_calendar,
+            snapshot_read_cache=snapshot_read_cache,
         )
         symbol_results.append(result)
         if result.status == "ok":
@@ -317,6 +327,7 @@ def _preflight_symbol(
     indicator_requirements: tuple[IndicatorRequirement, ...],
     indicator_alarm_threshold: float,
     trading_calendar,
+    snapshot_read_cache: SnapshotReadCache | None,
 ) -> DataPreflightSymbolResult:
     try:
         prepared = _prepare_symbol_data(
@@ -325,6 +336,7 @@ def _preflight_symbol(
             provider=provider,
             indicator_requirements=indicator_requirements,
             trading_calendar=trading_calendar,
+            snapshot_read_cache=snapshot_read_cache,
         )
     except Exception as exc:
         return DataPreflightSymbolResult(
@@ -415,17 +427,38 @@ def _indicator_coverage(
     start_date: date,
     end_date: date,
 ) -> IndicatorCoverage:
-    snapshots = tuple(
-        snapshot
-        for snapshot in prepared.indicator_snapshots
-        if snapshot.timeframe == requirement.timeframe
-        and start_date <= snapshot.trade_date <= end_date
+    timeframe_snapshots = tuple(
+        sorted(
+            (
+                snapshot
+                for snapshot in prepared.indicator_snapshots
+                if snapshot.timeframe == requirement.timeframe
+            ),
+            key=lambda snapshot: snapshot.trade_date,
+        )
     )
-    available_count = sum(1 for snapshot in snapshots if snapshot.has_indicator(requirement.name))
-    total_count = len(snapshots)
+    if not timeframe_snapshots:
+        return IndicatorCoverage(
+            name=requirement.name,
+            timeframe=requirement.timeframe,
+            total_count=0,
+            available_count=0,
+            missing_count=0,
+            missing_ratio=1.0,
+            status="error",
+        )
+
+    warmup_bars = indicator_spec(requirement.name).warmup_bars
+    eligible_snapshots = tuple(
+        snapshot
+        for snapshot in timeframe_snapshots[max(0, warmup_bars - 1) :]
+        if start_date <= snapshot.trade_date <= end_date
+    )
+    available_count = sum(1 for snapshot in eligible_snapshots if snapshot.has_indicator(requirement.name))
+    total_count = len(eligible_snapshots)
     missing_count = max(0, total_count - available_count)
-    missing_ratio = missing_count / total_count if total_count else 1.0
-    status = "ok" if total_count and missing_ratio <= threshold else "error"
+    missing_ratio = missing_count / total_count if total_count else 0.0
+    status = "ok" if missing_ratio <= threshold else "error"
     return IndicatorCoverage(
         name=requirement.name,
         timeframe=requirement.timeframe,
@@ -459,9 +492,14 @@ def _prepare_common_indexes(
     run_plan: RunPlan,
     *,
     provider: RunDataProvider | None,
+    snapshot_read_cache: SnapshotReadCache | None,
 ) -> tuple[dict[str, PreparedIndexData], tuple[DataPreflightIndexResult, ...]]:
     try:
-        prepared = _prepare_index_data_by_symbol(run_plan, provider=provider)
+        prepared = _prepare_index_data_by_symbol(
+            run_plan,
+            provider=provider,
+            snapshot_read_cache=snapshot_read_cache,
+        )
     except Exception as exc:
         symbols = tuple(dict.fromkeys((*run_plan.data.decision_series.indexes, *run_plan.data.benchmark_series.indexes)))
         return {}, tuple(
@@ -481,9 +519,14 @@ def _prepare_common_industry_indexes(
     run_plan: RunPlan,
     *,
     provider: RunDataProvider | None,
+    snapshot_read_cache: SnapshotReadCache | None,
 ) -> tuple[dict[str, PreparedIndexData], tuple[DataPreflightIndexResult, ...]]:
     try:
-        prepared = _prepare_industry_index_data_by_symbol(run_plan, provider=provider)
+        prepared = _prepare_industry_index_data_by_symbol(
+            run_plan,
+            provider=provider,
+            snapshot_read_cache=snapshot_read_cache,
+        )
     except Exception as exc:
         return {}, tuple(
             DataPreflightIndexResult(

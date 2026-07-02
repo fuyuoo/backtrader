@@ -29,9 +29,11 @@ from attbacktrader.data.snapshots import (
     IndexBarsSnapshotCandidate,
     SnapshotReadCache,
     SnapshotProvenance,
+    TradabilityStatusSnapshotCandidate,
     decode_attribution_reference_cell,
     discover_index_bars_snapshot_paths,
     discover_industry_index_bars_snapshot_paths,
+    discover_tradability_status_snapshot_paths,
     discover_tradable_bars_snapshot_paths,
     index_bars_snapshot_path,
     industry_index_bars_snapshot_path,
@@ -263,6 +265,9 @@ class PreparedRunData:
                 groups[symbol] = str(getattr(membership, field_name))
         return groups
 
+    def performance_profile(self) -> dict[str, Any]:
+        return _prepared_run_data_performance_profile(self)
+
 
 @dataclass(frozen=True)
 class PreparedRunDataCacheKey:
@@ -440,16 +445,7 @@ def prepare_run_data(
         run_id=run_plan.run.id,
         evidence_symbol_count=len(attribution_reference_evidence_by_symbol_date),
     )
-    _emit_prepare_event(
-        event_progress,
-        stage="prepare_run_data_detail",
-        status="completed",
-        run_id=run_plan.run.id,
-        total_symbols=len(tradable_series),
-        prepared_symbol_count=len(prepared_symbols),
-    )
-
-    return PreparedRunData(
+    prepared_run_data = PreparedRunData(
         tradable_series=tradable_series,
         symbol_data_by_symbol=prepared_by_symbol,
         index_data_by_symbol=prepared_indexes_by_symbol,
@@ -460,6 +456,23 @@ def prepare_run_data(
         trading_calendar=trading_calendar,
         attribution_reference_evidence_by_symbol_date=attribution_reference_evidence_by_symbol_date,
     )
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_profile",
+        status="completed",
+        run_id=run_plan.run.id,
+        profile=prepared_run_data.performance_profile(),
+    )
+    _emit_prepare_event(
+        event_progress,
+        stage="prepare_run_data_detail",
+        status="completed",
+        run_id=run_plan.run.id,
+        total_symbols=len(tradable_series),
+        prepared_symbol_count=len(prepared_symbols),
+    )
+
+    return prepared_run_data
 
 
 def _emit_prepare_event(
@@ -643,6 +656,105 @@ def _latest_membership(
     if not memberships:
         return None
     return sorted(memberships, key=lambda membership: (membership.in_date, membership.symbol))[-1]
+
+
+def _prepared_run_data_performance_profile(prepared: PreparedRunData) -> dict[str, Any]:
+    provenances = _prepared_run_data_snapshot_provenances(prepared)
+    indicator_provenances = tuple(
+        provenance
+        for provenance in provenances
+        if provenance.snapshot_type == "indicators"
+    )
+    return {
+        "schema": "attbacktrader.prepare_run_data_performance_profile.v1",
+        "symbol_count": len(prepared.symbols),
+        "benchmark_count": len(prepared.index_data_by_symbol),
+        "industry_index_count": len(prepared.industry_index_data_by_symbol),
+        "industry_membership_result_count": len(prepared.industry_membership_results),
+        "attribution_reference_symbol_count": len(prepared.attribution_reference_evidence_by_symbol_date),
+        "snapshot_profile": _snapshot_provenance_profile(provenances),
+        "indicator_profile": _indicator_provenance_profile(indicator_provenances),
+    }
+
+
+def _prepared_run_data_snapshot_provenances(prepared: PreparedRunData) -> tuple[SnapshotProvenance, ...]:
+    provenances: list[SnapshotProvenance] = []
+    for symbol_data in prepared.symbol_data_by_symbol.values():
+        provenances.append(symbol_data.snapshot_provenance)
+        provenances.extend(symbol_data.indicator_snapshot_provenance)
+        if symbol_data.tradability_snapshot_provenance is not None:
+            provenances.append(symbol_data.tradability_snapshot_provenance)
+    provenances.extend(prepared_index.snapshot_provenance for prepared_index in prepared.index_data_by_symbol.values())
+    provenances.extend(
+        prepared_index.snapshot_provenance
+        for prepared_index in prepared.industry_index_data_by_symbol.values()
+    )
+    return tuple(provenances)
+
+
+def _snapshot_provenance_profile(provenances: tuple[SnapshotProvenance, ...]) -> dict[str, Any]:
+    action_counts: dict[str, int] = {}
+    type_action_counts: dict[str, int] = {}
+    fetched_range_count = 0
+    provider_fetch_snapshot_count = 0
+    warmup_incomplete_count = 0
+    source_snapshot_path_count = 0
+
+    for provenance in provenances:
+        _increment_count(action_counts, provenance.action)
+        _increment_count(type_action_counts, f"{provenance.snapshot_type}.{provenance.action}")
+        fetched_ranges = _profile_sequence(provenance.details.get("fetched_ranges"))
+        fetched_range_count += len(fetched_ranges)
+        if fetched_ranges:
+            provider_fetch_snapshot_count += 1
+        if provenance.details.get("warmup_incomplete") is True:
+            warmup_incomplete_count += 1
+        source_snapshot_path_count += len(provenance.source_paths)
+
+    return {
+        "provenance_count": len(provenances),
+        "action_counts": action_counts,
+        "type_action_counts": type_action_counts,
+        "source_snapshot_reference_count": source_snapshot_path_count,
+        "source_snapshot_read_count_lower_bound": source_snapshot_path_count,
+        "provider_fetch_range_count": fetched_range_count,
+        "provider_fetch_snapshot_count": provider_fetch_snapshot_count,
+        "warmup_incomplete_count": warmup_incomplete_count,
+    }
+
+
+def _indicator_provenance_profile(provenances: tuple[SnapshotProvenance, ...]) -> dict[str, Any]:
+    built_or_filled_count = sum(
+        1
+        for provenance in provenances
+        if provenance.action in {"created", "incremental_filled"}
+    )
+    reused_count = sum(
+        1
+        for provenance in provenances
+        if provenance.action in {"exact_reused", "range_reused"}
+    )
+    return {
+        "snapshot_group_count": len(provenances),
+        "built_or_filled_count": built_or_filled_count,
+        "reused_count": reused_count,
+        "source_snapshot_reference_count": sum(len(provenance.source_paths) for provenance in provenances),
+        "source_snapshot_read_count_lower_bound": sum(len(provenance.source_paths) for provenance in provenances),
+    }
+
+
+def _increment_count(counts: dict[str, int], key: str) -> None:
+    counts[key] = counts.get(key, 0) + 1
+
+
+def _profile_sequence(value: Any) -> tuple[Any, ...]:
+    if isinstance(value, (str, bytes, bytearray)) or value is None:
+        return ()
+    if isinstance(value, tuple):
+        return value
+    if isinstance(value, list):
+        return tuple(value)
+    return ()
 
 
 def _indicator_calculation_start_date(
@@ -895,6 +1007,7 @@ def _prepare_symbol_data(
         series=series,
         bars=calculation_bars,
         indicator_requirements=indicator_requirements,
+        snapshot_read_cache=snapshot_read_cache,
     )
     indicator_frame = indicator_frame_from_snapshots(indicator_snapshots)
     tradability_statuses = ()
@@ -905,6 +1018,7 @@ def _prepare_symbol_data(
             symbol=series.symbol,
             path=tradability_path,
             provider=provider,
+            snapshot_read_cache=snapshot_read_cache,
         )
         tradability_statuses = tradability_load_result.statuses
         tradability_provenance = tradability_load_result.provenance
@@ -976,6 +1090,43 @@ def _load_or_fetch_bars(
                 ),
             )
 
+        if _can_reuse_declared_bar_snapshot(
+            candidates,
+            existing_bars,
+            requested_start_date=start_date,
+            requested_end_date=end_date,
+            minimum_start_date=minimum_start_date,
+        ):
+            bars = _bars_for_date_range(
+                existing_bars,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if not path.exists():
+                write_daily_bars_parquet(bars, path)
+            action = "exact_reused" if _has_exact_bar_candidate(candidates, path) else "range_reused"
+            return DailyBarsLoadResult(
+                bars=bars,
+                provenance=_snapshot_provenance(
+                    snapshot_type="tradable_bars",
+                    action=action,
+                    path=path,
+                    source_paths=_candidate_paths(candidates),
+                    bars=bars,
+                    details=_bar_load_details(
+                        requested_start_date=start_date,
+                        requested_end_date=end_date,
+                        minimum_start_date=minimum_start_date,
+                        warmup_incomplete=not _bars_cover_date_range(
+                            bars,
+                            start_date=start_date,
+                            end_date=end_date,
+                        ),
+                        declared_snapshot_coverage=True,
+                    ),
+                ),
+            )
+
         if provider is None and _bars_cover_date_range(
             existing_bars,
             start_date=minimum_start_date,
@@ -1004,9 +1155,15 @@ def _load_or_fetch_bars(
                         warmup_incomplete=True,
                     ),
                 ),
-            )
+        )
 
         if provider is None:
+            if existing_bars and not _has_bars_in_date_range(
+                existing_bars,
+                start_date=minimum_start_date,
+                end_date=end_date,
+            ):
+                raise ValueError(f"no daily bars returned for {series.symbol} in run window")
             raise ValueError("provider is required when snapshots must be refreshed or created")
 
         missing_bars, missing_ranges = _fetch_missing_tradable_bars(
@@ -1289,6 +1446,37 @@ def _bars_cover_date_range(
     return min(dates) <= start_date and max(dates) >= end_date
 
 
+def _can_reuse_declared_bar_snapshot(
+    candidates: tuple[DailyBarsSnapshotCandidate, ...],
+    bars: tuple[DailyBar, ...],
+    *,
+    requested_start_date: date,
+    requested_end_date: date,
+    minimum_start_date: date,
+) -> bool:
+    return (
+        _bar_candidates_cover_date_range(
+            candidates,
+            start_date=requested_start_date,
+            end_date=requested_end_date,
+        )
+        and _has_bars_in_date_range(
+            bars,
+            start_date=minimum_start_date,
+            end_date=requested_end_date,
+        )
+    )
+
+
+def _bar_candidates_cover_date_range(
+    candidates: tuple[DailyBarsSnapshotCandidate, ...],
+    *,
+    start_date: date,
+    end_date: date,
+) -> bool:
+    return any(candidate.start_date <= start_date and candidate.end_date >= end_date for candidate in candidates)
+
+
 def _has_bars_in_date_range(
     bars: tuple[DailyBar, ...],
     *,
@@ -1407,6 +1595,7 @@ def _bar_load_details(
     minimum_start_date: date,
     fetched_ranges: tuple[dict[str, str], ...] = (),
     warmup_incomplete: bool = False,
+    declared_snapshot_coverage: bool = False,
 ) -> dict[str, Any]:
     details: dict[str, Any] = {
         "requested_start_date": requested_start_date.isoformat(),
@@ -1417,6 +1606,8 @@ def _bar_load_details(
         details["fetched_ranges"] = fetched_ranges
     if warmup_incomplete:
         details["warmup_incomplete"] = True
+    if declared_snapshot_coverage:
+        details["declared_snapshot_coverage"] = True
     return details
 
 
@@ -1426,6 +1617,7 @@ def _load_or_build_required_indicators(
     series: TradableSeriesConfig,
     bars: tuple[DailyBar, ...],
     indicator_requirements: tuple[IndicatorRequirement, ...],
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> tuple[tuple[IndicatorSnapshot, ...], tuple[Path, ...], tuple[SnapshotProvenance, ...]]:
     snapshots: list[IndicatorSnapshot] = []
     paths: list[Path] = []
@@ -1454,6 +1646,7 @@ def _load_or_build_required_indicators(
             bars=timeframe_bars,
             path=path,
             plan=plan,
+            snapshot_read_cache=snapshot_read_cache,
         )
         snapshots.extend(load_result.snapshots)
         paths.append(path)
@@ -1473,6 +1666,7 @@ def _load_or_build_indicators(
     bars: tuple[DailyBar, ...],
     path: Path,
     plan: IndicatorUpdatePlan,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> IndicatorSnapshotsLoadResult:
     if not run_plan.data.refresh_snapshots:
         snapshots, metadata, candidates = _load_discovered_indicator_snapshots(
@@ -1480,6 +1674,7 @@ def _load_or_build_indicators(
             series=series,
             bars=bars,
             plan=plan,
+            snapshot_read_cache=snapshot_read_cache,
         )
         if metadata is not None and not _indicator_metadata_matches_plan(metadata, plan):
             snapshots = build_indicator_snapshots(bars, indicator_names=plan.indicator_names, timeframe=plan.timeframe)
@@ -1632,6 +1827,7 @@ def _load_discovered_indicator_snapshots(
     series: TradableSeriesConfig,
     bars: tuple[DailyBar, ...],
     plan: IndicatorUpdatePlan,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> tuple[tuple[IndicatorSnapshot, ...], IndicatorSnapshotMetadata | None, tuple[IndicatorSnapshotCandidate, ...]]:
     if not bars:
         return (), None, ()
@@ -1651,7 +1847,12 @@ def _load_discovered_indicator_snapshots(
         for candidate in candidates
         if candidate.start_date == bars[0].trade_date
     )
-    snapshots, metadata = _read_indicator_candidates(candidates, bars=bars, plan=plan)
+    snapshots, metadata = _read_indicator_candidates(
+        candidates,
+        bars=bars,
+        plan=plan,
+        snapshot_read_cache=snapshot_read_cache,
+    )
     return snapshots, metadata, candidates
 
 
@@ -1660,6 +1861,7 @@ def _read_indicator_candidates(
     *,
     bars: tuple[DailyBar, ...],
     plan: IndicatorUpdatePlan,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> tuple[tuple[IndicatorSnapshot, ...], IndicatorSnapshotMetadata | None]:
     snapshots: list[IndicatorSnapshot] = []
     selected_metadata: IndicatorSnapshotMetadata | None = None
@@ -1671,7 +1873,7 @@ def _read_indicator_candidates(
 
         snapshots.extend(
             _indicator_snapshots_for_bars(
-                read_indicator_snapshots_parquet(candidate.path),
+                read_indicator_snapshots_parquet(candidate.path, cache=snapshot_read_cache),
                 bars,
                 timeframe=plan.timeframe,
             )
@@ -1875,39 +2077,233 @@ def _load_or_fetch_tradability_statuses(
     symbol: str,
     path: Path,
     provider: RunDataProvider | None,
+    snapshot_read_cache: SnapshotReadCache | None = None,
 ) -> TradabilityLoadResult:
-    if not run_plan.data.refresh_snapshots and path.exists():
-        statuses = read_tradability_statuses_parquet(path)
+    start_date = run_plan.run.from_date
+    end_date = run_plan.run.to_date
+    existing_statuses, candidates = _load_discovered_tradability_statuses(
+        run_plan,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+        snapshot_read_cache=snapshot_read_cache,
+    )
+
+    if _tradability_candidates_cover_date_range(
+        candidates,
+        start_date=start_date,
+        end_date=end_date,
+    ):
+        statuses = _tradability_statuses_for_date_range(
+            existing_statuses,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if not path.exists():
+            write_tradability_statuses_parquet(statuses, path)
+        action = (
+            "exact_reused"
+            if _has_exact_tradability_candidate(candidates, path)
+            else "range_reused"
+        )
         return TradabilityLoadResult(
             statuses=statuses,
-            provenance=SnapshotProvenance(
-                snapshot_type="tradability_statuses",
-                action="exact_reused",
+            provenance=_tradability_status_provenance(
+                action=action,
                 path=path,
-                source_paths=(path,),
-                start_date=min((status.trade_date for status in statuses), default=None),
-                end_date=max((status.trade_date for status in statuses), default=None),
+                statuses=statuses,
+                candidates=candidates,
+                details={
+                    "requested_start_date": start_date.isoformat(),
+                    "requested_end_date": end_date.isoformat(),
+                },
             ),
         )
 
     if provider is None:
         raise ValueError("provider is required when tradability snapshots must be refreshed or created")
 
-    statuses = provider.fetch_tradability_statuses(
-        symbol=symbol,
-        start_date=run_plan.run.from_date,
-        end_date=run_plan.run.to_date,
+    missing_ranges = _missing_tradability_status_ranges(
+        candidates,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    fetched_statuses: list[TradabilityStatus] = []
+    for missing_start, missing_end in missing_ranges:
+        if missing_start > missing_end:
+            continue
+        fetched_statuses.extend(
+            provider.fetch_tradability_statuses(
+                symbol=symbol,
+                start_date=missing_start,
+                end_date=missing_end,
+            )
+        )
+
+    statuses = _tradability_statuses_for_date_range(
+        _deduplicate_tradability_statuses((*existing_statuses, *fetched_statuses)),
+        start_date=start_date,
+        end_date=end_date,
     )
     write_tradability_statuses_parquet(statuses, path)
+    action = "created" if not candidates else "incremental_filled"
     return TradabilityLoadResult(
         statuses=statuses,
-        provenance=SnapshotProvenance(
-            snapshot_type="tradability_statuses",
-            action="created",
+        provenance=_tradability_status_provenance(
+            action=action,
             path=path,
-            start_date=min((status.trade_date for status in statuses), default=None),
-            end_date=max((status.trade_date for status in statuses), default=None),
+            statuses=statuses,
+            candidates=candidates,
+            details={
+                "requested_start_date": start_date.isoformat(),
+                "requested_end_date": end_date.isoformat(),
+                "fetched_ranges": _date_ranges_payload(tuple(missing_ranges)),
+            },
         ),
+    )
+
+
+def _load_discovered_tradability_statuses(
+    run_plan: RunPlan,
+    *,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+    snapshot_read_cache: SnapshotReadCache | None = None,
+) -> tuple[tuple[TradabilityStatus, ...], tuple[TradabilityStatusSnapshotCandidate, ...]]:
+    candidates = discover_tradability_status_snapshot_paths(
+        run_plan.data.snapshot_root,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+        asset_type="stock",
+    )
+    return _read_tradability_status_candidates(candidates, snapshot_read_cache=snapshot_read_cache), candidates
+
+
+def _read_tradability_status_candidates(
+    candidates: tuple[TradabilityStatusSnapshotCandidate, ...],
+    *,
+    snapshot_read_cache: SnapshotReadCache | None = None,
+) -> tuple[TradabilityStatus, ...]:
+    statuses: list[TradabilityStatus] = []
+    for candidate in candidates:
+        statuses.extend(read_tradability_statuses_parquet(candidate.path, cache=snapshot_read_cache))
+    return _deduplicate_tradability_statuses(statuses)
+
+
+def _tradability_candidates_cover_date_range(
+    candidates: tuple[TradabilityStatusSnapshotCandidate, ...],
+    *,
+    start_date: date,
+    end_date: date,
+) -> bool:
+    return not _missing_tradability_status_ranges(candidates, start_date=start_date, end_date=end_date)
+
+
+def _missing_tradability_status_ranges(
+    candidates: tuple[TradabilityStatusSnapshotCandidate, ...],
+    *,
+    start_date: date,
+    end_date: date,
+) -> tuple[tuple[date, date], ...]:
+    covered_ranges = tuple(
+        (candidate.start_date, candidate.end_date)
+        for candidate in candidates
+    )
+    return tuple(
+        _missing_date_ranges_from_covered_ranges(
+            covered_ranges,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    )
+
+
+def _missing_date_ranges_from_covered_ranges(
+    covered_ranges: tuple[tuple[date, date], ...],
+    *,
+    start_date: date,
+    end_date: date,
+) -> list[tuple[date, date]]:
+    clipped_ranges = sorted(
+        (
+            (max(range_start, start_date), min(range_end, end_date))
+            for range_start, range_end in covered_ranges
+            if range_start <= end_date and range_end >= start_date
+        ),
+        key=lambda value: (value[0], value[1]),
+    )
+    if not clipped_ranges:
+        return [(start_date, end_date)]
+
+    missing_ranges: list[tuple[date, date]] = []
+    cursor = start_date
+    for range_start, range_end in clipped_ranges:
+        if range_end < cursor:
+            continue
+        if range_start > cursor:
+            missing_ranges.append((cursor, range_start - timedelta(days=1)))
+        cursor = max(cursor, range_end + timedelta(days=1))
+        if cursor > end_date:
+            break
+
+    if cursor <= end_date:
+        missing_ranges.append((cursor, end_date))
+    return missing_ranges
+
+
+def _tradability_statuses_for_date_range(
+    statuses: tuple[TradabilityStatus, ...],
+    *,
+    start_date: date,
+    end_date: date,
+) -> tuple[TradabilityStatus, ...]:
+    return tuple(
+        status
+        for status in statuses
+        if start_date <= status.trade_date <= end_date
+    )
+
+
+def _deduplicate_tradability_statuses(
+    statuses: tuple[TradabilityStatus, ...] | list[TradabilityStatus],
+) -> tuple[TradabilityStatus, ...]:
+    statuses_by_key = {
+        (status.symbol, status.trade_date): status
+        for status in statuses
+    }
+    return tuple(
+        sorted(
+            statuses_by_key.values(),
+            key=lambda status: (status.symbol, status.trade_date),
+        )
+    )
+
+
+def _has_exact_tradability_candidate(
+    candidates: tuple[TradabilityStatusSnapshotCandidate, ...],
+    path: Path,
+) -> bool:
+    return any(candidate.path == path for candidate in candidates)
+
+
+def _tradability_status_provenance(
+    *,
+    action: str,
+    path: Path,
+    statuses: tuple[TradabilityStatus, ...],
+    candidates: tuple[TradabilityStatusSnapshotCandidate, ...],
+    details: Mapping[str, Any] | None = None,
+) -> SnapshotProvenance:
+    return SnapshotProvenance(
+        snapshot_type="tradability_statuses",
+        action=action,
+        path=path,
+        source_paths=_candidate_paths(candidates),
+        start_date=min((status.trade_date for status in statuses), default=None),
+        end_date=max((status.trade_date for status in statuses), default=None),
+        details=details or {},
     )
 
 

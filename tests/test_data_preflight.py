@@ -8,7 +8,9 @@ from types import SimpleNamespace
 from attbacktrader.cli import data_preflight as data_preflight_cli
 from attbacktrader.config import RunPlan
 from attbacktrader.data import DailyBar, IndexBar, TradabilityStatus
+from attbacktrader.features import IndicatorRequirement, IndicatorSnapshot
 from attbacktrader.runners import run_data_preflight
+from attbacktrader.runners.data_preflight import _indicator_coverage
 
 
 class FakePreflightProvider:
@@ -110,17 +112,63 @@ def test_data_preflight_keeps_going_when_one_symbol_fails(tmp_path: Path) -> Non
     assert provider.daily_calls == ["000001.SZ", "000002.SZ"]
 
 
-def test_data_preflight_flags_indicator_coverage_alarm(tmp_path: Path) -> None:
-    bars = _bars("000001.SZ", date(2024, 1, 1), 70)
-    provider = FakePreflightProvider({"000001.SZ": bars})
+def test_data_preflight_allows_indicator_warmup_for_new_listing(tmp_path: Path) -> None:
+    bars = _bars("001203.SZ", date(2024, 2, 1), 90)
+    provider = FakePreflightProvider({"001203.SZ": bars})
 
-    report = run_data_preflight(_run_plan(tmp_path, symbols=("000001.SZ",)), provider=provider)
+    report = run_data_preflight(_run_plan(tmp_path, symbols=("001203.SZ",)), provider=provider)
 
-    assert report.status == "error"
-    assert report.symbol_results[0].status == "error"
+    assert report.failed_symbol_count == 0
     ma60 = next(item for item in report.symbol_results[0].indicator_coverage if item.name == "ma60")
-    assert ma60.missing_ratio > 0.05
-    assert report.issue_summary["indicator.ma60:D"] == 1
+    assert ma60.status == "ok"
+    assert ma60.missing_count == 0
+
+
+def test_data_preflight_flags_indicator_coverage_alarm_after_warmup() -> None:
+    snapshots = tuple(
+        IndicatorSnapshot(
+            "000001.SZ",
+            date(2024, 1, 1) + timedelta(days=index),
+            ma60=None if index < 59 or index == 65 else 10.0 + index,
+        )
+        for index in range(70)
+    )
+
+    coverage = _indicator_coverage(
+        SimpleNamespace(indicator_snapshots=snapshots),
+        requirement=IndicatorRequirement("ma60", "D"),
+        threshold=0.05,
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 3, 10),
+    )
+
+    assert coverage.status == "error"
+    assert coverage.total_count == 11
+    assert coverage.missing_count == 1
+    assert coverage.missing_ratio > 0.05
+
+
+def test_data_preflight_counts_run_window_indicator_missing_after_pre_run_warmup() -> None:
+    snapshots = tuple(
+        IndicatorSnapshot(
+            "000001.SZ",
+            date(2023, 11, 1) + timedelta(days=index),
+            ma60=None if index < 59 or index == 65 else 10.0 + index,
+        )
+        for index in range(70)
+    )
+
+    coverage = _indicator_coverage(
+        SimpleNamespace(indicator_snapshots=snapshots),
+        requirement=IndicatorRequirement("ma60", "D"),
+        threshold=0.05,
+        start_date=date(2024, 1, 5),
+        end_date=date(2024, 1, 9),
+    )
+
+    assert coverage.status == "error"
+    assert coverage.total_count == 5
+    assert coverage.missing_count == 1
 
 
 def test_data_preflight_cli_prints_json(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -173,6 +221,73 @@ execution:
     output = capsys.readouterr().out
     assert '"schema": "attbacktrader.data_preflight.v1"' in output
     assert '"run_id": "preflight-cli"' in output
+
+
+def test_data_preflight_cli_offline_data_forces_snapshot_reuse_without_provider(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    config_path = tmp_path / "run.yaml"
+    config_path.write_text(
+        """
+run:
+  id: preflight-offline-cli
+  from_date: "2024-01-01"
+  to_date: "2024-01-10"
+data:
+  snapshot_root: "{snapshot_root}"
+  refresh_snapshots: true
+  refresh_before_stock_pool_filter: true
+  symbols: ["000001.SZ"]
+strategy:
+  template: trend_template_v1
+  entry_method: baoma_entry
+  entry_params:
+    dea_max_age_trading_days: 14
+  profit_taking_method: baoma_ma25_profit_exit
+  stop_loss_method: baoma_ma60_stop
+  add_on_method: baoma_add_on
+  sizing_rule: equal_weight
+broker:
+  initial_cash: 1000000
+  commission_rate: 0
+  stamp_tax_rate: 0
+  transfer_fee_rate: 0
+  slippage:
+    type: percent
+    value: 0
+execution:
+  engine: baoma_v1_business
+""".format(snapshot_root=(tmp_path / "snapshots").as_posix()),
+        encoding="utf-8",
+    )
+
+    def fail_read_token(path):
+        raise AssertionError("offline data preflight must not read Tushare token")
+
+    def fail_provider(*args, **kwargs):
+        raise AssertionError("offline data preflight must not build TushareProvider")
+
+    def fake_run_data_preflight(run_plan, *, provider=None, **kwargs):
+        assert provider is None
+        assert run_plan.data.refresh_snapshots is False
+        assert run_plan.data.refresh_before_stock_pool_filter is False
+        return {
+            "schema": "attbacktrader.data_preflight.v1",
+            "run_id": run_plan.run.id,
+            "status": "ok",
+        }
+
+    monkeypatch.setattr(data_preflight_cli, "read_tushare_token", fail_read_token)
+    monkeypatch.setattr(data_preflight_cli, "TushareProvider", fail_provider)
+    monkeypatch.setattr(data_preflight_cli, "run_data_preflight", fake_run_data_preflight)
+
+    exit_code = data_preflight_cli.main(["--config", str(config_path), "--offline-data", "--json"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert '"run_id": "preflight-offline-cli"' in output
 
 
 def _run_plan(tmp_path: Path, *, symbols: tuple[str, ...]) -> RunPlan:

@@ -149,11 +149,15 @@ def execute_run_plan(
 ) -> RunPlanExecutionResult:
     if progress_interval_days <= 0:
         raise ValueError("progress_interval_days must be positive")
+    effective_snapshot_read_cache = snapshot_read_cache
+    if effective_snapshot_read_cache is None and _can_default_share_snapshot_reads(run_plan):
+        effective_snapshot_read_cache = SnapshotReadCache()
     _emit_run_progress(progress_callback, stage="run_plan", status="started", run_id=run_plan.run.id)
     _emit_run_progress(progress_callback, stage="auto_stock_pool_filter", status="started", run_id=run_plan.run.id)
     execution_run_plan, data_preflight_report, stock_pool_filter = _run_plan_with_auto_stock_pool_filter(
         run_plan,
         provider=provider,
+        snapshot_read_cache=effective_snapshot_read_cache,
         progress_callback=progress_callback,
     )
     _emit_run_progress(
@@ -181,14 +185,14 @@ def execute_run_plan(
         prepared_data = prepare_run_data(
             execution_run_plan,
             provider=provider,
-            snapshot_read_cache=snapshot_read_cache,
+            snapshot_read_cache=effective_snapshot_read_cache,
             event_progress=progress_callback,
         )
     else:
         prepared_data = prepared_data_cache.get_or_prepare(
             execution_run_plan,
             provider=provider,
-            snapshot_read_cache=snapshot_read_cache,
+            snapshot_read_cache=effective_snapshot_read_cache,
             event_progress=progress_callback,
         )
     _emit_run_progress(
@@ -433,13 +437,19 @@ def _run_plan_with_auto_stock_pool_filter(
     run_plan: RunPlan,
     *,
     provider: RunDataProvider | None,
+    snapshot_read_cache: SnapshotReadCache | None,
     progress_callback: Callable[[Mapping[str, object]], None] | None = None,
 ) -> tuple[RunPlan, DataPreflightReport | None, StockPoolAutoFilterResult | None]:
     if run_plan.data.stock_pool_file is None:
         return run_plan, None, None
 
     preflight_run_plan = _stock_pool_preflight_run_plan(run_plan)
-    preflight = run_data_preflight(preflight_run_plan, provider=provider, event_progress=progress_callback)
+    preflight = run_data_preflight(
+        preflight_run_plan,
+        provider=provider,
+        snapshot_read_cache=snapshot_read_cache,
+        event_progress=progress_callback,
+    )
     stock_pool_filter = _stock_pool_filter_from_preflight(run_plan, preflight)
     if not stock_pool_filter.kept_symbols:
         raise ValueError("stock pool auto filter excluded all symbols")
@@ -459,6 +469,12 @@ def _run_plan_with_auto_stock_pool_filter(
         }
     )
     return run_plan.model_copy(update={"data": filtered_data}), preflight, stock_pool_filter
+
+
+def _can_default_share_snapshot_reads(run_plan: RunPlan) -> bool:
+    if not run_plan.data.refresh_snapshots:
+        return True
+    return run_plan.data.stock_pool_file is not None and not run_plan.data.refresh_before_stock_pool_filter
 
 
 def _run_plan_reusing_snapshots(run_plan: RunPlan) -> RunPlan:

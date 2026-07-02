@@ -18,9 +18,12 @@ from attbacktrader.data.snapshots import (
     attribution_reference_snapshot_dir,
     read_daily_bars_csv,
     read_daily_bars_parquet,
+    read_tradability_statuses_parquet,
     tradable_bars_snapshot_path,
+    tradability_status_snapshot_path,
     write_attribution_reference_snapshot,
     write_daily_bars_parquet,
+    write_tradability_statuses_parquet,
 )
 from attbacktrader.features import (
     IndicatorRequirement,
@@ -49,6 +52,7 @@ class FakePreparedDataProvider:
         self.classification_calls: list[str] = []
         self.membership_calls: list[tuple[str, str]] = []
         self.tradability_calls: list[str] = []
+        self.tradability_ranges: list[tuple[str, date, date]] = []
 
     def fetch_daily_bars(self, *, symbol, start_date, end_date, adjustment):
         self.calls.append((symbol, adjustment))
@@ -96,6 +100,7 @@ class FakePreparedDataProvider:
 
     def fetch_tradability_statuses(self, *, symbol, start_date, end_date):
         self.tradability_calls.append(symbol)
+        self.tradability_ranges.append((symbol, start_date, end_date))
         return (
             TradabilityStatus(symbol=symbol, trade_date=start_date),
             TradabilityStatus(symbol=symbol, trade_date=end_date),
@@ -153,6 +158,91 @@ def test_prepare_run_data_returns_one_interface_for_snapshots_features_and_analy
     assert prepared.risk_group_by_symbol(level=1) == {"000001.SZ": "801780.SI"}
 
 
+def test_prepare_run_data_reuses_tradability_status_range_snapshot_without_fetching(
+    tmp_path: Path,
+) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    provider = FakePreparedDataProvider(bars)
+    run_plan = _run_plan(tmp_path)
+    broad_status_path = tradability_status_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 1, 31),
+    )
+    write_tradability_statuses_parquet(
+        (
+            TradabilityStatus("000001.SZ", date(2024, 1, 1)),
+            TradabilityStatus("000001.SZ", date(2024, 1, 2)),
+            TradabilityStatus("000001.SZ", date(2024, 1, 11)),
+            TradabilityStatus("000001.SZ", date(2024, 1, 31)),
+        ),
+        broad_status_path,
+    )
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+
+    exact_path = tradability_status_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=run_plan.run.from_date,
+        end_date=run_plan.run.to_date,
+    )
+    symbol_data = prepared.symbol_data_by_symbol["000001.SZ"]
+    assert provider.tradability_calls == []
+    assert exact_path.exists()
+    assert symbol_data.tradability_snapshot_provenance is not None
+    assert symbol_data.tradability_snapshot_provenance.action == "range_reused"
+    assert symbol_data.tradability_snapshot_provenance.source_paths == (broad_status_path,)
+    assert [status.trade_date for status in read_tradability_statuses_parquet(exact_path)] == [
+        date(2024, 1, 2),
+        date(2024, 1, 11),
+    ]
+
+
+def test_prepare_run_data_fetches_only_missing_tradability_status_ranges(tmp_path: Path) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    provider = FakePreparedDataProvider(bars)
+    run_plan = _run_plan(tmp_path)
+    partial_status_path = tradability_status_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=run_plan.run.from_date,
+        end_date=date(2024, 1, 5),
+    )
+    write_tradability_statuses_parquet(
+        (
+            TradabilityStatus("000001.SZ", date(2024, 1, 2)),
+            TradabilityStatus("000001.SZ", date(2024, 1, 5)),
+        ),
+        partial_status_path,
+    )
+
+    prepared = prepare_run_data(run_plan, provider=provider)
+
+    exact_path = tradability_status_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=run_plan.run.from_date,
+        end_date=run_plan.run.to_date,
+    )
+    symbol_data = prepared.symbol_data_by_symbol["000001.SZ"]
+    assert provider.tradability_ranges == [
+        ("000001.SZ", date(2024, 1, 6), date(2024, 1, 11)),
+    ]
+    assert symbol_data.tradability_snapshot_provenance is not None
+    assert symbol_data.tradability_snapshot_provenance.action == "incremental_filled"
+    assert symbol_data.tradability_snapshot_provenance.details["fetched_ranges"] == (
+        {"start_date": "2024-01-06", "end_date": "2024-01-11"},
+    )
+    assert [status.trade_date for status in read_tradability_statuses_parquet(exact_path)] == [
+        date(2024, 1, 2),
+        date(2024, 1, 5),
+        date(2024, 1, 6),
+        date(2024, 1, 11),
+    ]
+
+
 def test_prepare_run_data_reports_structured_progress(tmp_path: Path) -> None:
     bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
     provider = FakePreparedDataProvider(bars)
@@ -167,6 +257,11 @@ def test_prepare_run_data_reports_structured_progress(tmp_path: Path) -> None:
         for event in events
         if event["stage"] == "prepare_run_data_symbols" and event["status"] == "running"
     ]
+    profile_events = [
+        event
+        for event in events
+        if event["stage"] == "prepare_run_data_profile" and event["status"] == "completed"
+    ]
 
     assert prepared.symbols == ("000001.SZ",)
     assert ("prepare_run_data_detail", "started") in stage_statuses
@@ -176,6 +271,20 @@ def test_prepare_run_data_reports_structured_progress(tmp_path: Path) -> None:
     assert symbol_progress[0]["symbol"] == "000001.SZ"
     assert symbol_progress[0]["bar_count"] > 0
     assert ("prepare_run_data_attribution_reference", "completed") in stage_statuses
+    assert len(profile_events) == 1
+    profile = profile_events[0]["profile"]
+    assert profile == prepared.performance_profile()
+    assert profile["schema"] == "attbacktrader.prepare_run_data_performance_profile.v1"
+    assert profile["symbol_count"] == 1
+    assert profile["snapshot_profile"]["provenance_count"] >= 4
+    assert profile["snapshot_profile"]["action_counts"]["created"] >= 1
+    assert profile["snapshot_profile"]["source_snapshot_reference_count"] == profile["snapshot_profile"][
+        "source_snapshot_read_count_lower_bound"
+    ]
+    assert profile["indicator_profile"]["snapshot_group_count"] >= 1
+    assert profile["indicator_profile"]["source_snapshot_reference_count"] == profile["indicator_profile"][
+        "source_snapshot_read_count_lower_bound"
+    ]
     assert events[-1]["stage"] == "prepare_run_data_detail"
     assert events[-1]["status"] == "completed"
 
@@ -794,6 +903,37 @@ def test_prepare_run_data_discovers_broader_bar_snapshot_without_provider(tmp_pa
     )
     assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_provenance.action == "range_reused"
     assert prepared.symbol_data_by_symbol["000001.SZ"].snapshot_provenance.source_paths == (broad_path,)
+
+
+def test_prepare_run_data_reuses_declared_full_range_snapshot_for_late_listing_without_provider(
+    tmp_path: Path,
+) -> None:
+    run_plan = _ma_run_plan(tmp_path)
+    warmup_start = date(2023, 10, 3)
+    first_bar_date = date(2024, 2, 1)
+    bars = _trend_bars_from(
+        "000001.SZ",
+        start_date=first_bar_date,
+        count=(run_plan.run.to_date - first_bar_date).days + 1,
+    )
+    bar_path = tradable_bars_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=warmup_start,
+        end_date=run_plan.run.to_date,
+        asset_type="stock",
+        adjustment="qfq",
+    )
+    write_daily_bars_parquet(bars, bar_path)
+
+    prepared = prepare_run_data(run_plan, provider=None)
+    symbol_data = prepared.symbol_data_by_symbol["000001.SZ"]
+
+    assert symbol_data.bars[0].trade_date == first_bar_date
+    assert symbol_data.bars[-1].trade_date == run_plan.run.to_date
+    assert symbol_data.snapshot_path == bar_path
+    assert symbol_data.snapshot_provenance.action == "exact_reused"
+    assert symbol_data.snapshot_provenance.details["declared_snapshot_coverage"] is True
 
 
 def test_prepare_run_data_extends_discovered_bar_snapshot_edges(tmp_path: Path) -> None:

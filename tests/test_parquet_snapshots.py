@@ -4,6 +4,7 @@ from attbacktrader.data import DailyBar, TradabilityStatus
 from attbacktrader.data.snapshots import (
     SnapshotReadCache,
     daily_bars_snapshot_path,
+    discover_tradability_status_snapshot_paths,
     discover_tradable_bars_snapshot_paths,
     merge_daily_bars,
     read_daily_bars_parquet,
@@ -194,3 +195,67 @@ def test_tradability_status_parquet_round_trip(tmp_path) -> None:
     assert path.parts[-3:-1] == ("tradability", "stock")
     assert path.name == "000001_SZ_20240102_20240103.parquet"
     assert read_tradability_statuses_parquet(path) == statuses
+
+
+def test_tradability_status_parquet_read_cache_reuses_by_path(tmp_path) -> None:
+    path = tradability_status_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=date(2024, 1, 2),
+        end_date=date(2024, 1, 3),
+    )
+    original = (
+        TradabilityStatus("000001.SZ", date(2024, 1, 2), is_suspended=False),
+        TradabilityStatus("000001.SZ", date(2024, 1, 3), is_suspended=True),
+    )
+    updated = (
+        TradabilityStatus("000001.SZ", date(2024, 1, 2), is_suspended=True),
+        TradabilityStatus("000001.SZ", date(2024, 1, 3), is_suspended=False),
+    )
+    write_tradability_statuses_parquet(original, path)
+    cache = SnapshotReadCache()
+
+    first = read_tradability_statuses_parquet(path, cache=cache)
+    write_tradability_statuses_parquet(updated, path)
+    second = read_tradability_statuses_parquet(path, cache=cache)
+    fresh = read_tradability_statuses_parquet(path, cache=SnapshotReadCache())
+
+    assert first is second
+    assert first == original
+    assert fresh == updated
+
+
+def test_discover_tradability_status_snapshot_paths_finds_overlapping_ranges(tmp_path) -> None:
+    matching_path = tradability_status_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 1, 31),
+    )
+    outside_path = tradability_status_snapshot_path(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=date(2024, 3, 1),
+        end_date=date(2024, 3, 31),
+    )
+    other_symbol_path = tradability_status_snapshot_path(
+        tmp_path,
+        symbol="000002.SZ",
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 1, 31),
+    )
+    matching_path.parent.mkdir(parents=True, exist_ok=True)
+    matching_path.write_text("", encoding="utf-8")
+    outside_path.write_text("", encoding="utf-8")
+    other_symbol_path.write_text("", encoding="utf-8")
+
+    candidates = discover_tradability_status_snapshot_paths(
+        tmp_path,
+        symbol="000001.SZ",
+        start_date=date(2024, 1, 15),
+        end_date=date(2024, 2, 15),
+    )
+
+    assert tuple(candidate.path for candidate in candidates) == (matching_path,)
+    assert candidates[0].start_date == date(2024, 1, 1)
+    assert candidates[0].end_date == date(2024, 1, 31)

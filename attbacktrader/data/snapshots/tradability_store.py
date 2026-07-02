@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Sequence
 
 from attbacktrader.data import TradabilityStatus
+from attbacktrader.data.snapshots.read_cache import SnapshotReadCache, snapshot_path_cache_key
+
+
+@dataclass(frozen=True)
+class TradabilityStatusSnapshotCandidate:
+    path: Path
+    symbol: str
+    start_date: date
+    end_date: date
+    asset_type: str
+
+    def overlaps(self, *, start_date: date, end_date: date) -> bool:
+        return self.start_date <= end_date and self.end_date >= start_date
 
 
 def tradability_status_snapshot_path(
@@ -17,12 +31,38 @@ def tradability_status_snapshot_path(
     end_date: date,
     asset_type: str = "stock",
 ) -> Path:
-    safe_symbol = symbol.replace(".", "_")
+    safe_symbol = _safe_symbol(symbol)
     return (
         Path(snapshot_root)
         / "tradability"
         / asset_type
         / f"{safe_symbol}_{start_date:%Y%m%d}_{end_date:%Y%m%d}.parquet"
+    )
+
+
+def discover_tradability_status_snapshot_paths(
+    snapshot_root: str | Path,
+    *,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+    asset_type: str = "stock",
+) -> tuple[TradabilityStatusSnapshotCandidate, ...]:
+    directory = Path(snapshot_root) / "tradability" / asset_type
+    if not directory.exists():
+        return ()
+
+    candidates: list[TradabilityStatusSnapshotCandidate] = []
+    for path in directory.glob(f"{_safe_symbol(symbol)}_*.parquet"):
+        candidate = _candidate_from_snapshot_path(path, symbol=symbol, asset_type=asset_type)
+        if candidate is not None and candidate.overlaps(start_date=start_date, end_date=end_date):
+            candidates.append(candidate)
+
+    return tuple(
+        sorted(
+            candidates,
+            key=lambda candidate: (candidate.start_date, candidate.end_date, candidate.path.name),
+        )
     )
 
 
@@ -63,7 +103,17 @@ def write_tradability_statuses_parquet(statuses: Sequence[TradabilityStatus], pa
     return parquet_path
 
 
-def read_tradability_statuses_parquet(path: str | Path) -> tuple[TradabilityStatus, ...]:
+def read_tradability_statuses_parquet(
+    path: str | Path,
+    *,
+    cache: SnapshotReadCache | None = None,
+) -> tuple[TradabilityStatus, ...]:
+    if cache is not None:
+        return cache.get_or_read(
+            snapshot_path_cache_key("tradability_statuses_parquet", path),
+            lambda: read_tradability_statuses_parquet(path),
+        )
+
     try:
         import pandas as pd
     except ImportError as exc:
@@ -96,3 +146,44 @@ def _optional_float(value) -> float | None:
     if pd is not None and pd.isna(value):
         return None
     return float(value)
+
+
+def _candidate_from_snapshot_path(
+    path: Path,
+    *,
+    symbol: str,
+    asset_type: str,
+) -> TradabilityStatusSnapshotCandidate | None:
+    safe_symbol = _safe_symbol(symbol)
+    stem = path.stem
+    prefix = f"{safe_symbol}_"
+    if not stem.startswith(prefix):
+        return None
+
+    date_parts = stem.removeprefix(prefix).split("_")
+    if len(date_parts) != 2:
+        return None
+
+    try:
+        start_date = date.fromisoformat(_compact_date_to_iso(date_parts[0]))
+        end_date = date.fromisoformat(_compact_date_to_iso(date_parts[1]))
+    except ValueError:
+        return None
+
+    return TradabilityStatusSnapshotCandidate(
+        path=path,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+        asset_type=asset_type,
+    )
+
+
+def _compact_date_to_iso(value: str) -> str:
+    if len(value) != 8 or not value.isdigit():
+        raise ValueError(f"invalid compact date: {value}")
+    return f"{value[:4]}-{value[4:6]}-{value[6:]}"
+
+
+def _safe_symbol(symbol: str) -> str:
+    return symbol.replace(".", "_")

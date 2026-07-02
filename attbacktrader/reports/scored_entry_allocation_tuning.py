@@ -466,6 +466,14 @@ def build_strategy_decision_event_table_from_signal_audit(
                     "event_count": len(events),
                 }
             )
+    profile = {
+        "schema": "attbacktrader.strategy_decision_event_table_build_profile.v1",
+        "source": "full_signal_audit",
+        "scanned_rows": scanned_count,
+        "actionable_rows": actionable_count,
+        "event_count": len(events),
+        "factor_field_count": len(factor_fields),
+    }
     if progress_callback is not None:
         progress_callback(
             {
@@ -474,6 +482,8 @@ def build_strategy_decision_event_table_from_signal_audit(
                 "scanned_rows": scanned_count,
                 "actionable_rows": actionable_count,
                 "event_count": len(events),
+                "factor_field_count": len(factor_fields),
+                "profile": profile,
             }
         )
     cache_inputs_with_fields = dict(cache_inputs)
@@ -481,7 +491,9 @@ def build_strategy_decision_event_table_from_signal_audit(
         if not factor_fields:
             raise ValueError("full signal_audit has no actionable decision evidence fields")
         cache_inputs_with_fields["factor_field_set"] = sorted(factor_fields)
-    return build_strategy_decision_event_table(events, cache_inputs=cache_inputs_with_fields)
+    table = build_strategy_decision_event_table(events, cache_inputs=cache_inputs_with_fields)
+    table["build_profile"] = profile
+    return table
 
 
 def score_entry_candidates(

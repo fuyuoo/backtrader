@@ -24,6 +24,8 @@ DEFAULT_5000_POINT_REQUESTS_PER_MINUTE = 450.0
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     run_plan = load_run_plan(args.config)
+    if args.offline_data:
+        run_plan = _force_offline_data_mode(run_plan)
     provider = None
     if run_plan.data.refresh_snapshots:
         if run_plan.data.provider != "tushare":
@@ -70,12 +72,33 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="Print full preflight report JSON")
     parser.add_argument("--strict", action="store_true", help="Exit non-zero when preflight status is error")
     parser.add_argument("--no-progress", action="store_true", help="Disable progress messages")
+    parser.add_argument(
+        "--offline-data",
+        action="store_true",
+        help=(
+            "Force data.refresh_snapshots=false and run preflight without a Tushare provider. "
+            "Missing snapshots fail instead of being fetched."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.max_symbols is not None and args.max_symbols <= 0:
         parser.error("--max-symbols must be positive")
     if args.indicator_alarm_threshold < 0:
         parser.error("--indicator-alarm-threshold must be non-negative")
     return args
+
+
+def _force_offline_data_mode(run_plan):
+    return run_plan.model_copy(
+        update={
+            "data": run_plan.data.model_copy(
+                update={
+                    "refresh_snapshots": False,
+                    "refresh_before_stock_pool_filter": False,
+                }
+            )
+        }
+    )
 
 
 def _print_progress(current: int, total: int, symbol: str, status: str) -> None:

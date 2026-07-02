@@ -121,11 +121,53 @@ def test_run_plan_cli_writes_progress_log(monkeypatch, capsys, tmp_path) -> None
     assert all("timestamp_utc" in event for event in events)
 
 
+def test_run_plan_cli_offline_data_forces_snapshot_reuse_without_provider(monkeypatch, capsys) -> None:
+    run_plan = _mutable_run_plan()
+
+    def fail_read_token(_path):
+        raise AssertionError("offline data mode must not read Tushare token")
+
+    def fail_provider(*_args, **_kwargs):
+        raise AssertionError("offline data mode must not build TushareProvider")
+
+    def fake_execute(_run_plan, provider=None):
+        assert provider is None
+        assert _run_plan.data.refresh_snapshots is False
+        assert _run_plan.data.refresh_before_stock_pool_filter is False
+        return _result()
+
+    monkeypatch.setattr(run_plan_cli, "load_run_plan", lambda _path: run_plan)
+    monkeypatch.setattr(run_plan_cli, "read_tushare_token", fail_read_token)
+    monkeypatch.setattr(run_plan_cli, "TushareProvider", fail_provider)
+    monkeypatch.setattr(run_plan_cli, "execute_run_plan", fake_execute)
+
+    assert run_plan_cli.main(["--config", "dummy.yaml", "--offline-data", "--no-persist", "--summary-json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema"] == "attbacktrader.run_execution_summary.v1"
+
+
 def _run_plan():
     return SimpleNamespace(
         run=SimpleNamespace(id="summary-test", from_date=date(2024, 1, 1), to_date=date(2024, 3, 31)),
         data=SimpleNamespace(refresh_snapshots=False, provider="fake"),
         execution=SimpleNamespace(engine="backtrader"),
+        output=SimpleNamespace(persist=True, report_root="reports"),
+    )
+
+
+class _MutableNamespace(SimpleNamespace):
+    def model_copy(self, *, update):
+        values = dict(self.__dict__)
+        values.update(update)
+        return type(self)(**values)
+
+
+def _mutable_run_plan():
+    return _MutableNamespace(
+        run=SimpleNamespace(id="summary-test", from_date=date(2024, 1, 1), to_date=date(2024, 3, 31)),
+        data=_MutableNamespace(refresh_snapshots=True, refresh_before_stock_pool_filter=True, provider="tushare"),
+        execution=_MutableNamespace(engine="backtrader"),
         output=SimpleNamespace(persist=True, report_root="reports"),
     )
 

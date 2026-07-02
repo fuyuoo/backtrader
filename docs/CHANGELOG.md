@@ -13,6 +13,47 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-07-02 — RunPlan 离线只读阶段共享 SnapshotReadCache
+
+- 需求：`data_preflight_symbols` 和 `prepare_run_data_symbols` 都会读取同一批日线、指标和可交易状态快照；正式离线回测应避免重复读盘。
+- 改动：
+  - `attbacktrader/runners/run_plan.py`：在只读快照模式下自动创建共享 `SnapshotReadCache`，并同时传给股票池 preflight 与正式 prepared data；如果 `refresh_before_stock_pool_filter=true`，默认不自动共享，避免边写边读造成缓存陈旧。
+  - `attbacktrader/runners/data_preflight.py`：新增 `snapshot_read_cache` 参数，并下传到 index、industry index 和 symbol 级准备逻辑。
+  - `attbacktrader/features/snapshots.py`、`attbacktrader/data/snapshots/tradability_store.py`：指标快照和可交易状态 Parquet reader 支持可选 read cache。
+  - `attbacktrader/runners/prepared_data.py`：指标、可交易状态候选读取接入共享 cache；性能画像新增 `source_snapshot_reference_count`，旧的 `source_snapshot_read_count_lower_bound` 暂保留兼容。
+  - `tests/test_run_plan_executor.py`、`tests/test_indicator_snapshots.py`、`tests/test_parquet_snapshots.py`、`tests/test_prepared_run_data.py`：覆盖跨阶段 cache 传递和 reader cache 复用。
+- 影响：不改变策略信号、数据刷新策略或回测结果口径；2023-2024 固定 800 股票池离线基线从约 746.9 秒降到约 473.5 秒，但第二次运行保留标的数从 768 增至 797，耗时对比仅作为工程基线，不作为策略证据。
+
+## 2026-07-02 — 数据准备与 Decision Event Table 增加性能画像
+
+- 需求：优先处理架构报告里的效率问题，先补可观测性，定位数据准备和大表构建的主要耗时/重复读取来源。
+- 改动：
+  - `attbacktrader/runners/prepared_data.py`：`PreparedRunData` 新增 `performance_profile()`，数据准备完成时通过 progress callback 写出 `prepare_run_data_profile` 事件，记录股票数、benchmark/行业引用数量、快照来源动作统计、provider fetch 次数下界、指标快照复用/构建统计等。
+  - `attbacktrader/reports/scored_entry_allocation_tuning.py`：Strategy Decision Event Table 构建结果新增 `build_profile`，progress completed 事件同步输出扫描行数、actionable 行数、事件数和因子字段数。
+  - `tests/test_prepared_run_data.py`、`tests/test_scored_entry_allocation_tuning.py`：覆盖性能画像事件和构建画像字段。
+  - `docs/FEATURES.md`：补充 RunPlan 数据准备性能画像和 Decision Event Table 构建画像说明。
+- 影响：不改变策略信号、回测结果、数据刷新逻辑或 artifact schema 的核心含义；这次只增加长任务诊断信息，为后续减少重复 snapshot 读取和 provider fetch 做基线。
+
+## 2026-07-01 — 可交易状态快照支持区间复用
+
+- 需求：长窗口回测和后续 20 年全 A 回测前，先减少重复 Tushare 请求；回测期间不应为了可交易状态反复联网。
+- 改动：
+  - `attbacktrader/cli/data_preflight.py`：新增 `--offline-data`，正式回测前的数据校验也可以强制只读本地快照，不读取 token、不构建 Tushare provider。
+  - `attbacktrader/data/snapshots/tradability_store.py`：新增可交易状态快照候选发现，支持按文件名日期区间识别本地 Parquet 覆盖范围。
+  - `attbacktrader/runners/prepared_data.py`：准备数据时优先复用已有可交易状态区间快照；覆盖完整时直接裁剪写出目标快照，覆盖不足时只请求缺口区间。
+  - `tests/test_data_preflight.py`、`tests/test_parquet_snapshots.py`、`tests/test_prepared_run_data.py`：覆盖离线 preflight、区间发现、宽区间复用不请求 provider、以及只补缺口的行为。
+  - `docs/FEATURES.md`：补充长窗口数据准备和离线回测的数据复用口径。
+- 影响：默认策略信号和交易逻辑不变；数据准备阶段减少重复联网，正式回测配合 `--offline-data` 可保证缺数据直接失败。
+
+## 2026-07-01 — RunPlan CLI 增加离线数据模式
+
+- 需求：正式回测期间不允许请求 Tushare；数据准备和回测执行需要硬隔离，缺本地数据时应直接失败。
+- 改动：
+  - `attbacktrader/cli/run_plan.py`：新增 `--offline-data`，强制 `data.refresh_snapshots=false` 和 `data.refresh_before_stock_pool_filter=false`，不读取 Tushare token、不创建 Tushare provider。
+  - `tests/test_run_execution_summary.py`：覆盖离线模式不会读取 token/构建 provider，并把离线 RunPlan 传入执行器。
+  - `docs/FEATURES.md`：补充离线回测命令和长窗口数据准备建议。
+- 影响：默认 RunPlan 行为不变；只有显式加 `--offline-data` 时启用离线只读本地快照口径。
+
 ## 2026-07-01 — RunPlan 支持动态指数成分股入场门槛
 
 - 需求：2005-2014 回测不能用 2026 年固定沪深300/中证500成分股池；股票池需要按历史成分股快照变化。

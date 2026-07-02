@@ -251,6 +251,66 @@ def test_execute_run_plan_auto_filter_reuses_existing_snapshots(tmp_path: Path) 
     assert offline_result.data_preflight_report.checked_symbol_count == 2
 
 
+def test_execute_run_plan_auto_filter_and_prepare_share_default_snapshot_cache(monkeypatch, tmp_path: Path) -> None:
+    pool_path = tmp_path / "pool.csv"
+    pool_path.write_text(
+        "\n".join(
+            [
+                "ts_code,name,source_index,freeze_date",
+                "000001.SZ,平安银行,HS300,2026-06-07",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    run_plan = _stock_pool_run_plan(tmp_path, pool_path)
+    seen: dict[str, object] = {}
+
+    def fake_run_data_preflight(run_plan, *, snapshot_read_cache=None, **kwargs):
+        seen["preflight_cache"] = snapshot_read_cache
+        return run_plan_module.DataPreflightReport(
+            schema="attbacktrader.data_preflight.v1",
+            run_id=run_plan.run.id,
+            status="ok",
+            run_start_date=run_plan.run.from_date,
+            run_end_date=run_plan.run.to_date,
+            requested_symbol_count=1,
+            checked_symbol_count=1,
+            ok_symbol_count=1,
+            warning_symbol_count=0,
+            failed_symbol_count=0,
+            indicator_alarm_threshold=0.05,
+            required_indicators=(),
+            index_results=(),
+            industry_index_results=(),
+            symbol_results=(
+                run_plan_module.DataPreflightSymbolResult(
+                    symbol="000001.SZ",
+                    asset_type="stock",
+                    adjustment="qfq",
+                    status="ok",
+                ),
+            ),
+            issue_summary={},
+            error_summary={},
+        )
+
+    class StopAfterPrepareCacheCapture(Exception):
+        pass
+
+    def fake_prepare_run_data(run_plan, *, snapshot_read_cache=None, **kwargs):
+        seen["prepare_cache"] = snapshot_read_cache
+        raise StopAfterPrepareCacheCapture()
+
+    monkeypatch.setattr(run_plan_module, "run_data_preflight", fake_run_data_preflight)
+    monkeypatch.setattr(run_plan_module, "prepare_run_data", fake_prepare_run_data)
+
+    with pytest.raises(StopAfterPrepareCacheCapture):
+        execute_run_plan(run_plan, provider=None)
+
+    assert seen["preflight_cache"] is not None
+    assert seen["prepare_cache"] is seen["preflight_cache"]
+
+
 def test_execute_run_plan_can_reuse_existing_snapshots_without_provider(tmp_path: Path) -> None:
     first_symbol_bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
     second_symbol_bars = tuple(replace(bar, symbol="000002.SZ") for bar in first_symbol_bars)
