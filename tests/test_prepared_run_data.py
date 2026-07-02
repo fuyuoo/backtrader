@@ -276,6 +276,7 @@ def test_prepare_run_data_reports_structured_progress(tmp_path: Path) -> None:
     assert profile == prepared.performance_profile()
     assert profile["schema"] == "attbacktrader.prepare_run_data_performance_profile.v1"
     assert profile["symbol_count"] == 1
+    assert profile["reused_prepared_symbol_count"] == 0
     assert profile["snapshot_profile"]["provenance_count"] >= 4
     assert profile["snapshot_profile"]["action_counts"]["created"] >= 1
     assert profile["snapshot_profile"]["source_snapshot_reference_count"] == profile["snapshot_profile"][
@@ -285,8 +286,43 @@ def test_prepare_run_data_reports_structured_progress(tmp_path: Path) -> None:
     assert profile["indicator_profile"]["source_snapshot_reference_count"] == profile["indicator_profile"][
         "source_snapshot_read_count_lower_bound"
     ]
+    phase_profile = profile["symbol_prepare_phase_profile"]
+    assert phase_profile["symbol_count"] == 1
+    assert phase_profile["measured_symbol_count"] == 1
+    assert phase_profile["reused_symbol_count"] == 0
+    assert phase_profile["recorded_seconds"] >= 0
+    assert phase_profile["phase_counts"]["load_bars"] == 1
+    assert phase_profile["phase_counts"]["slice_and_assess_quality"] == 1
+    assert phase_profile["phase_counts"]["load_indicators"] == 1
+    assert phase_profile["phase_counts"]["build_indicator_frame"] == 1
+    assert set(phase_profile["phase_avg_seconds"]).issuperset(
+        {"load_bars", "slice_and_assess_quality", "load_indicators", "build_indicator_frame"}
+    )
     assert events[-1]["stage"] == "prepare_run_data_detail"
     assert events[-1]["status"] == "completed"
+
+
+def test_prepare_run_data_reuses_prepared_symbol_data_by_symbol(tmp_path: Path) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    run_plan = _run_plan(tmp_path)
+    provider = FakePreparedDataProvider(bars)
+    first = prepare_run_data(run_plan, provider=provider)
+    reuse_run_plan = run_plan.model_copy(
+        update={"data": run_plan.data.model_copy(update={"refresh_snapshots": False})}
+    )
+
+    second = prepare_run_data(
+        reuse_run_plan,
+        provider=None,
+        prepared_symbol_data_by_symbol=first.symbol_data_by_symbol,
+    )
+    profile = second.performance_profile()
+
+    assert second.symbol_data_by_symbol["000001.SZ"] is first.symbol_data_by_symbol["000001.SZ"]
+    assert profile["reused_prepared_symbol_count"] == 1
+    assert profile["symbol_prepare_phase_profile"]["measured_symbol_count"] == 0
+    assert profile["symbol_prepare_phase_profile"]["reused_symbol_count"] == 1
+    assert profile["symbol_prepare_phase_profile"]["phase_counts"] == {}
 
 
 def test_prepared_run_data_cache_reuses_when_only_run_id_changes(tmp_path: Path) -> None:

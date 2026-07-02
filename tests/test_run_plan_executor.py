@@ -265,8 +265,10 @@ def test_execute_run_plan_auto_filter_and_prepare_share_default_snapshot_cache(m
     run_plan = _stock_pool_run_plan(tmp_path, pool_path)
     seen: dict[str, object] = {}
 
-    def fake_run_data_preflight(run_plan, *, snapshot_read_cache=None, **kwargs):
+    def fake_run_data_preflight(run_plan, *, snapshot_read_cache=None, prepared_symbol_cache=None, **kwargs):
         seen["preflight_cache"] = snapshot_read_cache
+        seen["prepared_symbol_cache"] = prepared_symbol_cache
+        prepared_symbol_cache["000001.SZ"] = object()
         return run_plan_module.DataPreflightReport(
             schema="attbacktrader.data_preflight.v1",
             run_id=run_plan.run.id,
@@ -297,8 +299,9 @@ def test_execute_run_plan_auto_filter_and_prepare_share_default_snapshot_cache(m
     class StopAfterPrepareCacheCapture(Exception):
         pass
 
-    def fake_prepare_run_data(run_plan, *, snapshot_read_cache=None, **kwargs):
+    def fake_prepare_run_data(run_plan, *, snapshot_read_cache=None, prepared_symbol_data_by_symbol=None, **kwargs):
         seen["prepare_cache"] = snapshot_read_cache
+        seen["prepared_symbol_data_by_symbol"] = prepared_symbol_data_by_symbol
         raise StopAfterPrepareCacheCapture()
 
     monkeypatch.setattr(run_plan_module, "run_data_preflight", fake_run_data_preflight)
@@ -309,6 +312,8 @@ def test_execute_run_plan_auto_filter_and_prepare_share_default_snapshot_cache(m
 
     assert seen["preflight_cache"] is not None
     assert seen["prepare_cache"] is seen["preflight_cache"]
+    assert seen["prepared_symbol_cache"] is not None
+    assert seen["prepared_symbol_data_by_symbol"]["000001.SZ"] is seen["prepared_symbol_cache"]["000001.SZ"]
 
 
 def test_execute_run_plan_can_reuse_existing_snapshots_without_provider(tmp_path: Path) -> None:

@@ -13,6 +13,43 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-07-02 — Data Preflight 增加阶段画像并并行化离线 symbol 读取
+
+- 需求：prepared symbol 复用后，`data_preflight_symbols` 成为最大耗时阶段，需要先定位内部耗时，再减少离线本地快照读取的墙钟时间。
+- 改动：
+  - `attbacktrader/runners/data_preflight.py`：`DataPreflightReport` 和 progress completed 事件新增 `performance_profile`，记录 symbol 准备阶段 `load_bars`、`load_indicators`、`load_tradability`、`build_indicator_frame`、`slice_and_assess_quality` 的累计耗时、调用次数、平均耗时和 symbol 阶段 wall time。
+  - `attbacktrader/runners/data_preflight.py`：在 `provider is None` 且 `data.refresh_snapshots=false` 的离线只读 preflight 下，自动使用最多 4 个 worker 并行准备 symbol；联网/刷新快照场景保持串行。
+  - `attbacktrader/data/snapshots/read_cache.py`：`SnapshotReadCache` 加锁，支持并行 preflight 共享只读缓存。
+  - `tests/test_data_preflight.py`、`tests/test_parquet_snapshots.py`、`tests/test_indicator_snapshots.py`、`tests/test_run_plan_executor.py`：覆盖 profile 字段、并行结果顺序、prepared cache 汇总和缓存兼容。
+- 影响：不改变 preflight 成功/失败口径、股票池过滤结果、策略信号或回测结果；2023-2024 固定样本离线基准中 `data_preflight` 从约 177.8 秒降到约 149.3 秒。
+
+## 2026-07-02 — Baoma 归因构建复用 symbol 内指标查找
+
+- 需求：prepared symbol 复用后，`baoma_entry_attribution_context_build_symbols` 仍是主要热点之一，且每根 K 线都会重复扫描同一股票的 MACD 日期序列和 weekly 指标日期序列。
+- 改动：
+  - `attbacktrader/strategies/attribution.py`：每只股票预先构建 `date -> DEA 水线年龄` 映射，symbol evidence 构建时按日期查表，避免每个 bar 重新排序和回扫 MACD 序列。
+  - `attbacktrader/strategies/attribution.py`：每只股票预先构建 completed weekly KDJ/MACD evidence 映射，保留 `event_date - 1` 的已完成周线口径，避免每个 bar 反复扫描 weekly 指标日期。
+  - `tests/test_entry_attribution.py`、`tests/test_weekly_attribution_prerequisites.py`：继续覆盖归因字段、水线年龄桶和周线不能偷看当周未完成数据的约束。
+- 影响：不改变归因字段、筛选逻辑或回测信号；2023-2024 固定样本离线基准中 `baoma_entry_attribution_context_build_symbols` 从约 56.1 秒降到约 30.7 秒，整个 `baoma_entry_attribution_context` 从约 68.5 秒降到约 43.3 秒。
+
+## 2026-07-02 — 股票池 preflight 结果复用 PreparedSymbolData
+
+- 需求：细粒度画像显示 `prepare_run_data_symbols` 主要耗时在 `load_indicators`、`load_bars` 和 `load_tradability`；这些数据在股票池 preflight 阶段已经成功准备过。
+- 改动：
+  - `attbacktrader/runners/data_preflight.py`：支持把成功准备的 `PreparedSymbolData` 写入本次执行内的临时 cache。
+  - `attbacktrader/runners/run_plan.py`：股票池过滤后，仅把保留下来的 prepared symbol 传给正式 prepared data。
+  - `attbacktrader/runners/prepared_data.py`：`prepare_run_data` 支持 `prepared_symbol_data_by_symbol`，匹配 symbol / asset_type / adjustment 后直接复用，并在 profile 中记录 `reused_prepared_symbol_count`、`measured_symbol_count` 和 `reused_symbol_count`。
+  - `tests/test_prepared_run_data.py`、`tests/test_run_plan_executor.py`：覆盖同次执行内的 prepared symbol 复用链路。
+- 影响：不改变 preflight 的错误隔离和股票池过滤规则；只复用本次执行内已经成功准备且通过过滤的 symbol 数据，不跨 RunPlan 落盘复用。
+
+## 2026-07-02 — Prepared Run Data 增加 symbol 阶段耗时画像
+
+- 需求：共享 SnapshotReadCache 后，继续定位 `data_preflight_symbols` / `prepare_run_data_symbols` 的剩余耗时来自哪一段 symbol 准备逻辑。
+- 改动：
+  - `attbacktrader/runners/prepared_data.py`：`prepare_run_data_profile` 新增 `symbol_prepare_phase_profile`，聚合 `load_bars`、`slice_and_assess_quality`、`load_indicators`、`build_indicator_frame`、`load_tradability` 的总耗时、调用次数和平均耗时。
+  - `tests/test_prepared_run_data.py`：覆盖新增 phase profile 字段。
+- 影响：只增加诊断字段，不改变数据读取、指标构建、可交易状态、策略信号或回测结果。
+
 ## 2026-07-02 — RunPlan 离线只读阶段共享 SnapshotReadCache
 
 - 需求：`data_preflight_symbols` 和 `prepare_run_data_symbols` 都会读取同一批日线、指标和可交易状态快照；正式离线回测应避免重复读盘。

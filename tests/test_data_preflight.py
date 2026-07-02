@@ -10,6 +10,7 @@ from attbacktrader.config import RunPlan
 from attbacktrader.data import DailyBar, IndexBar, TradabilityStatus
 from attbacktrader.features import IndicatorRequirement, IndicatorSnapshot
 from attbacktrader.runners import run_data_preflight
+from attbacktrader.runners import data_preflight as data_preflight_module
 from attbacktrader.runners.data_preflight import _indicator_coverage
 
 
@@ -94,6 +95,60 @@ def test_data_preflight_reports_structured_progress(tmp_path: Path) -> None:
     assert events[-1]["stage"] == "data_preflight"
     assert events[-1]["status"] == "completed"
     assert events[-1]["preflight_status"] == "ok"
+    assert events[-1]["parallel_worker_count"] == 1
+    assert events[-1]["performance_profile"] == report.performance_profile
+    phase_profile = report.performance_profile["symbol_prepare_phase_profile"]
+    assert phase_profile["symbol_count"] == 1
+    assert phase_profile["measured_symbol_count"] == 1
+    assert phase_profile["parallel_worker_count"] == 1
+    assert phase_profile["phase_counts"]["load_bars"] == 1
+    assert phase_profile["phase_counts"]["load_indicators"] == 1
+    assert phase_profile["recorded_seconds"] >= 0
+    assert phase_profile["wall_seconds"] >= 0
+    assert report.performance_profile["snapshot_profile"]["action_counts"]
+
+
+def test_data_preflight_parallel_workers_preserve_report_order_and_cache(monkeypatch, tmp_path: Path) -> None:
+    run_plan = _run_plan(tmp_path, symbols=("000001.SZ", "000002.SZ", "000003.SZ"))
+    run_plan = run_plan.model_copy(
+        update={"data": run_plan.data.model_copy(update={"refresh_snapshots": False})}
+    )
+    events = []
+    prepared_cache = {}
+
+    monkeypatch.setattr(data_preflight_module, "_prepare_common_indexes", lambda *args, **kwargs: ({}, ()))
+    monkeypatch.setattr(data_preflight_module, "_prepare_common_industry_indexes", lambda *args, **kwargs: ({}, ()))
+    monkeypatch.setattr(data_preflight_module, "_trading_calendar_for_run", lambda *args, **kwargs: None)
+
+    def fake_preflight_symbol(run_plan, *, series, phase_timer=None, **kwargs):
+        if phase_timer is not None:
+            phase_timer("load_bars", 0.01)
+        return data_preflight_module._PreflightSymbolOutcome(
+            result=data_preflight_module.DataPreflightSymbolResult(
+                symbol=series.symbol,
+                asset_type=series.asset_type,
+                adjustment=series.price_adjustment or "none",
+                status="ok",
+            ),
+            prepared_symbol=SimpleNamespace(symbol=series.symbol),
+        )
+
+    monkeypatch.setattr(data_preflight_module, "_preflight_symbol", fake_preflight_symbol)
+
+    report = data_preflight_module.run_data_preflight(
+        run_plan,
+        prepared_symbol_cache=prepared_cache,
+        parallel_workers=3,
+        event_progress=events.append,
+    )
+
+    assert [result.symbol for result in report.symbol_results] == ["000001.SZ", "000002.SZ", "000003.SZ"]
+    assert set(prepared_cache) == {"000001.SZ", "000002.SZ", "000003.SZ"}
+    assert report.performance_profile["parallel_worker_count"] == 3
+    assert report.performance_profile["prepared_symbol_cache_count"] == 3
+    assert report.performance_profile["symbol_prepare_phase_profile"]["phase_counts"]["load_bars"] == 3
+    assert events[0]["stage"] == "data_preflight"
+    assert events[-1]["parallel_worker_count"] == 3
 
 
 def test_data_preflight_keeps_going_when_one_symbol_fails(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -170,6 +171,9 @@ class PreparedRunData:
     attribution_reference_evidence_by_symbol_date: Mapping[str, Mapping[date, EntryAttributionEvidence]] = field(
         default_factory=dict
     )
+    symbol_prepare_phase_seconds: Mapping[str, float] = field(default_factory=dict)
+    symbol_prepare_phase_counts: Mapping[str, int] = field(default_factory=dict)
+    reused_prepared_symbol_count: int = 0
 
     @property
     def symbols(self) -> tuple[str, ...]:
@@ -286,6 +290,7 @@ class PreparedRunDataCache:
         *,
         provider: RunDataProvider | None = None,
         snapshot_read_cache: SnapshotReadCache | None = None,
+        prepared_symbol_data_by_symbol: Mapping[str, PreparedSymbolData] | None = None,
         event_progress: Callable[[Mapping[str, object]], None] | None = None,
         prepare: Callable[..., Any] | None = None,
     ) -> Any:
@@ -295,6 +300,8 @@ class PreparedRunDataCache:
             kwargs: dict[str, Any] = {"provider": provider}
             if snapshot_read_cache is not None:
                 kwargs["snapshot_read_cache"] = snapshot_read_cache
+            if prepared_symbol_data_by_symbol is not None:
+                kwargs["prepared_symbol_data_by_symbol"] = prepared_symbol_data_by_symbol
             if event_progress is not None:
                 kwargs["event_progress"] = event_progress
             self._items[key] = prepare_func(run_plan, **kwargs)
@@ -316,6 +323,7 @@ def prepare_run_data(
     *,
     provider: RunDataProvider | None = None,
     snapshot_read_cache: SnapshotReadCache | None = None,
+    prepared_symbol_data_by_symbol: Mapping[str, PreparedSymbolData] | None = None,
     event_progress: Callable[[Mapping[str, object]], None] | None = None,
 ) -> PreparedRunData:
     tradable_series = run_plan.data.resolved_tradable_series
@@ -348,6 +356,14 @@ def prepare_run_data(
     )
     trading_calendar = _trading_calendar_for_run(run_plan, prepared_indexes_by_symbol)
     prepared_symbol_items: list[PreparedSymbolData] = []
+    symbol_prepare_phase_seconds: dict[str, float] = {}
+    symbol_prepare_phase_counts: dict[str, int] = {}
+    reused_prepared_symbol_count = 0
+
+    def record_symbol_prepare_phase(phase: str, seconds: float) -> None:
+        symbol_prepare_phase_seconds[phase] = symbol_prepare_phase_seconds.get(phase, 0.0) + seconds
+        symbol_prepare_phase_counts[phase] = symbol_prepare_phase_counts.get(phase, 0) + 1
+
     _emit_prepare_event(
         event_progress,
         stage="prepare_run_data_symbols",
@@ -356,14 +372,24 @@ def prepare_run_data(
         total_symbols=len(tradable_series),
     )
     for index, series in enumerate(tradable_series, start=1):
-        prepared_symbol = _prepare_symbol_data(
-            run_plan,
-            series=series,
-            provider=provider,
-            indicator_requirements=indicator_requirements,
-            trading_calendar=trading_calendar,
-            snapshot_read_cache=snapshot_read_cache,
+        cached_prepared_symbol = (
+            prepared_symbol_data_by_symbol.get(series.symbol)
+            if prepared_symbol_data_by_symbol is not None
+            else None
         )
+        if cached_prepared_symbol is not None and _prepared_symbol_matches_series(cached_prepared_symbol, series):
+            prepared_symbol = cached_prepared_symbol
+            reused_prepared_symbol_count += 1
+        else:
+            prepared_symbol = _prepare_symbol_data(
+                run_plan,
+                series=series,
+                provider=provider,
+                indicator_requirements=indicator_requirements,
+                trading_calendar=trading_calendar,
+                snapshot_read_cache=snapshot_read_cache,
+                phase_timer=record_symbol_prepare_phase,
+            )
         prepared_symbol_items.append(prepared_symbol)
         _emit_prepare_event(
             event_progress,
@@ -376,6 +402,7 @@ def prepare_run_data(
             bar_count=len(prepared_symbol.bars),
             indicator_snapshot_count=len(prepared_symbol.indicator_snapshots),
             tradability_status_count=len(prepared_symbol.tradability_statuses),
+            reused_prepared_symbol=cached_prepared_symbol is prepared_symbol,
         )
     prepared_symbols = tuple(prepared_symbol_items)
     _emit_prepare_event(
@@ -455,6 +482,9 @@ def prepare_run_data(
         memberships_by_symbol=memberships_by_symbol,
         trading_calendar=trading_calendar,
         attribution_reference_evidence_by_symbol_date=attribution_reference_evidence_by_symbol_date,
+        symbol_prepare_phase_seconds=symbol_prepare_phase_seconds,
+        symbol_prepare_phase_counts=symbol_prepare_phase_counts,
+        reused_prepared_symbol_count=reused_prepared_symbol_count,
     )
     _emit_prepare_event(
         event_progress,
@@ -672,8 +702,10 @@ def _prepared_run_data_performance_profile(prepared: PreparedRunData) -> dict[st
         "industry_index_count": len(prepared.industry_index_data_by_symbol),
         "industry_membership_result_count": len(prepared.industry_membership_results),
         "attribution_reference_symbol_count": len(prepared.attribution_reference_evidence_by_symbol_date),
+        "reused_prepared_symbol_count": prepared.reused_prepared_symbol_count,
         "snapshot_profile": _snapshot_provenance_profile(provenances),
         "indicator_profile": _indicator_provenance_profile(indicator_provenances),
+        "symbol_prepare_phase_profile": _symbol_prepare_phase_profile(prepared),
     }
 
 
@@ -741,6 +773,50 @@ def _indicator_provenance_profile(provenances: tuple[SnapshotProvenance, ...]) -
         "source_snapshot_reference_count": sum(len(provenance.source_paths) for provenance in provenances),
         "source_snapshot_read_count_lower_bound": sum(len(provenance.source_paths) for provenance in provenances),
     }
+
+
+def _symbol_prepare_phase_profile(prepared: PreparedRunData) -> dict[str, Any]:
+    phase_seconds = {
+        phase: round(seconds, 6)
+        for phase, seconds in sorted(prepared.symbol_prepare_phase_seconds.items())
+    }
+    phase_counts = {
+        phase: prepared.symbol_prepare_phase_counts[phase]
+        for phase in sorted(prepared.symbol_prepare_phase_counts)
+    }
+    phase_avg_seconds = {
+        phase: round(phase_seconds[phase] / phase_counts[phase], 6)
+        for phase in phase_seconds
+        if phase_counts.get(phase, 0) > 0
+    }
+    measured_symbol_count = max(phase_counts.values(), default=0)
+    return {
+        "symbol_count": len(prepared.symbols),
+        "measured_symbol_count": measured_symbol_count,
+        "reused_symbol_count": prepared.reused_prepared_symbol_count,
+        "phase_seconds": phase_seconds,
+        "phase_counts": phase_counts,
+        "phase_avg_seconds": phase_avg_seconds,
+        "recorded_seconds": round(sum(phase_seconds.values()), 6),
+    }
+
+
+def _record_phase_seconds(
+    phase_timer: Callable[[str, float], None] | None,
+    phase: str,
+    started_at: float,
+) -> None:
+    if phase_timer is None:
+        return
+    phase_timer(phase, time.perf_counter() - started_at)
+
+
+def _prepared_symbol_matches_series(prepared: PreparedSymbolData, series: TradableSeriesConfig) -> bool:
+    return (
+        prepared.symbol == series.symbol
+        and prepared.asset_type == series.asset_type
+        and prepared.adjustment == (series.price_adjustment or "none")
+    )
 
 
 def _increment_count(counts: dict[str, int], key: str) -> None:
@@ -954,6 +1030,7 @@ def _prepare_symbol_data(
     indicator_requirements: tuple[IndicatorRequirement, ...],
     trading_calendar: TradingCalendar | None,
     snapshot_read_cache: SnapshotReadCache | None = None,
+    phase_timer: Callable[[str, float], None] | None = None,
 ) -> PreparedSymbolData:
     calculation_start_date = _symbol_calculation_start_date(
         run_plan,
@@ -977,6 +1054,7 @@ def _prepare_symbol_data(
             asset_type=series.asset_type,
         )
 
+    phase_started_at = time.perf_counter()
     bars_load_result = _load_or_fetch_bars(
         run_plan,
         series=series,
@@ -987,6 +1065,9 @@ def _prepare_symbol_data(
         minimum_start_date=run_plan.run.from_date,
         snapshot_read_cache=snapshot_read_cache,
     )
+    _record_phase_seconds(phase_timer, "load_bars", phase_started_at)
+
+    phase_started_at = time.perf_counter()
     calculation_bars = bars_load_result.bars
     bars = _bars_for_date_range(
         calculation_bars,
@@ -1002,6 +1083,9 @@ def _prepare_symbol_data(
         end_date=run_plan.run.to_date,
         trading_calendar=trading_calendar,
     )
+    _record_phase_seconds(phase_timer, "slice_and_assess_quality", phase_started_at)
+
+    phase_started_at = time.perf_counter()
     indicator_snapshots, indicator_paths, indicator_provenance = _load_or_build_required_indicators(
         run_plan,
         series=series,
@@ -1009,10 +1093,16 @@ def _prepare_symbol_data(
         indicator_requirements=indicator_requirements,
         snapshot_read_cache=snapshot_read_cache,
     )
+    _record_phase_seconds(phase_timer, "load_indicators", phase_started_at)
+
+    phase_started_at = time.perf_counter()
     indicator_frame = indicator_frame_from_snapshots(indicator_snapshots)
+    _record_phase_seconds(phase_timer, "build_indicator_frame", phase_started_at)
+
     tradability_statuses = ()
     tradability_provenance = None
     if tradability_path is not None:
+        phase_started_at = time.perf_counter()
         tradability_load_result = _load_or_fetch_tradability_statuses(
             run_plan,
             symbol=series.symbol,
@@ -1022,6 +1112,7 @@ def _prepare_symbol_data(
         )
         tradability_statuses = tradability_load_result.statuses
         tradability_provenance = tradability_load_result.provenance
+        _record_phase_seconds(phase_timer, "load_tradability", phase_started_at)
 
     return PreparedSymbolData(
         symbol=series.symbol,

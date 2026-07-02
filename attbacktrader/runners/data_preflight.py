@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from threading import Lock
 
 from attbacktrader.config import RunPlan, TradableSeriesConfig
 from attbacktrader.config.models import SeriesSelection
@@ -100,6 +104,13 @@ class DataPreflightReport:
     symbol_results: tuple[DataPreflightSymbolResult, ...]
     issue_summary: dict[str, int]
     error_summary: dict[str, int]
+    performance_profile: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _PreflightSymbolOutcome:
+    result: DataPreflightSymbolResult
+    prepared_symbol: PreparedSymbolData | None = None
 
 
 def run_data_preflight(
@@ -107,6 +118,8 @@ def run_data_preflight(
     *,
     provider: RunDataProvider | None = None,
     snapshot_read_cache: SnapshotReadCache | None = None,
+    prepared_symbol_cache: MutableMapping[str, PreparedSymbolData] | None = None,
+    parallel_workers: int | None = None,
     max_symbols: int | None = None,
     indicator_alarm_threshold: float = 0.05,
     progress: Callable[[int, int, str, str], None] | None = None,
@@ -116,6 +129,8 @@ def run_data_preflight(
         raise ValueError("indicator_alarm_threshold must be non-negative")
     if max_symbols is not None and max_symbols <= 0:
         raise ValueError("max_symbols must be positive")
+    if parallel_workers is not None and parallel_workers <= 0:
+        raise ValueError("parallel_workers must be positive")
 
     series = run_plan.data.resolved_tradable_series
     if max_symbols is not None:
@@ -176,24 +191,42 @@ def run_data_preflight(
     running_ok_count = 0
     running_warning_count = 0
     running_failed_count = 0
+    symbol_prepare_phase_seconds: dict[str, float] = {}
+    symbol_prepare_phase_counts: dict[str, int] = {}
+    symbol_prepare_phase_lock = Lock()
+    resolved_parallel_workers = _resolve_preflight_parallel_workers(
+        run_plan,
+        provider=provider,
+        symbol_count=len(series),
+        parallel_workers=parallel_workers,
+    )
+
+    def record_symbol_prepare_phase(phase: str, seconds: float) -> None:
+        with symbol_prepare_phase_lock:
+            symbol_prepare_phase_seconds[phase] = symbol_prepare_phase_seconds.get(phase, 0.0) + seconds
+            symbol_prepare_phase_counts[phase] = symbol_prepare_phase_counts.get(phase, 0) + 1
+
     _emit_preflight_event(
         event_progress,
         stage="data_preflight_symbols",
         status="started",
         run_id=run_plan.run.id,
         total_symbols=len(series),
+        parallel_worker_count=resolved_parallel_workers,
     )
-    for index, item in enumerate(series, start=1):
-        result = _preflight_symbol(
-            run_plan,
-            series=item,
-            provider=provider,
-            indicator_requirements=indicator_requirements,
-            indicator_alarm_threshold=indicator_alarm_threshold,
-            trading_calendar=trading_calendar,
-            snapshot_read_cache=snapshot_read_cache,
-        )
-        symbol_results.append(result)
+    symbols_started_at = time.perf_counter()
+
+    def record_symbol_outcome(
+        *,
+        processed_count: int,
+        symbol_position: int,
+        item: TradableSeriesConfig,
+        outcome: _PreflightSymbolOutcome,
+    ) -> None:
+        nonlocal running_ok_count, running_warning_count, running_failed_count
+        result = outcome.result
+        if prepared_symbol_cache is not None and outcome.prepared_symbol is not None:
+            prepared_symbol_cache[item.symbol] = outcome.prepared_symbol
         if result.status == "ok":
             running_ok_count += 1
         elif result.status == "warning":
@@ -201,20 +234,76 @@ def run_data_preflight(
         elif result.status == "error":
             running_failed_count += 1
         if progress is not None:
-            progress(index, len(series), item.symbol, result.status)
+            progress(processed_count, len(series), item.symbol, result.status)
         _emit_preflight_event(
             event_progress,
             stage="data_preflight_symbols",
             status="running",
             run_id=run_plan.run.id,
-            processed_symbol_count=index,
+            processed_symbol_count=processed_count,
             total_symbols=len(series),
             symbol=item.symbol,
+            symbol_position=symbol_position,
             symbol_status=result.status,
             ok_symbol_count=running_ok_count,
             warning_symbol_count=running_warning_count,
             failed_symbol_count=running_failed_count,
         )
+
+    if resolved_parallel_workers == 1:
+        for index, item in enumerate(series, start=1):
+            outcome = _preflight_symbol(
+                run_plan,
+                series=item,
+                provider=provider,
+                indicator_requirements=indicator_requirements,
+                indicator_alarm_threshold=indicator_alarm_threshold,
+                trading_calendar=trading_calendar,
+                snapshot_read_cache=snapshot_read_cache,
+                phase_timer=record_symbol_prepare_phase,
+            )
+            symbol_results.append(outcome.result)
+            record_symbol_outcome(
+                processed_count=index,
+                symbol_position=index,
+                item=item,
+                outcome=outcome,
+            )
+    else:
+        results_by_position: list[DataPreflightSymbolResult | None] = [None] * len(series)
+        completed_count = 0
+        with ThreadPoolExecutor(max_workers=resolved_parallel_workers) as executor:
+            futures = {
+                executor.submit(
+                    _preflight_symbol,
+                    run_plan,
+                    series=item,
+                    provider=provider,
+                    indicator_requirements=indicator_requirements,
+                    indicator_alarm_threshold=indicator_alarm_threshold,
+                    trading_calendar=trading_calendar,
+                    snapshot_read_cache=snapshot_read_cache,
+                    phase_timer=record_symbol_prepare_phase,
+                ): (index, item)
+                for index, item in enumerate(series, start=1)
+            }
+            for future in as_completed(futures):
+                index, item = futures[future]
+                outcome = future.result()
+                completed_count += 1
+                results_by_position[index - 1] = outcome.result
+                record_symbol_outcome(
+                    processed_count=completed_count,
+                    symbol_position=index,
+                    item=item,
+                    outcome=outcome,
+                )
+        symbol_results.extend(
+            result
+            for result in results_by_position
+            if result is not None
+        )
+    symbols_wall_seconds = time.perf_counter() - symbols_started_at
 
     issue_summary = _issue_summary(symbol_results)
     error_summary = _error_summary(symbol_results, index_results, industry_index_results)
@@ -226,6 +315,15 @@ def run_data_preflight(
         status = "error"
     elif warning_count or any(result.status == "warning" for result in (*index_results, *industry_index_results)):
         status = "warning"
+    performance_profile = _data_preflight_performance_profile(
+        total_symbols=len(series),
+        symbol_results=symbol_results,
+        symbol_prepare_phase_seconds=symbol_prepare_phase_seconds,
+        symbol_prepare_phase_counts=symbol_prepare_phase_counts,
+        prepared_symbol_cache=prepared_symbol_cache,
+        parallel_worker_count=resolved_parallel_workers,
+        symbols_wall_seconds=symbols_wall_seconds,
+    )
 
     _emit_preflight_event(
         event_progress,
@@ -236,6 +334,8 @@ def run_data_preflight(
         ok_symbol_count=ok_count,
         warning_symbol_count=warning_count,
         failed_symbol_count=failed_count,
+        parallel_worker_count=resolved_parallel_workers,
+        performance_profile=performance_profile,
     )
     _emit_preflight_event(
         event_progress,
@@ -247,6 +347,8 @@ def run_data_preflight(
         ok_symbol_count=ok_count,
         warning_symbol_count=warning_count,
         failed_symbol_count=failed_count,
+        parallel_worker_count=resolved_parallel_workers,
+        performance_profile=performance_profile,
     )
 
     return DataPreflightReport(
@@ -267,6 +369,7 @@ def run_data_preflight(
         symbol_results=tuple(symbol_results),
         issue_summary=issue_summary,
         error_summary=error_summary,
+        performance_profile=performance_profile,
     )
 
 
@@ -277,6 +380,119 @@ def _emit_preflight_event(
     if event_progress is None:
         return
     event_progress(event)
+
+
+def _data_preflight_performance_profile(
+    *,
+    total_symbols: int,
+    symbol_results: Sequence[DataPreflightSymbolResult],
+    symbol_prepare_phase_seconds: Mapping[str, float],
+    symbol_prepare_phase_counts: Mapping[str, int],
+    prepared_symbol_cache: Mapping[str, PreparedSymbolData] | None,
+    parallel_worker_count: int,
+    symbols_wall_seconds: float,
+) -> dict[str, object]:
+    return {
+        "symbol_count": total_symbols,
+        "checked_symbol_count": len(symbol_results),
+        "ok_symbol_count": sum(1 for result in symbol_results if result.status == "ok"),
+        "warning_symbol_count": sum(1 for result in symbol_results if result.status == "warning"),
+        "failed_symbol_count": sum(1 for result in symbol_results if result.status == "error"),
+        "prepared_symbol_cache_count": len(prepared_symbol_cache) if prepared_symbol_cache is not None else 0,
+        "parallel_worker_count": parallel_worker_count,
+        "snapshot_profile": _data_preflight_snapshot_profile(symbol_results),
+        "symbol_prepare_phase_profile": _symbol_prepare_phase_profile(
+            total_symbols=total_symbols,
+            phase_seconds=symbol_prepare_phase_seconds,
+            phase_counts=symbol_prepare_phase_counts,
+            parallel_worker_count=parallel_worker_count,
+            wall_seconds=symbols_wall_seconds,
+        ),
+    }
+
+
+def _data_preflight_snapshot_profile(
+    symbol_results: Sequence[DataPreflightSymbolResult],
+) -> dict[str, object]:
+    action_counts: dict[str, int] = {}
+    type_action_counts: dict[str, int] = {}
+    source_snapshot_reference_count = 0
+
+    for result in symbol_results:
+        if result.snapshot_action is not None:
+            _increment_count(action_counts, result.snapshot_action)
+            _increment_count(type_action_counts, f"daily_bars.{result.snapshot_action}")
+            if result.snapshot_path is not None:
+                source_snapshot_reference_count += 1
+        for action in result.indicator_snapshot_actions:
+            _increment_count(action_counts, action)
+            _increment_count(type_action_counts, f"indicator.{action}")
+        source_snapshot_reference_count += len(result.indicator_snapshot_paths)
+        if result.tradability_snapshot_action is not None:
+            _increment_count(action_counts, result.tradability_snapshot_action)
+            _increment_count(type_action_counts, f"tradability.{result.tradability_snapshot_action}")
+            if result.tradability_snapshot_path is not None:
+                source_snapshot_reference_count += 1
+
+    return {
+        "action_counts": action_counts,
+        "type_action_counts": type_action_counts,
+        "source_snapshot_reference_count": source_snapshot_reference_count,
+        "source_snapshot_read_count_lower_bound": source_snapshot_reference_count,
+    }
+
+
+def _symbol_prepare_phase_profile(
+    *,
+    total_symbols: int,
+    phase_seconds: Mapping[str, float],
+    phase_counts: Mapping[str, int],
+    parallel_worker_count: int,
+    wall_seconds: float,
+) -> dict[str, object]:
+    rounded_seconds = {
+        phase: round(seconds, 6)
+        for phase, seconds in sorted(phase_seconds.items())
+    }
+    counts = {
+        phase: phase_counts[phase]
+        for phase in sorted(phase_counts)
+    }
+    avg_seconds = {
+        phase: round(rounded_seconds[phase] / counts[phase], 6)
+        for phase in rounded_seconds
+        if counts.get(phase, 0) > 0
+    }
+    return {
+        "symbol_count": total_symbols,
+        "measured_symbol_count": max(counts.values(), default=0),
+        "parallel_worker_count": parallel_worker_count,
+        "phase_seconds": rounded_seconds,
+        "phase_counts": counts,
+        "phase_avg_seconds": avg_seconds,
+        "recorded_seconds": round(sum(rounded_seconds.values()), 6),
+        "wall_seconds": round(wall_seconds, 6),
+    }
+
+
+def _resolve_preflight_parallel_workers(
+    run_plan: RunPlan,
+    *,
+    provider: RunDataProvider | None,
+    symbol_count: int,
+    parallel_workers: int | None,
+) -> int:
+    if symbol_count <= 1:
+        return 1
+    if provider is not None or run_plan.data.refresh_snapshots:
+        return 1
+    if parallel_workers is not None:
+        return min(parallel_workers, symbol_count)
+    return min(symbol_count, os.cpu_count() or 1, 4)
+
+
+def _increment_count(counts: dict[str, int], key: str) -> None:
+    counts[key] = counts.get(key, 0) + 1
 
 
 def render_data_preflight_summary_text(report: DataPreflightReport) -> str:
@@ -328,7 +544,8 @@ def _preflight_symbol(
     indicator_alarm_threshold: float,
     trading_calendar,
     snapshot_read_cache: SnapshotReadCache | None,
-) -> DataPreflightSymbolResult:
+    phase_timer: Callable[[str, float], None] | None,
+) -> _PreflightSymbolOutcome:
     try:
         prepared = _prepare_symbol_data(
             _single_symbol_run_plan(run_plan, series),
@@ -337,22 +554,28 @@ def _preflight_symbol(
             indicator_requirements=indicator_requirements,
             trading_calendar=trading_calendar,
             snapshot_read_cache=snapshot_read_cache,
+            phase_timer=phase_timer,
         )
     except Exception as exc:
-        return DataPreflightSymbolResult(
-            symbol=series.symbol,
-            asset_type=series.asset_type,
-            adjustment=series.price_adjustment or "none",
-            status="error",
-            error_type=type(exc).__name__,
-            error_message=str(exc),
+        return _PreflightSymbolOutcome(
+            result=DataPreflightSymbolResult(
+                symbol=series.symbol,
+                asset_type=series.asset_type,
+                adjustment=series.price_adjustment or "none",
+                status="error",
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
         )
 
-    return _symbol_result_from_prepared(
-        run_plan,
-        prepared,
-        indicator_requirements=indicator_requirements,
-        indicator_alarm_threshold=indicator_alarm_threshold,
+    return _PreflightSymbolOutcome(
+        result=_symbol_result_from_prepared(
+            run_plan,
+            prepared,
+            indicator_requirements=indicator_requirements,
+            indicator_alarm_threshold=indicator_alarm_threshold,
+        ),
+        prepared_symbol=prepared,
     )
 
 

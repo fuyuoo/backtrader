@@ -6,13 +6,14 @@ import math
 from bisect import bisect_right
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, timedelta
 from types import MappingProxyType
 from typing import Any, Mapping
 
 from attbacktrader.data import DailyBar, IndexBar, StockIndustryMembership, resample_daily_bars
 from attbacktrader.data.snapshots.attribution_reference import FIELD_DEFINITIONS as ATTRIBUTION_REFERENCE_FIELD_DEFINITIONS
 from attbacktrader.features import (
+    CompletedIndicatorEvidence,
     IndicatorFrame,
     IndicatorRequirement,
     calculate_kdj,
@@ -1804,6 +1805,17 @@ def build_entry_attribution_context(
             period: _ma_values_by_date(ordered_bars, period=period)
             for period in (20, 25, 60)
         }
+        dea_waterline_age_by_date = _dea_waterline_age_by_date(frame) if frame is not None else {}
+        completed_weekly_kdj_by_date = (
+            _completed_weekly_indicator_by_event_date(frame, ordered_bars, name="kdj")
+            if frame is not None
+            else {}
+        )
+        completed_weekly_macd_by_date = (
+            _completed_weekly_indicator_by_event_date(frame, ordered_bars, name="macd")
+            if frame is not None
+            else {}
+        )
         symbol_derived_evidence_by_date = _symbol_derived_evidence_by_date(ordered_bars)
         symbol_cross_section_evidence_by_date = symbol_cross_section_evidence_by_symbol.get(symbol, {})
         symbol_industry_relative_evidence_by_date = symbol_industry_relative_evidence_by_symbol.get(symbol, {})
@@ -1832,6 +1844,9 @@ def build_entry_attribution_context(
                         for period, values_by_date in ma_values_by_period.items()
                         if bar.trade_date in values_by_date
                     },
+                    dea_waterline_age_by_date=dea_waterline_age_by_date,
+                    completed_weekly_kdj_by_date=completed_weekly_kdj_by_date,
+                    completed_weekly_macd_by_date=completed_weekly_macd_by_date,
                     kdj_threshold=symbol_kdj_threshold,
                 ),
                 _latest_evidence_on_or_before(market_evidence_index, bar.trade_date),
@@ -2091,6 +2106,9 @@ def _symbol_evidence(
     frame: IndicatorFrame | None,
     *,
     ma_values: Mapping[int, float],
+    dea_waterline_age_by_date: Mapping[date, int] | None = None,
+    completed_weekly_kdj_by_date: Mapping[date, CompletedIndicatorEvidence] | None = None,
+    completed_weekly_macd_by_date: Mapping[date, CompletedIndicatorEvidence] | None = None,
     kdj_threshold: float,
 ) -> EntryAttributionEvidence:
     values: dict[str, Any] = {"symbol.close": bar.close}
@@ -2108,12 +2126,15 @@ def _symbol_evidence(
         except KeyError:
             pass
         try:
-            weekly_kdj = completed_indicator_before_event(
-                frame,
-                name="kdj",
-                timeframe="W",
-                event_date=bar.trade_date,
-            )
+            if completed_weekly_kdj_by_date is None:
+                weekly_kdj = completed_indicator_before_event(
+                    frame,
+                    name="kdj",
+                    timeframe="W",
+                    event_date=bar.trade_date,
+                )
+            else:
+                weekly_kdj = completed_weekly_kdj_by_date[bar.trade_date]
             values["symbol.kdj.week.indicator_date"] = weekly_kdj.indicator_date.isoformat()
             values["symbol.kdj.week.k"] = weekly_kdj.value.k
             values["symbol.kdj.week.d"] = weekly_kdj.value.d
@@ -2143,7 +2164,10 @@ def _symbol_evidence(
                 categories["entry.signal_strength.dif_dea_distance_bucket"] = _signed_strength_bucket(
                     (macd.line - macd.signal) / bar.close
                 )
-            waterline_age = _dea_waterline_age_trading_days(frame, bar.trade_date)
+            if dea_waterline_age_by_date is None:
+                waterline_age = _dea_waterline_age_trading_days(frame, bar.trade_date)
+            else:
+                waterline_age = dea_waterline_age_by_date.get(bar.trade_date)
             waterline_age_bucket = _dea_waterline_age_bucket(waterline_age)
             if waterline_age is not None:
                 values["symbol.macd.dea_waterline_age_trading_days"] = waterline_age
@@ -2152,12 +2176,15 @@ def _symbol_evidence(
         except KeyError:
             pass
         try:
-            weekly_macd = completed_indicator_before_event(
-                frame,
-                name="macd",
-                timeframe="W",
-                event_date=bar.trade_date,
-            )
+            if completed_weekly_macd_by_date is None:
+                weekly_macd = completed_indicator_before_event(
+                    frame,
+                    name="macd",
+                    timeframe="W",
+                    event_date=bar.trade_date,
+                )
+            else:
+                weekly_macd = completed_weekly_macd_by_date[bar.trade_date]
             values["symbol.macd.week.indicator_date"] = weekly_macd.indicator_date.isoformat()
             values["symbol.macd.week.dif"] = weekly_macd.value.line
             values["symbol.macd.week.dea"] = weekly_macd.value.signal
@@ -2227,6 +2254,43 @@ def _ma_values_by_date(bars: Sequence[DailyBar], *, period: int) -> dict[date, f
         for bar, ma in zip(ordered_bars, ma_values)
         if ma is not None
     }
+
+
+def _completed_weekly_indicator_by_event_date(
+    frame: IndicatorFrame,
+    bars: Sequence[DailyBar],
+    *,
+    name: str,
+) -> dict[date, CompletedIndicatorEvidence]:
+    if name == "kdj":
+        values_by_key = frame.kdj_by_key
+        value_at = frame.kdj_at
+    elif name == "macd":
+        values_by_key = frame.macd_by_key
+        value_at = frame.macd_at
+    else:
+        raise ValueError(f"unsupported completed indicator: {name}")
+    if values_by_key is None:
+        return {}
+
+    indicator_dates = tuple(
+        sorted(key[-1] for key in values_by_key if key[0] == "W")
+    )
+    completed_by_event_date: dict[date, CompletedIndicatorEvidence] = {}
+    for bar in bars:
+        lookup_date = bar.trade_date - timedelta(days=1)
+        index = bisect_right(indicator_dates, lookup_date) - 1
+        if index < 0:
+            continue
+        indicator_date = indicator_dates[index]
+        completed_by_event_date[bar.trade_date] = CompletedIndicatorEvidence(
+            name=name,
+            timeframe="W",
+            event_date=bar.trade_date,
+            indicator_date=indicator_date,
+            value=value_at(indicator_date, timeframe="W"),
+        )
+    return completed_by_event_date
 
 
 def _objective_market_component_evidence_by_date(
@@ -2772,28 +2836,31 @@ def _signal_shadow_bucket(bar: DailyBar) -> str | None:
 def _dea_waterline_age_trading_days(frame: IndicatorFrame, trade_date: date) -> int | None:
     if frame.macd_by_key is None:
         return None
-    current_macd = frame.macd_at(trade_date)
-    if current_macd.signal <= 0:
-        return None
+    frame.macd_at(trade_date)
+    return _dea_waterline_age_by_date(frame).get(trade_date)
 
-    available_dates = sorted(
-        key[-1]
-        for key in frame.macd_by_key
-        if key[0] == "D" and key[-1] <= trade_date
+
+def _dea_waterline_age_by_date(frame: IndicatorFrame) -> dict[date, int]:
+    if frame.macd_by_key is None:
+        return {}
+    available_dates = tuple(
+        sorted(key[-1] for key in frame.macd_by_key if key[0] == "D")
     )
-    if trade_date not in available_dates:
-        return None
-    current_index = available_dates.index(trade_date)
-    start_index = None
-    for index in range(current_index, -1, -1):
-        candidate_date = available_dates[index]
-        if frame.macd_by_key[("D", candidate_date)].signal <= 0:
-            if index + 1 <= current_index:
-                start_index = index + 1
-            break
-    if start_index is None:
-        return None
-    return current_index - start_index
+    ages_by_date: dict[date, int] = {}
+    saw_nonpositive = False
+    positive_start_index: int | None = None
+    for index, current_date in enumerate(available_dates):
+        current_macd = frame.macd_by_key[("D", current_date)]
+        if current_macd.signal <= 0:
+            saw_nonpositive = True
+            positive_start_index = None
+            continue
+        if positive_start_index is None:
+            if not saw_nonpositive:
+                continue
+            positive_start_index = index
+        ages_by_date[current_date] = index - positive_start_index
+    return ages_by_date
 
 
 def _return_values_by_date(bars: Sequence[Any], *, period: int) -> dict[date, float]:
