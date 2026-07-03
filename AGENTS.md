@@ -15,6 +15,10 @@ For GitHub issue, PRD, and PR operations, explicitly target `fuyuoo/backtrader`.
 - 全程使用中文回答。
 - 不允许静默处理、隐藏失败或悄悄降级；异常、缺失数据、权限问题、口径不一致都要直接说明。
 - 当用户问“现在到哪一步”“怎么做”“下一步方向”时，不要只列 TODO。要给出判断、取舍、风险和推荐推进顺序。
+- 回答结尾优先给出与当前任务直接相关的下一步；如果没有明确下一步，且用户没有要求简短回答，则根据当时的任务环境和上下文，为每个建议先标注一个合适的身份/视角，再给出三个可选方向：
+  1. 站在当前路径内最适合推进者的身份，给推荐的下一步。
+  2. 站在当前路径内相反或质疑者的身份，给反向检查、暂停或验证的一步。
+  3. 跳出当前视角，站在更高一层的身份，给更长期或更系统性的下一步。
 - 如果需求不清楚，先问清楚；如果代码或文档可以回答，就先查项目再回答。
 
 ## Quant Research Advisory Role
@@ -57,6 +61,37 @@ Important distinction:
 - `Trade-Sample Backtest`: broad sample collection with large capital or high holding cap; useful for factor discovery and pre-tuning, not final portfolio return evidence.
 - `Scored Portfolio Backtest`: candidates compete for cash and holding capacity after pre-entry evidence scoring; this is the target for real portfolio-style validation.
 - `Scored Entry Allocation Tuning`: first tuning scope; optimize entry scoring and allocation controls while keeping exit, add-on, scale-out, and lifecycle rules fixed.
+
+## Allowed And Forbidden
+
+### Allowed
+
+- 允许只在当前仓库根目录 `.` 内读取、编辑和运行本仓库任务。
+- 允许优先使用 CodeGraph 理解结构、符号调用关系和改动影响面。
+- 允许用 `rg` 查找字面文本、注释、报告字段、生成物名称和文档内容。
+- 允许在用户要求或任务需要时更新 `AGENTS.md`、`CONTEXT.md`、`docs/architecture/`、`docs/prd/`、`docs/adr/`、`docs/FEATURES.md`、`docs/CHANGELOG.md`。
+- 允许在数据准备、快照刷新、gap-fill、preflight 等明确的数据阶段访问 Tushare 或其他外部数据源。
+- 允许在正式回测前运行数据检查、指标覆盖检查、快照完整性检查和小样本回归测试。
+- 允许使用本地离线 Data Snapshot、Run Artifact、Report Artifact 和测试 fixture 作为正式分析证据。
+- 允许为长期架构取舍创建 ADR，为较大功能范围创建 PRD。
+- 允许运行与当前改动直接相关的测试、CLI 冒烟命令和报告生成命令。
+- 允许指出用户请求中的未来函数、过拟合、证据不足、路径错误、口径混用和不可复现风险。
+
+### Forbidden
+
+- 禁止读取、编辑或依赖当前仓库根目录 `.` 之外的其他 checkout。
+- 禁止在正式回测期间发起任何网络请求，包括 Tushare、Web、远程接口或临时在线补数据。
+- 禁止把联网补齐后的结果伪装成离线正式回测证据。
+- 禁止静默失败、隐藏异常、悄悄降级、默认填充缺失证据或用 `try/except pass` 掩盖问题。
+- 禁止把 `Trade-Sample Backtest`、`maxhold800` 或大资金样本采集结果当作真实组合收益证据。
+- 禁止把样本内调参结果当作样本外结论。
+- 禁止把 AI 结论当作证据来源；AI 只能解释、整理或提出待验证实验。
+- 禁止让报告层重新抓数据、重跑策略、重算信号或创造运行时没有记录的证据。
+- 禁止让策略、分析、报告或引擎适配器直接调用 Tushare。
+- 禁止在 CLI 中堆核心业务逻辑；CLI 只负责参数、配置、调用 runner 和输出。
+- 禁止在 `backtrader/`、`samples/`、`tools/` 中新增本项目业务规则，除非任务明确是修改上游引擎或示例。
+- 禁止提交 token、`.secrets/`、本地数据快照、生成报告和其他 ignored runtime artifact。
+- 禁止删除、覆盖或回滚用户已有改动，除非用户明确要求。
 
 ## Domain Language
 
@@ -131,6 +166,7 @@ General placement:
 
 ## Evidence and Backtest Policy
 
+- **铁律：正式回测期间禁止任何网络请求。** 回测必须完全基于已准备好的本地离线数据运行；如果回测流程需要请求 Tushare、Web、远程接口或任何外部网络资源，必须停止并明确说明“当前离线数据没有准备好”，先回到数据准备 / gap-fill / preflight 阶段，不能悄悄联网补数据后继续把结果当作正式回测证据。
 - Do not treat offline deletion of completed trades as final validation.
 - Do not treat `maxhold800` or large-capital trade-sample outputs as real portfolio return evidence.
 - Always distinguish in-sample tuning evidence from out-of-sample test evidence.
@@ -175,4 +211,3 @@ Do not update docs mechanically for internal-only edits that do not affect behav
 - Before starting skill-driven planning or implementation, check `git status --short`.
 - If unrelated uncommitted changes exist, list them and continue only when the user has confirmed or the change is clearly part of the current work.
 - Keep diffs attributable to the current task.
-

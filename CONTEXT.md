@@ -92,6 +92,10 @@ _Avoid_: Stock list, symbol list
 A run-level selection layer that resolves fixed or time-varying eligible symbols for each trading date before strategy methods evaluate entry or exit decisions. It is separate from strategy rules, which only act on the candidates supplied by the run plan.
 _Avoid_: Strategy-internal stock filter, hard-coded symbol list, buy-method constituent lookup
 
+**Backtest Stock Scope**:
+The configured stock range that Universe Selection resolves into eligible symbols for a strategy run, such as explicit symbols, component-stock constituents, time-varying constituents, or the full A-share market.
+_Avoid_: Hard-coded stock pool, strategy-owned symbol list, CLI symbol parameters
+
 **Component Stock Universe**:
 A stock universe formed from the constituent stocks of one or more indexes, such as the CSI 300 and CSI 500 constituents. It defines the eligible stocks for a strategy run and is distinct from directly trading the index, an ETF, or an index future.
 _Avoid_: Index trade, ETF proxy, vague symbol pool
