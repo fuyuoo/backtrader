@@ -1,0 +1,122 @@
+{
+  "schema": "attbacktrader.baoma_v1_practical_freeze.v1",
+  "sealed_on": "2026-07-03",
+  "folder_purpose_zh": "按策略方式、回测时间、回测股票类型、回测结果和方式固化 Baoma V1 当前研究结论。",
+  "canonical_documents": {
+    "readme": "docs/baoma-v1-20260703-practical-freeze/README.md",
+    "practical_conclusion": "docs/baoma-v1-current-practical-conclusion.md",
+    "soil_seed_score_matrix": "docs/baoma-v1-soil-seed-score-matrix.md",
+    "matrix_baseline": "examples/baoma-v1-soil-seed-score-matrix-baseline.json"
+  },
+  "strategy_method": {
+    "template": "trend_template_v1",
+    "entry_method": "baoma_entry",
+    "profit_taking_method": "baoma_ma25_profit_exit",
+    "stop_loss_method": "baoma_ma60_stop",
+    "add_on_method": "baoma_add_on",
+    "sizing_rule": "equal_weight",
+    "sizing_params": {
+      "max_holding_count": 800,
+      "min_order_quantity": 100
+    },
+    "execution_engine": "baoma_v1_business",
+    "ashare_constraints": {
+      "t_plus_one": true,
+      "limit_up_down": true,
+      "suspension": true,
+      "board_lot_size": 100
+    },
+    "interpretation_zh": "当前策略方式是 Trade-Sample Backtest 样本采集口径，不是实盘组合口径。"
+  },
+  "backtest_time": {
+    "run_id": "baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence-run-window-union",
+    "from_date": "2015-01-01",
+    "to_date": "2025-12-31",
+    "closed_trade_entry_start": "2015-01-08",
+    "closed_trade_entry_end": "2025-12-30",
+    "covered_years": [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+  },
+  "stock_universe": {
+    "type_zh": "A 股沪深300 + 中证500动态成分股",
+    "price_adjustment": "qfq",
+    "historical_union_csv": "reports/baoma-v1-dynamic-hs300-csi500-2015-2025/input/hs300-csi500-dynamic-union-run-window-2015-2025-with-2014-anchor.csv",
+    "dynamic_membership_parquet": "reports/baoma-v1-dynamic-hs300-csi500-2015-2025/input/hs300-csi500-dynamic-constituents-2015-2025-with-2014-anchor.parquet",
+    "historical_union_symbol_count": 1552,
+    "dynamic_membership_row_count": 141200,
+    "dynamic_membership_symbol_count": 1554,
+    "scored_closed_trade_symbol_count": 1505,
+    "benchmarks": ["000300.SH", "000905.SH"],
+    "industry_source": "SW2021",
+    "industry_level1_index_count": 31,
+    "interpretation_zh": "historical union 是数据准备宇宙，dynamic membership 是 T-1 入场门槛；不能外推为全 A 实盘结论。"
+  },
+  "backtest_result_and_method": {
+    "evidence_validation": {
+      "status": "ok",
+      "error_count": 0,
+      "warning_count": 0,
+      "closed_trade_count": 25253,
+      "open_position_count": 183,
+      "signal_intent_count": 4448322,
+      "sizing_decision_count": 39716,
+      "execution_event_count": 83316,
+      "rejected_order_count": 0
+    },
+    "sample_collection_report_metrics": {
+      "starting_equity": 10000000000.0,
+      "final_equity": 10951050348.0,
+      "cumulative_return": 0.09510503479999999,
+      "max_drawdown": 0.040954705222081916,
+      "closed_trade_win_rate": 0.460301746327169,
+      "profit_loss_ratio": 1.5773888870266213,
+      "use_as_live_portfolio_evidence": false
+    },
+    "matrix_method": {
+      "strategy_rerun": false,
+      "network_access_used": false,
+      "score_recomputed_from_fixed_score5_config": true,
+      "missing_score_fields_contribute_zero": true,
+      "soil_seed_recomputed_for_current_run": true,
+      "soil_seed_join_key": "symbol + entry_date",
+      "type_diagnostics_added": ["soil_type_v1", "seed_type_v1"]
+    },
+    "matrix_coverage": {
+      "soil_seed_matched_current_3x3": 25253,
+      "soil_unknown_count": 5,
+      "seed_unknown_count": 0,
+      "score_complete_count": 24841,
+      "score_complete_rate": 0.9837,
+      "avg_score_field_coverage_pct": 99.56
+    },
+    "accepted_findings_zh": [
+      "score 有方向性，但不能单独使用。",
+      "soil/seed 能明显解释同一 score 附近的交易质量差异。",
+      "强土壤 + 强种子是当前最清晰的核心正向组合：3829 笔，胜率 59.31%，均笔收益 2.24%，PF 1.68。",
+      "score 3-4 开始明显改善，可以作为第一轮组合回测最低候选带。",
+      "score 8 最强但样本只有 545 笔，不能单独定为唯一买点。",
+      "score 9+ 样本只有 79 笔且总 PnL 为负，不能解释为越高越好。",
+      "弱土壤 + 弱种子应作为下一轮组合回测优先排除项。"
+    ]
+  },
+  "next_portfolio_validation": {
+    "workflow": "Scored Portfolio Backtest",
+    "max_holding_count": 10,
+    "max_total_exposure_percent": 0.85,
+    "max_sw2021_l1_industry_exposure_percent": 0.20,
+    "industry_preference": "prefer_unheld_industry_on_close_scores",
+    "gate_hypotheses": [
+      {
+        "name": "conservative",
+        "rule_zh": "score >= 5 且强土壤 + 强种子，或类型为全局强势/行业带动 + 健康趋势回踩"
+      },
+      {
+        "name": "balanced",
+        "rule_zh": "score >= 4 且 soil/seed 至少一个为强，排除弱土壤 + 弱种子"
+      },
+      {
+        "name": "aggressive",
+        "rule_zh": "score >= 3 且进入类型白名单，允许强种子 + 弱土壤小仓位参与"
+      }
+    ]
+  }
+}
