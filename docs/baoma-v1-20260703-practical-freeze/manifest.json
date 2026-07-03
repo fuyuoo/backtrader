@@ -1,7 +1,32 @@
 {
   "schema": "attbacktrader.baoma_v1_practical_freeze.v1",
   "sealed_on": "2026-07-03",
-  "folder_purpose_zh": "按策略方式、回测时间、回测股票类型、回测结果和方式固化 Baoma V1 当前研究结论。",
+  "folder_purpose_zh": "在开始下一个版本前，按策略方式、回测时间、回测股票类型、回测结果和方式固化 Baoma V1 当前研究结论。",
+  "baseline_role": {
+    "baseline_id": "baoma-v1-20260703-pre-industry-avoidance-baseline",
+    "purpose_zh": "保留当前未启用行业规避、未启用真实持仓数和资金竞争的样本采集型回测结果，作为后续行业规避版和 scored portfolio 版的对照基线。",
+    "current_version_characteristics_zh": [
+      "未启用行业规避。",
+      "未启用总仓位上限。",
+      "未启用同一行业持仓数上限。",
+      "未启用 score/soil/seed 排序后的真实资金竞争。",
+      "使用 max_holding_count=800 和 10,000,000,000 初始资金做交易样本采集。",
+      "用后验矩阵固化 soil/seed/score 的统计发现。"
+    ],
+    "next_version_candidates_zh": [
+      "行业规避版。",
+      "真实持仓数限制版。",
+      "scored portfolio 版。",
+      "行业规避 + scored portfolio 组合约束版。"
+    ],
+    "comparison_questions_zh": [
+      "行业规避是否降低回撤和行业集中度。",
+      "行业规避是否牺牲强土壤/强种子的收益捕获。",
+      "持仓数限制和资金竞争是否改变 score/soil/seed 的有效性。",
+      "新版本收益改善是否来自规则本身，而不是样本筛选或后验调参。"
+    ],
+    "do_not_overwrite": true
+  },
   "canonical_documents": {
     "readme": "docs/baoma-v1-20260703-practical-freeze/README.md",
     "practical_conclusion": "docs/baoma-v1-current-practical-conclusion.md",

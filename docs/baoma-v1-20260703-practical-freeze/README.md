@@ -11,6 +11,35 @@
 本目录不保存 ignored `reports/` 下的大体积产物，只保存可复盘的结论、
 关键数字、路径和边界。
 
+## Baseline Role
+
+这个目录的主要目的，是在开始下一个版本前，保留当前版本结果。
+
+当前版本可以命名为：
+
+```text
+baoma-v1-20260703-pre-industry-avoidance-baseline
+```
+
+它代表：
+
+- 未启用行业规避。
+- 未启用总仓位上限。
+- 未启用同一行业持仓上限。
+- 未启用 score/soil/seed 排序后的真实资金竞争。
+- 使用 `max_holding_count=800` 和 `10,000,000,000` 初始资金做交易样本采集。
+- 用后验矩阵固化 soil/seed/score 的统计发现。
+
+后续任何新版本，例如行业规避版、真实持仓数版、scored portfolio 版，
+都应该和这个 baseline 比较，而不是覆盖或重解释这个 baseline。
+
+比较时至少要回答：
+
+- 行业规避是否降低回撤和行业集中度。
+- 行业规避是否牺牲了强土壤/强种子的收益捕获。
+- 持仓数限制和资金竞争是否改变 score/soil/seed 的有效性。
+- 新版本的收益改善是否来自规则本身，而不是样本筛选或后验调参。
+
 ## Completeness Boundary
 
 只读本目录的 `README.md` 和 `manifest.json`，可以知道本次回测的核心结论：
