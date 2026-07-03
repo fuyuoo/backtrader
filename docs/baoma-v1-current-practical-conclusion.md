@@ -72,6 +72,13 @@ max_risk_group_holding_count = 2
 
 当前 soil/seed/score 证据适合做候选排序和过滤，不适合直接人工拍成永久阈值。
 
+本轮矩阵已单独封板在：
+
+```text
+docs/baoma-v1-soil-seed-score-matrix.md
+examples/baoma-v1-soil-seed-score-matrix-baseline.json
+```
+
 第一版可执行口径应是：
 
 1. 每个交易日只看 T-1 已完成 K 线和已落盘证据。

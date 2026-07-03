@@ -1,0 +1,101 @@
+{
+  "schema": "attbacktrader.baoma_v1_soil_seed_score_matrix_baseline.v1",
+  "sealed_on": "2026-07-03",
+  "purpose_zh": "固化 Baoma V1 当前 soil/seed/type/score 后验诊断矩阵的关键数字、来源和下一轮 scored portfolio 初始 gate 假设。本 baseline 不是实盘规则，也不是组合收益证据。",
+  "source_artifacts": {
+    "run_dir": "reports/baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence-run-window-union",
+    "soil_seed_3x3_dir": "reports/soil-seed-strength-3x3-baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-current-run",
+    "score_soil_seed_4d_dir": "reports/score-soil-seed-4d-matrix-baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence",
+    "matrix_summary_zh": "reports/score-soil-seed-4d-matrix-baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence/summary.zh.md",
+    "type_diagnostics_zh": "reports/score-soil-seed-4d-matrix-baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence/soil_seed_type_diagnostics.zh.md"
+  },
+  "scope": {
+    "closed_trade_count": 25253,
+    "from_year": 2015,
+    "to_year": 2025,
+    "strategy_rerun": false,
+    "network_access_used": false,
+    "evidence_note_zh": "只读本地已落盘 run artifact、指数快照、日线快照和 attribution reference。"
+  },
+  "coverage": {
+    "missing_signal_count": 0,
+    "soil_seed_matched_current_3x3": 25253,
+    "soil_unknown_count": 5,
+    "seed_unknown_count": 0,
+    "score_complete_count": 24841,
+    "score_complete_rate": 0.9836851067199937,
+    "avg_score_field_coverage_pct": 99.56332820942967,
+    "known_gap_zh": "300114.SZ 有 SW2021 显式空行业会员记录，相关 soil 缺口保留为缺失证据。"
+  },
+  "soil_seed_3x3": [
+    {"soil": "strong_soil", "seed": "strong_seed", "trades": 3829, "win_rate_pct": 59.310524941237915, "avg_return_pct": 2.2394959908664362, "profit_factor_ret": 1.6768253573679373},
+    {"soil": "strong_soil", "seed": "neutral_seed", "trades": 4135, "win_rate_pct": 48.3192261185006, "avg_return_pct": 1.4645448345512337, "profit_factor_ret": 1.5474842760159302},
+    {"soil": "strong_soil", "seed": "weak_seed", "trades": 2050, "win_rate_pct": 40.146341463414636, "avg_return_pct": 0.8217086541854786, "profit_factor_ret": 1.394972412952154},
+    {"soil": "neutral_soil", "seed": "strong_seed", "trades": 2949, "win_rate_pct": 50.62733129874534, "avg_return_pct": 0.965217912915988, "profit_factor_ret": 1.2602461926771986},
+    {"soil": "neutral_soil", "seed": "neutral_seed", "trades": 4142, "win_rate_pct": 42.56397875422501, "avg_return_pct": 0.7955655293893613, "profit_factor_ret": 1.3068864182397715},
+    {"soil": "neutral_soil", "seed": "weak_seed", "trades": 2607, "win_rate_pct": 33.755274261603375, "avg_return_pct": 0.23021813333114233, "profit_factor_ret": 1.10701917067756},
+    {"soil": "weak_soil", "seed": "strong_seed", "trades": 1513, "win_rate_pct": 53.139458030403176, "avg_return_pct": 0.9521442305319222, "profit_factor_ret": 1.2723827719108032},
+    {"soil": "weak_soil", "seed": "neutral_seed", "trades": 2218, "win_rate_pct": 41.88458070333634, "avg_return_pct": 0.13981083051536655, "profit_factor_ret": 1.0492851441733257},
+    {"soil": "weak_soil", "seed": "weak_seed", "trades": 1805, "win_rate_pct": 36.56509695290859, "avg_return_pct": -0.11167574168431589, "profit_factor_ret": 0.949982957602126}
+  ],
+  "score_buckets": [
+    {"bucket": "<=0", "trades": 7590, "win_rate_pct": 38.39262187088274, "avg_return_pct": 0.292415000554964, "profit_factor_ret": 1.121020003248298, "total_pnl": -4865060.0},
+    {"bucket": "1-2", "trades": 3901, "win_rate_pct": 42.681363752883875, "avg_return_pct": 0.7765975564741474, "profit_factor_ret": 1.284429546568007, "total_pnl": 93879518.0},
+    {"bucket": "3-4", "trades": 6842, "win_rate_pct": 49.839228295819936, "avg_return_pct": 1.371461693991258, "profit_factor_ret": 1.4683335036545293, "total_pnl": 413119437.0},
+    {"bucket": "5", "trades": 2999, "win_rate_pct": 51.35045015005002, "avg_return_pct": 1.3847422265938143, "profit_factor_ret": 1.4619927140373503, "total_pnl": 197917163.0},
+    {"bucket": "6", "trades": 2000, "win_rate_pct": 51.949999999999996, "avg_return_pct": 1.4748855386273256, "profit_factor_ret": 1.450126534856405, "total_pnl": 111438228.0},
+    {"bucket": "7", "trades": 1297, "win_rate_pct": 52.659984579799534, "avg_return_pct": 1.1295306674117112, "profit_factor_ret": 1.3453710538936556, "total_pnl": 81643072.0},
+    {"bucket": "8", "trades": 545, "win_rate_pct": 60.0, "avg_return_pct": 2.470427660695618, "profit_factor_ret": 1.7656765914343409, "total_pnl": 59079183.0},
+    {"bucket": "9+", "trades": 79, "win_rate_pct": 58.22784810126582, "avg_return_pct": 0.8266397270182468, "profit_factor_ret": 1.1949094166170784, "total_pnl": -1161193.0}
+  ],
+  "accepted_observations": [
+    {
+      "finding_id": "soil-seed-strong-strong-best-core",
+      "claim_zh": "强土壤 + 强种子是最清晰的核心正向组合：3829 笔，胜率 59.31%，均笔收益 2.24%，PF 1.68。",
+      "boundary_zh": "这是交易样本归因，不是组合收益证据。"
+    },
+    {
+      "finding_id": "score-starts-working-around-3-4",
+      "claim_zh": "score 进入 3-4 桶后整体质量明显改善：6842 笔，胜率 49.84%，均笔收益 1.37%，PF 1.47。",
+      "boundary_zh": "score 不是严格单调，不能单独使用。"
+    },
+    {
+      "finding_id": "score-8-high-quality-small-sample",
+      "claim_zh": "score 8 桶表现最好：545 笔，胜率 60.00%，均笔收益 2.47%，PF 1.77。",
+      "boundary_zh": "样本较少，只能作为高优先级候选带。"
+    },
+    {
+      "finding_id": "score-9-not-automatically-better",
+      "claim_zh": "score 9+ 只有 79 笔，均笔收益 0.83%，总 PnL 为 -116.12 万，不能解释为越高越好。",
+      "boundary_zh": "需要检查 scorer 权重和组合约束下的表现。"
+    },
+    {
+      "finding_id": "weak-soil-weak-seed-first-exclusion",
+      "claim_zh": "弱土壤 + 弱种子为明显弱组合：1805 笔，胜率 36.57%，均笔收益 -0.11%，PF 0.95。",
+      "boundary_zh": "适合作为下一轮组合回测的优先排除项，但仍需 portfolio 验证。"
+    },
+    {
+      "finding_id": "type-diagnostics-useful-but-not-rules",
+      "claim_zh": "全局强势/行业带动 + 健康趋势回踩表现稳定，全局强势 + 过热延伸收益高但需控制回撤风险。",
+      "boundary_zh": "soil_type_v1/seed_type_v1 是诊断标签，不改变原始 soil/seed 层级。"
+    }
+  ],
+  "initial_portfolio_gate_hypotheses": [
+    {
+      "name": "conservative",
+      "rule_zh": "score >= 5 且强土壤 + 强种子，或类型为全局强势/行业带动 + 健康趋势回踩。",
+      "purpose_zh": "验证最高确定性组合。"
+    },
+    {
+      "name": "balanced",
+      "rule_zh": "score >= 4 且 soil/seed 至少一个为强，排除弱土壤 + 弱种子。",
+      "purpose_zh": "验证交易数量和收益质量平衡。"
+    },
+    {
+      "name": "aggressive",
+      "rule_zh": "score >= 3 且进入类型白名单，允许强种子 + 弱土壤小仓位参与。",
+      "purpose_zh": "验证强个股形态能否穿越弱环境。"
+    }
+  ],
+  "next_recommended_action_zh": "冻结本矩阵为 scorer 输入，跑带真实持仓数、现金竞争和行业约束的 Scored Portfolio Backtest。"
+}
