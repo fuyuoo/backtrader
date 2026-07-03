@@ -2,7 +2,7 @@
   "schema": "attbacktrader.ai_skill_entry_contract.v1",
   "generated_on": "2026-06-05",
   "skill_name": "attbacktrader-ai-review",
-  "skill_doc_path": "C:\\Users\\fff\\.agents\\skills\\attbacktrader-ai-review\\SKILL.md",
+  "skill_doc_path": ".agents/skills/attbacktrader-ai-review/SKILL.md",
   "source_workbench_closure": {
     "path": "examples\\backtest-workbench-v1-baseline.json",
     "exists": true,

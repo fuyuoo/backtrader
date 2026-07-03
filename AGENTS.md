@@ -2,9 +2,9 @@
 
 ### Workspace
 
-Use `C:\Work\GitWork\GoalStockBacktrad` as the only working directory for this repository.
+Use the repository root (`.`) as the only working directory for this repository.
 
-Do not read, edit, or depend on `E:\GithubWorkSpace\GoalStockBacktrad`.
+Do not read, edit, or depend on any external checkout of this repository outside `.`.
 
 ### GitHub Repository
 

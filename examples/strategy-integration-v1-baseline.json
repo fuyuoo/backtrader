@@ -40,7 +40,7 @@
       "direction_zh": "AI 协作",
       "purpose_zh": "让 AI 后续按固定边界新增真实策略，不把框架接入、策略评价和调参混在一起。",
       "evidence": [
-        "C:/Users/fff/.agents/skills/attbacktrader-strategy-integration/SKILL.md"
+        ".agents/skills/attbacktrader-strategy-integration/SKILL.md"
       ]
     }
   ],

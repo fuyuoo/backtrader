@@ -135,7 +135,7 @@ def test_dea_neg_distance_capped_at_max_lookback():
 - [ ] **Step 2: 运行测试，确认失败**
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 pytest my_strategy/tests/test_strategy.py -k "first_buy_price_locked or mfe_mae_recorded or dea_neg_distance" -v
 ```
 预期：FAIL（KeyError 'mfe_pct' / ImportError `_scan_dea_neg_distance`）。
@@ -843,7 +843,7 @@ EXPECTED_FILES = [
 - [ ] **Step 2: 用现有 trade_summary.csv 跑端到端**
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 python my_strategy/tests/test_attribution_run.py
 ```
 预期最后一行：`所有归因报告产出成功。`，并打印 15 个 `[OK]` 行。
@@ -868,7 +868,7 @@ git commit -m "test(attribution): extend integration test for 4 new attribution 
 - [ ] **Step 1: 重跑回测**
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader/my_strategy
+cd my_strategy
 python backtest.py
 ```
 预期：约 12 分钟，正常完成；末尾自动跑归因；产出含 `mfe_pct / mae_pct / dea_neg_distance_days` 列的 `trade_summary.csv`，以及 15 张归因 CSV。
@@ -876,7 +876,7 @@ python backtest.py
 - [ ] **Step 2: 抽样检查 3 个新列**
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 python -c "
 import pandas as pd
 df = pd.read_csv('my_strategy/results/trade_summary.csv')
@@ -968,7 +968,7 @@ git commit -m "docs: document holding-excursion / dea-lookback / monthly attribu
 全部 8 个 Task 完成后，运行：
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 pytest my_strategy/tests/test_strategy.py my_strategy/tests/test_attribution.py -v
 python my_strategy/tests/test_attribution_run.py
 git log --oneline -8

@@ -580,7 +580,7 @@ Expected: 8 passed.
 - [ ] **Step 5: 真实数据上跑一次（生成首个 integrity_report.csv）**
 
 ```bash
-cd /e/GithubCloneSpace/Stock/backtrader/backtrader && python -m my_strategy.tools.data_integrity_check
+cd . && python -m my_strategy.tools.data_integrity_check
 ```
 Expected: 输出形如 `N 条问题写入 .../integrity_report.csv`。N 不为零是正常（25 年数据必有一些缺日 / 停牌 / orphan）。
 
@@ -2113,14 +2113,14 @@ git commit -m "feat(phase-b-prep): loss_attribution report (signal frequency lif
 - [ ] **Step 1: 完整跑一次端到端**
 
 ```bash
-cd /e/GithubCloneSpace/Stock/backtrader/backtrader/my_strategy && time python backtest.py 2>&1 | tail -20
+cd my_strategy && time python backtest.py 2>&1 | tail -20
 ```
 Expected: 6-8 分钟完成（PIT 过滤可能微增）；末尾 `attribution reports written to ...`。
 
 - [ ] **Step 2: 验证 17 张报告齐全**
 
 ```bash
-cd /e/GithubCloneSpace/Stock/backtrader/backtrader && for f in payoff_metrics signal_stability signal_correlation_matrix multi_factor_combo_stats significance_summary signal_importance_ranking portfolio_risk_metrics losing_streak_stats drawdown_periods concurrent_positions_stats period_alpha rolling_metrics holding_period_curve mfe_timing sector_concentration_stats cost_breakdown loss_attribution; do
+cd . && for f in payoff_metrics signal_stability signal_correlation_matrix multi_factor_combo_stats significance_summary signal_importance_ranking portfolio_risk_metrics losing_streak_stats drawdown_periods concurrent_positions_stats period_alpha rolling_metrics holding_period_curve mfe_timing sector_concentration_stats cost_breakdown loss_attribution; do
   if [ -f "my_strategy/reports/$f.csv" ]; then echo "OK reports/$f.csv"; else echo "MISSING reports/$f.csv"; fi
 done
 ```

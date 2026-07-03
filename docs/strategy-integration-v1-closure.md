@@ -17,7 +17,7 @@ construction to real strategy backtesting.
 | `strategy_output_contract` | 策略输出契约 | 固定 `TradeIntent` 和 `signal_values` 形状，让报告、归因、环境适配和 AI 复盘不依赖具体策略实现。 | `attbacktrader/strategies/contract.py`; `docs/architecture/strategy-output-contract.md`; `tests/test_strategy_output_contract.py` |
 | `strategy_integration_template` | 策略接入模板 | 给未来策略提供可复制的接入步骤、文件边界、方法骨架和验收命令。 | `attbacktrader/strategies/integration_template.py`; `docs/strategy-integration-template.md`; `tests/test_strategy_integration_template.py` |
 | `strategy_integration_validation` | 策略接入校验 | 在完整回测前静态加载 RunPlan、绑定组件、采样调用方法，并检查 `TradeIntent` 输出契约。 | `attbacktrader/strategies/integration_validation.py`; `attbacktrader/cli/strategy_integration_validation.py`; `tests/test_strategy_integration_validation.py` |
-| `ai_strategy_integration_skill` | AI 协作 | 让 AI 后续按固定边界新增真实策略，不把框架接入、策略评价和调参混在一起。 | `C:/Users/fff/.agents/skills/attbacktrader-strategy-integration/SKILL.md` |
+| `ai_strategy_integration_skill` | AI 协作 | 让 AI 后续按固定边界新增真实策略，不把框架接入、策略评价和调参混在一起。 | `.agents/skills/attbacktrader-strategy-integration/SKILL.md` |
 
 ## Accepted Verification
 

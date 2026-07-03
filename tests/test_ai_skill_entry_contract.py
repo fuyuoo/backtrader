@@ -15,7 +15,7 @@ def test_ai_skill_entry_contract_records_fixed_review_flow(tmp_path: Path) -> No
     contract = build_ai_skill_entry_contract(
         generated_on="2026-06-05",
         source_workbench_closure=closure,
-        skill_doc_path="C:/Users/fff/.agents/skills/attbacktrader-ai-review/SKILL.md",
+        skill_doc_path=".agents/skills/attbacktrader-ai-review/SKILL.md",
     )
     markdown = render_ai_skill_entry_contract_markdown_zh(contract)
     json_path, markdown_path = write_ai_skill_entry_contract(

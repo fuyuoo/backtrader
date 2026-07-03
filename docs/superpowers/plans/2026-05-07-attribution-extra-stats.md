@@ -94,7 +94,7 @@ def test_compute_exit_reason_stats_empty_input():
 - [ ] **Step 2: 运行测试，确认失败**
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 pytest my_strategy/tests/test_attribution.py::test_compute_exit_reason_stats_groups_by_reason -v
 ```
 预期：`ImportError: cannot import name 'compute_exit_reason_stats'`
@@ -661,7 +661,7 @@ EXPECTED_FILES = [
 - [ ] **Step 2: 用真实 trade_summary.csv 跑端到端**
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 python my_strategy/tests/test_attribution_run.py
 ```
 预期最后一行：`所有归因报告产出成功。`，并打印 9 个 `[OK]` 行。
@@ -745,7 +745,7 @@ git commit -m "docs: document 4 new attribution stats reports"
 全部 6 个 Task 完成后，运行：
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 pytest my_strategy/tests/test_attribution.py -v
 python my_strategy/tests/test_attribution_run.py
 git log --oneline -7

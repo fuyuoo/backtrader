@@ -104,7 +104,7 @@ def test_add_allowed_when_max_bullish_below_threshold():
 - [ ] **Step 2: 运行测试，确认失败**
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 pytest my_strategy/tests/test_strategy.py::test_max_bullish_candle_pct_recorded_in_trade_log -v
 ```
 预期：FAIL，原因 `KeyError: 'max_bullish_candle_pct'` 或 `AssertionError`。
@@ -548,7 +548,7 @@ EXPECTED_FILES = [
 - [ ] **Step 2: 用现有 trade_summary.csv 跑端到端**
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 python my_strategy/tests/test_attribution_run.py
 ```
 预期最后一行：`所有归因报告产出成功。`，并打印 11 个 `[OK]` 行。`add_block_stats.csv` 应为空表（旧 `trade_summary.csv` 没有 `max_bullish_candle_pct` 列，按容错约定返回空表头）；`first_buy_size_stats.csv` 应有真实数据。
@@ -569,7 +569,7 @@ git commit -m "test(attribution): extend integration test for 2 magic-number sca
 - [ ] **Step 1: 重跑回测**
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 python my_strategy/backtest.py
 ```
 预期：回测正常完成；末尾自动跑归因；产出包含 `max_bullish_candle_pct` 列的 `trade_summary.csv`，以及 11 张归因 CSV。
@@ -667,7 +667,7 @@ git commit -m "docs: document magic-number scan attribution tables"
 全部 6 个 Task 完成后，运行：
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 pytest my_strategy/tests/test_strategy.py my_strategy/tests/test_attribution.py -v
 python my_strategy/tests/test_attribution_run.py
 git log --oneline -7

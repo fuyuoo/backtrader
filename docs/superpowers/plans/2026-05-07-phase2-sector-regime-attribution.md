@@ -491,7 +491,7 @@ EOF
 - [ ] **Step 1: 抓取重构前的 stock 模式 baseline（critical for regression test）**
 
 ```bash
-cd e:/GithubCloneSpace/Stock/backtrader/backtrader
+cd .
 mkdir -p .baseline_calc_indicators
 cp my_strategy/data/indicators/000001.SZ.csv .baseline_calc_indicators/
 cp my_strategy/data/indicators/600000.SH.csv .baseline_calc_indicators/
