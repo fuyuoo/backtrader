@@ -8,6 +8,33 @@
     "soil_seed_score_matrix": "docs/baoma-v1-soil-seed-score-matrix.md",
     "matrix_baseline": "examples/baoma-v1-soil-seed-score-matrix-baseline.json"
   },
+  "completeness_boundary": {
+    "sufficient_for_zh": [
+      "了解本次使用的策略方式、回测时间、股票池类型和动态成分股门槛。",
+      "了解 evidence validation 状态、核心交易数量和样本采集口径报告指标。",
+      "了解 soil/seed/score 矩阵的主要发现和下一轮 scored portfolio 验证假设。",
+      "判断当前结果为什么不能直接作为实盘组合收益证据。"
+    ],
+    "requires_source_artifacts_zh": [
+      "逐笔交易、逐笔订单、逐日信号和每次 sizing decision。",
+      "benchmark comparison、行业归因全量表、market regime 和 scenario fit。",
+      "完整的年份、行业、score x soil x seed 单元矩阵。",
+      "open position 明细、单票生命周期、加仓和卖飞复盘。",
+      "字段级覆盖率、缺失原因和 attribution reference 命中明细。",
+      "任何需要复算、审计或生成新图表的新分析。"
+    ],
+    "interpretation_zh": "本目录是结果封板入口和复盘索引，不是原始证据仓库。"
+  },
+  "source_artifacts": {
+    "run_dir": "reports/baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence-run-window-union",
+    "run_plan": "reports/baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence-run-window-union/run_plan.json",
+    "report": "reports/baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence-run-window-union/report.json",
+    "evidence_validation": "reports/baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence-run-window-union/evidence_validation.json",
+    "environment_fit": "reports/baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence-run-window-union/environment_fit.json",
+    "soil_seed_3x3_summary": "reports/soil-seed-strength-3x3-baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-current-run/summary.zh.md",
+    "score_soil_seed_matrix_summary": "reports/score-soil-seed-4d-matrix-baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence/summary.zh.md",
+    "soil_seed_type_diagnostics": "reports/score-soil-seed-4d-matrix-baoma-v1-dynamic-hs300-csi500-2015-2025-strict-t1-industry-evidence/soil_seed_type_diagnostics.zh.md"
+  },
   "strategy_method": {
     "template": "trend_template_v1",
     "entry_method": "baoma_entry",

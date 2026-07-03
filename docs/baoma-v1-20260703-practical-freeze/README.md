@@ -11,6 +11,30 @@
 本目录不保存 ignored `reports/` 下的大体积产物，只保存可复盘的结论、
 关键数字、路径和边界。
 
+## Completeness Boundary
+
+只读本目录的 `README.md` 和 `manifest.json`，可以知道本次回测的核心结论：
+
+- 用了什么策略方式。
+- 跑了什么时间区间。
+- 用了什么股票池和动态成分股门槛。
+- evidence validation 是否通过。
+- 样本采集口径下的核心交易数量和报告指标。
+- soil/seed/score 矩阵的主要发现。
+- 为什么当前结果不能直接作为实盘组合收益证据。
+- 下一轮 scored portfolio 应该如何验证。
+
+但这两个文件不能替代完整 run artifact。以下问题必须回到 `reports/`：
+
+- 逐笔交易、逐笔订单、逐日信号和每次 sizing decision。
+- benchmark comparison、行业归因全量表、market regime、scenario fit。
+- 每年、每行业、每个 score x soil x seed 单元的完整矩阵。
+- open position 明细、单票生命周期、加仓和卖飞复盘。
+- 字段级覆盖率、缺失原因、原始 attribution reference 命中情况。
+- 任何需要复算、审计或生成新图表的新分析。
+
+所以，本目录是“结果封板入口”和“复盘索引”，不是原始证据仓库。
+
 ## 1. 策略方式
 
 当前策略是 Baoma V1，接在 `trend_template_v1` 策略模板上。
