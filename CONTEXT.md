@@ -184,6 +184,11 @@ _Avoid_: Entry filter, decision input, look-ahead signal
 A post-run lookup that derives attribution only from the data snapshots and run artifacts recorded by the completed run, not from fresh provider calls or unrelated recalculation inputs.
 _Avoid_: Live-data explanation, current-data replay, unpinned post-hoc lookup
 
+**Industry-Inclusive Soil Rating**:
+A post-run environment rating that assigns a completed trade to a soil layer after combining broad-index soil evidence with the matched Shenwan industry soil evidence for that trade date.
+It is unknown when required broad-index or industry soil evidence is missing.
+_Avoid_: No-industry soil rating, industry attribution, industry hard gate
+
 **Water Temperature**:
 The user-facing interpretation of `Market Regime`, expressed as deterministic labels such as `cold`, `neutral`, `warm`, `hot`, or `insufficient_evidence`.
 _Avoid_: Unstructured AI opinion

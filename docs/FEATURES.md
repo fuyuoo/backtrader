@@ -43,6 +43,17 @@ python -m attbacktrader.cli.run_plan \
 
 数据准备阶段仍可显式使用 Tushare，并建议对 10-20 年长窗口使用更大的日期窗口，减少无意义分片请求。日线行情和可交易状态快照都会优先复用本地已覆盖的区间；如果已有宽区间 Parquet 覆盖目标窗口，会直接裁剪写出目标快照；如果只缺头部或尾部，则只请求缺口区间。
 
+行业归属缺口可在数据准备阶段使用 BigQuant DAI 补齐。`att-bigquant-industry-snapshots` 会读取 BigQuant `cn_stock_industry_component` 日频行业成分，压缩成项目内 `StockIndustryMembership` 区间，并写入本地 industry snapshot；该命令会联网，且需要 BigQuant 账号具备 DAI SDK 使用权限，正式回测仍只能读取已落地快照。
+
+```bash
+att-bigquant-industry-snapshots \
+  --source SW2014 \
+  --start-date 2006-01-01 \
+  --end-date 2025-12-31 \
+  --symbols-from-trades reports/soil-with-industry-v1-baoma-v1-dynamic-hs300-csi500-2006-2025/trade_soil_with_industry_v1.parquet \
+  --snapshot-root data/snapshots
+```
+
 ```bash
 python -m attbacktrader.cli.run_plan \
   --config reports/pre2015-2005-2014/input/run-baoma-v1-dynamic-hs300-csi500-2005-2014-strict-t1-no-industry.yaml \

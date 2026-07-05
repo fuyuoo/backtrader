@@ -6,6 +6,8 @@ Use the repository root (`.`) as the only working directory for this repository.
 
 Do not read, edit, or depend on any external checkout of this repository outside `.`.
 
+Do not use drive-specific absolute paths such as `C:\...` or `E:\...` in instructions, commands, examples, or documentation unless the user explicitly requests them. Prefer paths relative to the repository root.
+
 ### GitHub Repository
 
 For GitHub issue, PRD, and PR operations, explicitly target `fuyuoo/backtrader`. Do not rely on `gh` remote inference because this checkout may also have the upstream `mementum/backtrader` remote.

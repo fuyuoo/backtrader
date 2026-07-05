@@ -13,6 +13,15 @@
 - 影响：对其他模块的影响（可选）
 ```
 
+## 2026-07-05 — BigQuant 行业归属快照导入器
+
+- 需求：当前土壤评级已经把行业分数并入评级，但历史行业归属还有缺口，需要接入 BigQuant 行业成分数据补齐行业 membership 快照。
+- 改动：
+  - `attbacktrader/data/providers/bigquant.py`：新增 BigQuant DAI 行业 provider，支持读取 `cn_stock_industry` 分类映射和 `cn_stock_industry_component` 日频行业成分，并压缩成项目内 `StockIndustryMembership` 区间。
+  - `attbacktrader/cli/bigquant_industry_snapshots.py`：新增 `att-bigquant-industry-snapshots` 数据准备命令，可按股票列表、交易明细或全量范围写入 `data/snapshots/industries/sw/<source>/memberships/`。
+  - `tests/test_bigquant_provider.py`：覆盖行业代码 `.SI` 标准化、日频成分压缩成归属区间、BigQuant 查询日期过滤和 source 映射。
+- 影响：该命令属于数据准备阶段，会联网访问 BigQuant；正式回测仍必须使用本地离线快照。BigQuant SDK 需要先完成认证并具备 DAI SDK 使用权限，否则查询会直接失败。
+
 ## 2026-07-02 — Data Preflight 增加阶段画像并并行化离线 symbol 读取
 
 - 需求：prepared symbol 复用后，`data_preflight_symbols` 成为最大耗时阶段，需要先定位内部耗时，再减少离线本地快照读取的墙钟时间。
