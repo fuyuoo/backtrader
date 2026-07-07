@@ -330,7 +330,7 @@ def test_entry_attribution_context_uses_completed_weekly_symbol_context() -> Non
     assert evidence.categories["entry.weekly.symbol_ma_trend_bucket"] in {"uptrend", "downtrend", "mixed"}
 
 
-def test_entry_attribution_context_merges_reference_snapshot_evidence() -> None:
+def test_entry_attribution_context_merges_reference_snapshot_evidence_on_exact_date() -> None:
     bars = _daily_bars("000001.SZ", count=5, start_close=10.0, step=0.2)
     reference_date = bars[1].trade_date
 
@@ -347,11 +347,12 @@ def test_entry_attribution_context_merges_reference_snapshot_evidence() -> None:
         enabled_factor_keys=("entry.market_cap.total_mv_abs_bucket",),
     )
 
-    evidence = context.evidence_for("000001.SZ", bars[-1].trade_date)
+    evidence = context.evidence_for("000001.SZ", reference_date)
 
     assert evidence is not None
     assert evidence.categories["entry.market_cap.total_mv_abs_bucket"] == "0_100yi"
     assert evidence.values == {}
+    assert context.evidence_for("000001.SZ", bars[-1].trade_date) is None
 
 
 def test_entry_attribution_evidence_date_index_preserves_on_or_before_semantics() -> None:

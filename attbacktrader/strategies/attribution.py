@@ -1669,6 +1669,31 @@ def with_sizing_attribution(
     )
 
 
+def _enabled_keys_use_only_attribution_reference_snapshot(enabled_keys: frozenset[str]) -> bool:
+    if not enabled_keys:
+        return False
+    declarations = entry_attribution_declaration_by_key()
+    return all(
+        (declaration := declarations.get(key)) is not None
+        and declaration.source == "attribution_reference_snapshot"
+        for key in enabled_keys
+    )
+
+
+def _reference_only_evidence_by_key(
+    evidence_by_symbol_date: Mapping[str, Mapping[date, EntryAttributionEvidence]],
+    *,
+    enabled_keys: frozenset[str],
+) -> dict[tuple[str, date], EntryAttributionEvidence]:
+    result: dict[tuple[str, date], EntryAttributionEvidence] = {}
+    for symbol, by_date in evidence_by_symbol_date.items():
+        for trade_date, evidence in by_date.items():
+            filtered = _filter_evidence(evidence, enabled_keys)
+            if not filtered.is_empty():
+                result[(symbol, trade_date)] = filtered
+    return result
+
+
 def build_entry_attribution_context(
     *,
     bars_by_symbol: Mapping[str, Sequence[DailyBar]],
@@ -1702,6 +1727,30 @@ def build_entry_attribution_context(
         symbol_count=len(bars_by_symbol),
         enabled_factor_count=len(enabled_keys),
     )
+    if _enabled_keys_use_only_attribution_reference_snapshot(enabled_keys):
+        evidence_by_key = _reference_only_evidence_by_key(
+            attribution_reference_evidence_by_symbol_date,
+            enabled_keys=enabled_keys,
+        )
+        _emit_entry_attribution_progress(
+            progress_callback,
+            stage=f"{progress_stage}_reference",
+            status="completed",
+            evidence_symbol_count=len(attribution_reference_evidence_by_symbol_date),
+            total_evidence_count=len(evidence_by_key),
+        )
+        _emit_entry_attribution_progress(
+            progress_callback,
+            stage=progress_stage,
+            status="completed",
+            symbol_count=len(bars_by_symbol),
+            total_evidence_count=len(evidence_by_key),
+        )
+        return EntryAttributionContext(
+            evidence_by_key=evidence_by_key,
+            enabled_factor_keys=enabled_keys,
+            entry_filter=entry_filter or EntryAttributionFilterRule(),
+        )
     market_evidence_by_date: dict[date, EntryAttributionEvidence] = {}
     market_symbols = tuple(dict.fromkeys((market_symbol, *benchmark_bars_by_symbol)))
     _emit_entry_attribution_progress(
@@ -1827,12 +1876,9 @@ def build_entry_attribution_context(
         symbol_industry_relative_evidence_index = EntryAttributionEvidenceDateIndex.from_mapping(
             symbol_industry_relative_evidence_by_date
         )
-        attribution_reference_evidence_index = EntryAttributionEvidenceDateIndex.from_mapping(
-            attribution_reference_evidence_by_date
-        )
         for bar in ordered_bars:
             evidence = _merge_evidence(
-                _latest_evidence_on_or_before(attribution_reference_evidence_index, bar.trade_date),
+                attribution_reference_evidence_by_date.get(bar.trade_date),
                 _latest_evidence_on_or_before(symbol_derived_evidence_index, bar.trade_date),
                 _latest_evidence_on_or_before(symbol_cross_section_evidence_index, bar.trade_date),
                 _latest_evidence_on_or_before(symbol_industry_relative_evidence_index, bar.trade_date),
