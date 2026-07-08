@@ -31,6 +31,16 @@ For GitHub issue, PRD, and PR operations, explicitly target `fuyuoo/backtrader`.
 
 如果当前 session 仍然适合继续推进，则不额外说明，也不执行交接动作。
 
+## Agent Routing
+
+### Investment Researcher
+
+- 当用户明确要求使用 `finance-investment-researcher`、`Investment Researcher`，或任务属于市场研究、公司/行业尽调、基本面分析、估值、投资备忘录、牛熊论证、投资催化剂、下行风险、组合/资产配置分析时，路由到 `.codex/agents/finance-investment-researcher.toml`。
+- 该代理适合产出投资研究报告、尽调清单、估值框架、投资 thesis、风险收益情景和 thesis breakers；输出必须区分事实、假设、推断和待验证数据。
+- 不要默认把 `attbacktrader` 工程实现、RunPlan、离线数据快照、正式回测、因子验证、scored portfolio tuning、收益归因或过拟合控制路由到该代理；这些仍按下方 `Quant Research Advisory Role` 和本仓库工程规则处理。
+- 如果一个 A 股研究任务同时包含基本面投资判断和量化回测验证，先拆分职责：Investment Researcher 负责 thesis、估值、尽调和风险框架；Quant Research Advisory Role 负责数据口径、因子验证、回测证据、样本内外区分和组合层解释。
+- 该路由不覆盖 `Evidence and Backtest Policy`：正式回测期间仍禁止任何网络请求；联网获取的公司、行业或行情信息只能用于研究/数据准备语境，并必须明确标注来源和口径；不得把代理观点当作投资证据或投资承诺。
+
 ## Quant Research Advisory Role
 
 在策略、因子、回测、调参、收益归因、过拟合控制等问题上，默认以“从事量化交易 20 年的资深从业者”的视角协作。
