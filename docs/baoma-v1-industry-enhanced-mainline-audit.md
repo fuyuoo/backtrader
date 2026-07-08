@@ -176,3 +176,67 @@ Seed overlay 诊断：
 1. 第一轮 runner replay 使用保守档，先验证行业主轴 `very_strong_soil` 在资金竞争下是否仍有 lift。
 2. 第二轮 replay 使用均衡档，测试扩大样本后的 PF、回撤和容量。
 3. 进攻档只作为容量边界测试，不应先定为主线。
+
+## 2026-07-08 保守档 Runner Replay 对照
+
+已新增快速 replay 脚本：
+
+```text
+scripts/run_industry_gate_replay_from_signal_audit.py
+```
+
+该脚本不重新执行 2000 只股票的 Baoma engine。它读取已落盘 source run 的
+`signal_audit.parquet`，分批构造 actionable decision events，再调用同一个
+`simulate_precomputed_score_portfolio(...)` replay 核心。
+
+source run：
+
+```text
+reports/baoma-v1-dynamic-hs300-csi500-2006-2025-strict-t1-no-industry-attribution-normalized-symbols/
+```
+
+对照输出：
+
+```text
+reports/industry-gate-runner-replay-comparison-2006-2025-replay-cash-10m/
+```
+
+组合 replay 口径：
+
+```text
+window: 2006-01-01 -> 2025-12-31
+initial_cash: 10,000,000
+max_holding_count: 20
+max_new_positions_per_day: 5
+cash_reserve_ratio: 0.05
+industry_max_new_per_day: 1
+```
+
+事件 contract：
+
+```text
+signal_audit_rows_scanned: 8,879,478
+actionable_event_count: 86,782
+enter_event_count: 43,100
+```
+
+结果级对照：
+
+| candidate | score rows | matched enter | missing enter | selected | closed | cumulative | max drawdown | win rate | PF | final value |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 含行业保守档 `very_strong_soil` | 14,996 | 14,996 | 28,104 | 1,947 | 1,947 | 459.50% | 33.59% | 36.83% | 1.69 | 55,950,427 |
+| no-industry strong baseline | 23,647 | 23,647 | 19,453 | 2,387 | 2,387 | 204.42% | 37.74% | 34.52% | 1.43 | 30,441,571 |
+
+Lift：
+
+| metric | 含行业保守档 - no-industry strong |
+|---|---:|
+| cumulative_return | +255.09pct |
+| max_drawdown | -4.15pct |
+| win_rate | +2.31pct |
+| profit_factor | +0.26 |
+| selected trades | -440 |
+
+结论：
+
+含行业保守档在真实资金竞争 replay 下胜出。它不是靠更多交易取胜，而是在少选 440 笔的情况下提升累计收益、PF 和回撤。因此当前主线可以进入第二步：跑均衡档 replay，测试扩大样本后的容量边界。
