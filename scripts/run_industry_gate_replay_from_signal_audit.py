@@ -26,6 +26,7 @@ DEFAULT_SOURCE_RUN_DIR = Path(
 )
 DEFAULT_OUTPUT_DIR = Path("reports/industry-gate-runner-replay-comparison-2006-2025-replay-cash-10m")
 DEFAULT_INDUSTRY_RUN_DIR = Path("reports/industry-very-strong-entry-score-runner-2006-2025-replay-cash-10m")
+DEFAULT_BALANCED_RUN_DIR = Path("reports/industry-balanced-entry-score-runner-2006-2025-replay-cash-10m")
 DEFAULT_NO_INDUSTRY_RUN_DIR = Path("reports/no-industry-strong-entry-score-runner-2006-2025-replay-cash-10m")
 FUTURE_FIELDS_EXCLUDED = (
     "exit_date",
@@ -63,6 +64,7 @@ def build_industry_gate_replay_comparison(
     *,
     source_run_dir: str | Path = DEFAULT_SOURCE_RUN_DIR,
     industry_run_dir: str | Path = DEFAULT_INDUSTRY_RUN_DIR,
+    balanced_run_dir: str | Path = DEFAULT_BALANCED_RUN_DIR,
     no_industry_run_dir: str | Path = DEFAULT_NO_INDUSTRY_RUN_DIR,
     start_date: str = "2006-01-01",
     end_date: str = "2025-12-31",
@@ -74,6 +76,7 @@ def build_industry_gate_replay_comparison(
 ) -> dict[str, Any]:
     source_dir = Path(source_run_dir)
     industry_dir = Path(industry_run_dir)
+    balanced_dir = Path(balanced_run_dir)
     no_industry_dir = Path(no_industry_run_dir)
     stock_pool_order = _load_stock_pool_order(source_dir / "run_plan.json")
     events, extraction = _extract_decision_events(
@@ -99,6 +102,13 @@ def build_industry_gate_replay_comparison(
             industry_dir,
             "industry_very_strong_soil_v1_conservative",
             "entry.score.industry_very_strong_soil_v1",
+        ),
+        _candidate_config(
+            "industry_balanced",
+            "含行业均衡档",
+            balanced_dir,
+            "industry_balanced_soil_v1",
+            "entry.score.industry_balanced_soil_v1",
         ),
         _candidate_config(
             "no_industry_strong",
@@ -157,7 +167,7 @@ def write_industry_gate_replay_comparison(report: Mapping[str, Any], *, output_d
 def render_industry_gate_replay_comparison_markdown_zh(report: Mapping[str, Any]) -> str:
     comparison = _as_mapping(report.get("comparison"))
     lines = [
-        "# 含行业保守档 Runner Replay 对照",
+        "# 含行业 Gate Runner Replay 对照",
         "",
         "## 结论",
         "",
@@ -199,15 +209,17 @@ def render_industry_gate_replay_comparison_markdown_zh(report: Mapping[str, Any]
     lines.extend(
         [
             "",
-            "## Lift",
+            "## Lift vs no-industry strong",
             "",
-            "| metric | industry very strong - no-industry strong |",
-            "|---|---:|",
+            "| candidate | metric | delta |",
+            "|---|---|---:|",
         ]
     )
-    for key, value in _as_mapping(comparison.get("metric_delta")).items():
-        formatter = _fmt_pct if key in {"cumulative_return", "annualized_return", "max_drawdown", "win_rate"} else _fmt_num
-        lines.append(f"| {key} | {formatter(value)} |")
+    for item in _as_sequence(comparison.get("candidate_comparisons")):
+        candidate_id = item.get("tested_candidate_id")
+        for key, value in _as_mapping(item.get("metric_delta")).items():
+            formatter = _fmt_pct if key in {"cumulative_return", "annualized_return", "max_drawdown", "win_rate"} else _fmt_num
+            lines.append(f"| {candidate_id} | {key} | {formatter(value)} |")
 
     lines.extend(
         [
@@ -226,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
     report = build_industry_gate_replay_comparison(
         source_run_dir=args.source_run_dir,
         industry_run_dir=args.industry_run_dir,
+        balanced_run_dir=args.balanced_run_dir,
         no_industry_run_dir=args.no_industry_run_dir,
         start_date=args.start_date,
         end_date=args.end_date,
@@ -255,6 +268,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Replay industry gate artifacts from source signal_audit")
     parser.add_argument("--source-run-dir", type=Path, default=DEFAULT_SOURCE_RUN_DIR)
     parser.add_argument("--industry-run-dir", type=Path, default=DEFAULT_INDUSTRY_RUN_DIR)
+    parser.add_argument("--balanced-run-dir", type=Path, default=DEFAULT_BALANCED_RUN_DIR)
     parser.add_argument("--no-industry-run-dir", type=Path, default=DEFAULT_NO_INDUSTRY_RUN_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--start-date", default="2006-01-01")
@@ -385,27 +399,47 @@ def _write_candidate_artifacts(candidate: Mapping[str, Any], replay: Mapping[str
 
 def _comparison(results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     by_id = {str(item["candidate_id"]): item for item in results}
-    industry = _as_mapping(_as_mapping(by_id["industry_very_strong"]).get("metrics"))
     baseline = _as_mapping(_as_mapping(by_id["no_industry_strong"]).get("metrics"))
+    comparisons = [
+        _candidate_comparison(by_id, baseline, tested_candidate_id)
+        for tested_candidate_id in ("industry_very_strong", "industry_balanced")
+        if tested_candidate_id in by_id
+    ]
+    summary_parts = [
+        (
+            f"{item['tested_candidate_id']}：{item['verdict']}，"
+            f"年化差 {_fmt_pct(_as_mapping(item.get('metric_delta')).get('annualized_return'))}，"
+            f"PF 差 {_fmt_num(_as_mapping(item.get('metric_delta')).get('profit_factor'))}，"
+            f"selected 差 {_fmt_num(_as_mapping(item.get('metric_delta')).get('trade_count'))}"
+        )
+        for item in comparisons
+    ]
+    return {
+        "baseline_candidate_id": "no_industry_strong",
+        "candidate_comparisons": comparisons,
+        "summary_zh": "；".join(summary_parts) + "。",
+    }
+
+
+def _candidate_comparison(
+    by_id: Mapping[str, Mapping[str, Any]],
+    baseline: Mapping[str, Any],
+    tested_candidate_id: str,
+) -> dict[str, Any]:
+    tested = _as_mapping(_as_mapping(by_id[tested_candidate_id]).get("metrics"))
     delta = {
-        key: _delta(industry.get(key), baseline.get(key))
+        key: _delta(tested.get(key), baseline.get(key))
         for key in METRIC_KEYS
-        if _delta(industry.get(key), baseline.get(key)) is not None
+        if _delta(tested.get(key), baseline.get(key)) is not None
     }
     pf_delta = delta.get("profit_factor")
     ann_delta = delta.get("annualized_return")
-    selected_delta = delta.get("trade_count")
     verdict = "胜出" if (pf_delta is not None and pf_delta > 0 and ann_delta is not None and ann_delta > 0) else "未胜出"
     return {
         "baseline_candidate_id": "no_industry_strong",
-        "tested_candidate_id": "industry_very_strong",
+        "tested_candidate_id": tested_candidate_id,
         "verdict": verdict,
         "metric_delta": delta,
-        "summary_zh": (
-            f"含行业保守档相对 no-industry strong baseline：{verdict}。"
-            f"年化差 {_fmt_pct(ann_delta)}，PF 差 {_fmt_num(pf_delta)}，"
-            f"selected 差 {_fmt_num(selected_delta)}。"
-        ),
     }
 
 

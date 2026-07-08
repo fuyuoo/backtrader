@@ -240,3 +240,61 @@ Lift：
 结论：
 
 含行业保守档在真实资金竞争 replay 下胜出。它不是靠更多交易取胜，而是在少选 440 笔的情况下提升累计收益、PF 和回撤。因此当前主线可以进入第二步：跑均衡档 replay，测试扩大样本后的容量边界。
+
+## 2026-07-08 均衡档 Runner Replay 对照
+
+均衡档规则：
+
+```text
+very_strong_soil
+OR
+strong_soil + strong_seed
+```
+
+已生成均衡档 score artifact：
+
+```text
+reports/industry-balanced-entry-score-runner-2006-2025-replay-cash-10m/entry_score_artifact.parquet
+```
+
+artifact 行数：
+
+```text
+score rows: 20,517
+```
+
+同一 replay 脚本已扩展为三组对照：
+
+```text
+industry_very_strong
+industry_balanced
+no_industry_strong
+```
+
+结果级对照：
+
+| candidate | score rows | matched enter | missing enter | selected | closed | cumulative | max drawdown | win rate | PF | final value |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 含行业保守档 `very_strong_soil` | 14,996 | 14,996 | 28,104 | 1,947 | 1,947 | 459.50% | 33.59% | 36.83% | 1.69 | 55,950,427 |
+| 含行业均衡档 | 20,517 | 20,517 | 22,583 | 2,383 | 2,383 | 463.68% | 40.92% | 37.98% | 1.55 | 56,367,763 |
+| no-industry strong baseline | 23,647 | 23,647 | 19,453 | 2,387 | 2,387 | 204.42% | 37.74% | 34.52% | 1.43 | 30,441,571 |
+
+相对 no-industry strong baseline：
+
+| candidate | cumulative lift | drawdown delta | win-rate lift | PF lift | selected delta |
+|---|---:|---:|---:|---:|---:|
+| 含行业保守档 | +255.09pct | -4.15pct | +2.31pct | +0.26 | -440 |
+| 含行业均衡档 | +259.26pct | +3.18pct | +3.46pct | +0.12 | -4 |
+
+解释：
+
+- 均衡档基本恢复了 baseline 的成交容量：`2,383` vs `2,387`。
+- 均衡档最终收益略高于保守档：`56.37M` vs `55.95M`。
+- 均衡档的代价是回撤更高：`40.92%`，高于保守档 `33.59%`，也高于 no-industry strong baseline `37.74%`。
+- 保守档仍是质量主线；均衡档是容量/收益上限候选，不应直接替代保守档作为风险受控主线。
+
+当前判断：
+
+1. 若目标是风险受控主线，优先保守档。
+2. 若目标是容量和最终收益，均衡档值得进入下一层回撤/年份弱点审计。
+3. 下一步不应先跑进攻档，应先拆均衡档为什么增加回撤，尤其看 `2008`、`2018`、`2022-2023` 和 `strong_soil + strong_seed` 增量交易。
