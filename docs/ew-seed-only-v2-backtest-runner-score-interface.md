@@ -324,3 +324,5 @@ reports/ew-seed-only-v2-entry-score-runner-warmup-2006-filter-2013-2025-replay-c
   `reports/ew-seed-only-v2-entry-score-runner-warmup-2006-filter-2013-2025/entry_score_contract.json`
 - 新 runner 旧 formal 数值 parity：
   `reports/ew-seed-only-v2-entry-score-runner-warmup-2006-filter-2013-2025-replay-cash-10m/formal_result_parity_replay_cash_10m_audit.zh.md`
+- 新 runner 旧 formal 数值 parity 回归命令：
+  `python scripts/check_entry_score_formal_parity.py`
