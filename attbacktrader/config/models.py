@@ -264,10 +264,50 @@ class BaomaExecutionConfig(FrozenModel):
         return self
 
 
+class EntryScoreKeyConfig(FrozenModel):
+    symbol: str = Field(default="symbol", min_length=1)
+    trade_date: str = Field(default="entry_date", min_length=1)
+
+
+class EntryScoreConfig(FrozenModel):
+    enabled: bool = False
+    scope: Literal["backtest_only"] = "backtest_only"
+    score_id: str | None = None
+    score_field: str | None = None
+    source_score_field: str | None = None
+    artifact_path: Path | None = None
+    key: EntryScoreKeyConfig = Field(default_factory=EntryScoreKeyConfig)
+    missing_score_policy: Literal["skip", "fail"] = "skip"
+    max_holding_count: PositiveInt | None = None
+    max_new_positions_per_day: PositiveInt | None = None
+    cash_reserve_ratio: float = Field(default=0.05, ge=0, lt=1)
+    industry_max_new_per_day: PositiveInt | None = 1
+    allow_same_day_exit_cash_reuse: bool = True
+    prefer_unheld_industries: bool = False
+
+    @model_validator(mode="after")
+    def validate_enabled_contract(self) -> "EntryScoreConfig":
+        if not self.enabled:
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("execution.entry_score.score_id", self.score_id),
+                ("execution.entry_score.score_field", self.score_field),
+                ("execution.entry_score.artifact_path", self.artifact_path),
+            )
+            if value is None or value == ""
+        ]
+        if missing:
+            raise ValueError(f"entry_score enabled requires: {', '.join(missing)}")
+        return self
+
+
 class ExecutionConfig(FrozenModel):
     engine: Literal["business", "backtrader", "baoma_v1_business"] = "business"
     stake: PositiveInt = 100
     baoma: BaomaExecutionConfig = Field(default_factory=BaomaExecutionConfig)
+    entry_score: EntryScoreConfig = Field(default_factory=EntryScoreConfig)
 
 
 class OutputConfig(FrozenModel):
@@ -622,6 +662,12 @@ class RunPlan(FrozenModel):
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
+
+    @model_validator(mode="after")
+    def validate_entry_score_scope(self) -> "RunPlan":
+        if self.execution.entry_score.enabled and self.execution.engine != "baoma_v1_business":
+            raise ValueError("execution.entry_score.enabled requires execution.engine='baoma_v1_business'")
+        return self
 
     @classmethod
     def from_mapping(cls, raw_config: dict[str, Any]) -> "RunPlan":

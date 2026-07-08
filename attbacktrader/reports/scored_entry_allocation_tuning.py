@@ -20,6 +20,7 @@ SINGLE_FOLD_STAGE_B_TUNING_SCHEMA = "attbacktrader.single_fold_stage_b_tuning.v1
 FULL_WALK_FORWARD_TUNING_RUN_SCHEMA = "attbacktrader.full_walk_forward_tuning_run.v1"
 SCORED_ALLOCATION_REPORT_PACKAGE_SCHEMA = "attbacktrader.scored_allocation_report_package.v1"
 STRATEGY_DECISION_EVENT_TABLE_SCHEMA = "attbacktrader.strategy_decision_event_table.v1"
+PRECOMPUTED_SCORE_PORTFOLIO_RUN_SCHEMA = "attbacktrader.precomputed_score_portfolio_run.v1"
 
 _SUPPORTED_MODES = {"dry-run", "smoke", "standard", "sensitivity"}
 _OBJECTIVES = ("annualized_return", "sharpe_ratio", "benchmark_excess_return", "max_drawdown")
@@ -647,6 +648,119 @@ def simulate_scored_portfolio(
         prefer_unheld_industries=prefer_unheld_industries,
         unscored_baseline=unscored_baseline,
     )
+
+
+def simulate_precomputed_score_portfolio(
+    events: Sequence[Mapping[str, Any]],
+    *,
+    score_rows: Sequence[Mapping[str, Any]],
+    score_field: str,
+    portfolio_controls: Mapping[str, Any],
+    missing_score_policy: str = "skip",
+    score_id: str | None = None,
+    score_gate: Mapping[str, Any] | None = None,
+    unscored_baseline: bool = False,
+) -> dict[str, Any]:
+    """Run a backtest-only portfolio simulation using precomputed entry scores.
+
+    The external score artifact is keyed by ``symbol`` + ``trade_date`` and only
+    applies to enter events. Missing scores are explicit: ``skip`` blocks the
+    candidate via SCORE_GATE, while ``fail`` raises before simulation.
+    """
+
+    if missing_score_policy not in {"skip", "fail"}:
+        raise ValueError("missing_score_policy must be one of: skip, fail")
+
+    initial_cash = _positive_float(portfolio_controls, "initial_cash")
+    max_holding_count = _positive_int(portfolio_controls, "max_holding_count")
+    max_new_positions_per_day = _optional_positive_int(portfolio_controls.get("max_new_positions_per_day"))
+    industry_max_new_per_day = _optional_positive_int(portfolio_controls.get("industry_max_new_per_day"))
+    cash_reserve_ratio = float(portfolio_controls.get("cash_reserve_ratio", 0.0))
+    if not 0 <= cash_reserve_ratio < 1:
+        raise ValueError("cash_reserve_ratio must be in [0, 1)")
+    board_lot_size = int(portfolio_controls.get("board_lot_size") or 100)
+    if board_lot_size <= 0:
+        raise ValueError("board_lot_size must be positive")
+    allow_same_day_exit_cash_reuse = _optional_bool(
+        portfolio_controls.get("allow_same_day_exit_cash_reuse", True),
+        "allow_same_day_exit_cash_reuse",
+    )
+    prefer_unheld_industries = _optional_bool(
+        portfolio_controls.get("prefer_unheld_industries", False),
+        "prefer_unheld_industries",
+    )
+
+    normalized_events = [_normalize_decision_event(event) for event in events]
+    normalized_enter_events = [event for event in normalized_events if event["intent_type"] == "enter"]
+    score_by_key = _precomputed_score_rows_by_key(score_rows, score_field=score_field)
+    enter_keys = {(str(event["symbol"]), str(event["trade_date"])) for event in normalized_enter_events}
+    missing_keys = sorted(enter_keys - set(score_by_key))
+    if missing_keys and missing_score_policy == "fail":
+        sample = ", ".join(f"{symbol}@{trade_date}" for symbol, trade_date in missing_keys[:5])
+        suffix = "" if len(missing_keys) <= 5 else f" (+{len(missing_keys) - 5} more)"
+        raise ValueError(f"missing precomputed scores for {len(missing_keys)} enter events: {sample}{suffix}")
+
+    scores_by_key = {}
+    for event in normalized_enter_events:
+        key = (str(event["symbol"]), str(event["trade_date"]))
+        row = score_by_key.get(key)
+        score_present = row is not None
+        raw_score = float(row["score"]) if row is not None else None
+        score = 0.0 if unscored_baseline else (raw_score if raw_score is not None else -1_000_000_000.0)
+        scores_by_key[key] = {
+            **_candidate_public_fields(event),
+            "score": score,
+            "score_gate_passed": True if unscored_baseline else score_present,
+            "score_status": "present" if score_present else "missing",
+            "score_id": score_id,
+            "contributions": {
+                "factor_weights": {
+                    score_field: {
+                        "value": raw_score,
+                        "weight": score,
+                    }
+                },
+                "interaction_weights": [],
+            },
+        }
+        if row is not None:
+            scores_by_key[key].update(_jsonable(dict(row.get("metadata") or {})))
+
+    scored_gate = {
+        "threshold": None,
+        "derived_from": "precomputed_score_artifact",
+        "score_field": score_field,
+        "score_id": score_id,
+        "missing_score_policy": missing_score_policy,
+        **dict(score_gate or {}),
+    }
+    simulation = _simulate_scored_portfolio_from_normalized(
+        normalized_events=normalized_events,
+        scores_by_key=scores_by_key,
+        scored_gate=scored_gate,
+        portfolio_controls=portfolio_controls,
+        initial_cash=initial_cash,
+        max_holding_count=max_holding_count,
+        max_new_positions_per_day=max_new_positions_per_day,
+        industry_max_new_per_day=industry_max_new_per_day,
+        cash_reserve_ratio=cash_reserve_ratio,
+        board_lot_size=board_lot_size,
+        allow_same_day_exit_cash_reuse=allow_same_day_exit_cash_reuse,
+        prefer_unheld_industries=prefer_unheld_industries,
+        unscored_baseline=unscored_baseline,
+    )
+    simulation["precomputed_score_contract"] = {
+        "schema": PRECOMPUTED_SCORE_PORTFOLIO_RUN_SCHEMA,
+        "scope": "backtest_only",
+        "score_id": score_id,
+        "score_field": score_field,
+        "missing_score_policy": missing_score_policy,
+        "enter_event_count": len(normalized_enter_events),
+        "matched_enter_score_count": len(enter_keys & set(score_by_key)),
+        "missing_enter_score_count": len(missing_keys),
+        "score_keys_not_in_enter_events_count": len(set(score_by_key) - enter_keys),
+    }
+    return simulation
 
 
 def run_fixed_parameter_scored_portfolio_smoke(
@@ -2491,6 +2605,40 @@ def _candidate_order_key(
     if unscored_baseline:
         return (industry_key, int(event.get("stock_pool_order") or 0), str(event["symbol"]))
     return (industry_key, -float(scored_row["score"]), int(event.get("stock_pool_order") or 0), str(event["symbol"]))
+
+
+def _precomputed_score_rows_by_key(
+    score_rows: Sequence[Mapping[str, Any]],
+    *,
+    score_field: str,
+) -> dict[tuple[str, str], dict[str, Any]]:
+    rows_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in score_rows:
+        item = _as_mapping(row)
+        symbol = str(item.get("symbol") or "")
+        trade_date = str(item.get("trade_date") or item.get("entry_date") or "")
+        if not symbol or not trade_date:
+            raise ValueError("precomputed score rows must include symbol and trade_date or entry_date")
+        key = (symbol, trade_date)
+        if key in rows_by_key:
+            raise ValueError(f"duplicate precomputed score key: {symbol}@{trade_date}")
+        if score_field not in item:
+            raise ValueError(f"precomputed score row missing score_field {score_field}: {symbol}@{trade_date}")
+        score = _number_or_none(item.get(score_field))
+        if score is None or not math.isfinite(score):
+            raise ValueError(f"precomputed score must be finite for {symbol}@{trade_date}")
+        metadata = {
+            str(name): _jsonable(value)
+            for name, value in item.items()
+            if name not in {"symbol", "trade_date", "entry_date", score_field}
+        }
+        rows_by_key[key] = {
+            "symbol": symbol,
+            "trade_date": trade_date,
+            "score": score,
+            "metadata": metadata,
+        }
+    return rows_by_key
 
 
 def _block_entry(

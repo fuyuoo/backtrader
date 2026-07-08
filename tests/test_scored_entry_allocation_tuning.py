@@ -11,6 +11,7 @@ from attbacktrader.reports import (
     SCORED_ALLOCATION_REPORT_PACKAGE_SCHEMA,
     SCORED_ENTRY_ALLOCATION_TUNING_CONTRACT_SCHEMA,
     SCORED_PORTFOLIO_BASELINE_COMPARISON_SCHEMA,
+    PRECOMPUTED_SCORE_PORTFOLIO_RUN_SCHEMA,
     SINGLE_FOLD_STAGE_A_PRE_TUNING_SCHEMA,
     SINGLE_FOLD_STAGE_B_TUNING_SCHEMA,
     STRATEGY_DECISION_EVENT_TABLE_SCHEMA,
@@ -33,6 +34,7 @@ from attbacktrader.reports import (
     run_single_fold_stage_a_pre_tuning,
     run_single_fold_stage_b_tuning,
     score_entry_candidates,
+    simulate_precomputed_score_portfolio,
     simulate_scored_portfolio,
     write_full_walk_forward_tuning_run,
     write_scored_allocation_report_package,
@@ -465,6 +467,73 @@ def test_scored_portfolio_simulation_ranks_candidates_and_records_blockage_funne
     assert result["blocked_entries"][0]["symbol"] == "000002.SZ"
     assert result["blocked_entries"][0]["blocked_by"] == "INDUSTRY_MAX_NEW_PER_DAY"
     assert result["equity_curve"][-1]["holding_count"] == 2
+
+
+def test_precomputed_score_portfolio_ranks_external_scores_and_skips_missing_scores() -> None:
+    events = [
+        _rank_event("000001.SZ", rank_bucket="ignored", industry="bank", stock_pool_order=1),
+        _rank_event("000002.SZ", rank_bucket="ignored", industry="tech", stock_pool_order=2),
+        _rank_event("000003.SZ", rank_bucket="ignored", industry="medicine", stock_pool_order=3),
+    ]
+    score_rows = [
+        {"symbol": "000001.SZ", "trade_date": "2020-01-02", "entry.score.demo": 1.0, "fold_id": "f1"},
+        {"symbol": "000003.SZ", "trade_date": "2020-01-02", "entry.score.demo": 9.0, "fold_id": "f1"},
+    ]
+
+    result = simulate_precomputed_score_portfolio(
+        events,
+        score_rows=score_rows,
+        score_field="entry.score.demo",
+        score_id="demo_score",
+        missing_score_policy="skip",
+        portfolio_controls={
+            "initial_cash": 20_000,
+            "max_holding_count": 2,
+            "max_new_positions_per_day": 2,
+            "cash_reserve_ratio": 0.0,
+            "board_lot_size": 100,
+        },
+    )
+
+    assert [entry["symbol"] for entry in result["executed_entries"]] == ["000003.SZ", "000001.SZ"]
+    assert result["blocked_entries"][0]["symbol"] == "000002.SZ"
+    assert result["blocked_entries"][0]["blocked_by"] == "SCORE_GATE"
+    assert result["blocked_entries"][0]["score_status"] == "missing"
+    assert result["executed_entries"][0]["fold_id"] == "f1"
+    assert result["score_gate"]["missing_score_policy"] == "skip"
+    assert result["precomputed_score_contract"] == {
+        "schema": PRECOMPUTED_SCORE_PORTFOLIO_RUN_SCHEMA,
+        "scope": "backtest_only",
+        "score_id": "demo_score",
+        "score_field": "entry.score.demo",
+        "missing_score_policy": "skip",
+        "enter_event_count": 3,
+        "matched_enter_score_count": 2,
+        "missing_enter_score_count": 1,
+        "score_keys_not_in_enter_events_count": 0,
+    }
+
+
+def test_precomputed_score_portfolio_can_fail_on_missing_scores() -> None:
+    events = [
+        _rank_event("000001.SZ", rank_bucket="ignored", industry="bank", stock_pool_order=1),
+        _rank_event("000002.SZ", rank_bucket="ignored", industry="tech", stock_pool_order=2),
+    ]
+    score_rows = [
+        {"symbol": "000001.SZ", "trade_date": "2020-01-02", "entry.score.demo": 1.0},
+    ]
+
+    with pytest.raises(ValueError, match="missing precomputed scores for 1 enter events: 000002.SZ@2020-01-02"):
+        simulate_precomputed_score_portfolio(
+            events,
+            score_rows=score_rows,
+            score_field="entry.score.demo",
+            missing_score_policy="fail",
+            portfolio_controls={
+                "initial_cash": 20_000,
+                "max_holding_count": 2,
+            },
+        )
 
 
 def test_scored_portfolio_can_block_same_day_exit_cash_reuse() -> None:

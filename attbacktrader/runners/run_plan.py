@@ -40,6 +40,7 @@ from attbacktrader.runners.data_preflight import (
     DataPreflightSymbolResult,
     run_data_preflight,
 )
+from attbacktrader.runners.entry_score import run_entry_score_replay
 from attbacktrader.runners.prepared_data import (
     IndexSeriesResult,
     IndustryClassificationResult,
@@ -108,6 +109,7 @@ class RunPlanExecutionResult:
     data_preflight_report: object | None = None
     stock_pool_filter: object | None = None
     attribution_factor_selection: object | None = None
+    entry_score_replay: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -344,6 +346,28 @@ def execute_run_plan(
         lifecycle_snapshots = engine_result.lifecycle_snapshots
         _emit_run_progress(progress_callback, stage="engine", status="completed", run_id=execution_run_plan.run.id, engine="business")
 
+    entry_score_replay = None
+    if execution_run_plan.execution.entry_score.enabled:
+        _emit_run_progress(
+            progress_callback,
+            stage="entry_score_replay",
+            status="started",
+            run_id=execution_run_plan.run.id,
+        )
+        entry_score_replay = run_entry_score_replay(
+            execution_run_plan,
+            intents=portfolio_result.intents,
+        )
+        _emit_run_progress(
+            progress_callback,
+            stage="entry_score_replay",
+            status="completed",
+            run_id=execution_run_plan.run.id,
+            enter_event_count=entry_score_replay["precomputed_score_contract"]["enter_event_count"]
+            if entry_score_replay is not None
+            else 0,
+        )
+
     _emit_run_progress(progress_callback, stage="assemble_symbol_results", status="started", run_id=execution_run_plan.run.id)
     symbol_results = _symbol_results_from_portfolio(
         execution_run_plan,
@@ -423,6 +447,7 @@ def execute_run_plan(
         data_preflight_report=data_preflight_report,
         stock_pool_filter=stock_pool_filter,
         attribution_factor_selection=execution_run_plan.analysis.resolved_attribution_factor_selection,
+        entry_score_replay=entry_score_replay,
     )
 
 

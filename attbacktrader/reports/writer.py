@@ -73,6 +73,10 @@ class RunArtifactPaths:
     data_preflight_path: Path
     stock_pool_filter_path: Path
     attribution_factor_selection_path: Path
+    entry_score_contract_path: Path
+    entry_score_selected_entries_path: Path
+    entry_score_blocked_entries_path: Path
+    entry_score_equity_curve_path: Path
 
 
 def write_run_artifacts(
@@ -117,6 +121,10 @@ def write_run_artifacts(
         data_preflight_path=output_dir / "data_preflight.json",
         stock_pool_filter_path=output_dir / "stock_pool_filter.json",
         attribution_factor_selection_path=output_dir / "attribution_factor_selection.json",
+        entry_score_contract_path=output_dir / "entry_score_contract.json",
+        entry_score_selected_entries_path=output_dir / "entry_score_selected_entries.parquet",
+        entry_score_blocked_entries_path=output_dir / "entry_score_blocked_entries.parquet",
+        entry_score_equity_curve_path=output_dir / "entry_score_equity_curve.parquet",
     )
 
     artifact_detail = getattr(run_plan.output, "artifact_detail", "compact")
@@ -225,6 +233,31 @@ def write_run_artifacts(
         artifact_paths.attribution_factor_selection_path,
         result.attribution_factor_selection,
     )
+    if result.entry_score_replay is not None:
+        _write_json_artifact(
+            progress_callback,
+            "entry_score_contract",
+            artifact_paths.entry_score_contract_path,
+            result.entry_score_replay.get("precomputed_score_contract"),
+        )
+        _write_parquet_artifact(
+            progress_callback,
+            "entry_score_selected_entries",
+            artifact_paths.entry_score_selected_entries_path,
+            result.entry_score_replay.get("executed_entries") or (),
+        )
+        _write_parquet_artifact(
+            progress_callback,
+            "entry_score_blocked_entries",
+            artifact_paths.entry_score_blocked_entries_path,
+            result.entry_score_replay.get("blocked_entries") or (),
+        )
+        _write_parquet_artifact(
+            progress_callback,
+            "entry_score_equity_curve",
+            artifact_paths.entry_score_equity_curve_path,
+            result.entry_score_replay.get("equity_curve") or (),
+        )
 
     return artifact_paths
 
@@ -304,6 +337,7 @@ def _run_config_trace(run_plan: RunPlan) -> dict[str, Any]:
             "engine": run_plan.execution.engine,
             "stake": run_plan.execution.stake,
             "baoma": run_plan.execution.baoma,
+            "entry_score": run_plan.execution.entry_score,
         },
         "constraints": {
             "ashare": run_plan.constraints.ashare,
@@ -336,6 +370,7 @@ def _result_payload(result: RunPlanExecutionResult, *, artifact_detail: str, run
             "report": result.report,
             "post_exit_analysis_summary": _post_exit_analysis_summary(result),
             "attribution_factor_selection": result.attribution_factor_selection,
+            "entry_score_replay": _entry_score_replay_summary(result),
             "raw_detail_note": (
                 "Full high-volume tabular detail is persisted in dedicated Parquet artifacts such as "
                 "signal_audit.parquet, trades.parquet, execution_audit.parquet, equity_curve.parquet, "
@@ -358,6 +393,7 @@ def _result_payload(result: RunPlanExecutionResult, *, artifact_detail: str, run
         "report": result.report,
         "post_exit_analysis_summary": _post_exit_analysis_summary(result),
         "attribution_factor_selection": result.attribution_factor_selection,
+        "entry_score_replay": _entry_score_replay_summary(result),
         "raw_detail_note": (
             "Full result persistence is disabled by output.artifact_detail=compact. "
             "Use report/trades/snapshots/evidence_validation and derived review artifacts for AI review, "
@@ -387,6 +423,18 @@ def _post_exit_analysis_summary(result: RunPlanExecutionResult) -> dict[str, Any
         "configured_window_days": result.post_exit_analysis.configured_window_days,
         "sold_too_early_threshold": result.post_exit_analysis.sold_too_early_threshold,
         "rebound_thresholds": result.post_exit_analysis.rebound_thresholds,
+    }
+
+
+def _entry_score_replay_summary(result: RunPlanExecutionResult) -> dict[str, Any] | None:
+    replay = result.entry_score_replay
+    if replay is None:
+        return None
+    return {
+        "source": replay.get("source"),
+        "precomputed_score_contract": replay.get("precomputed_score_contract"),
+        "metrics": replay.get("metrics"),
+        "funnel": replay.get("funnel"),
     }
 
 

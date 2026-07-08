@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
+import pandas as pd
 
 from attbacktrader.config import RunPlan
 from attbacktrader.data import (
@@ -607,6 +608,54 @@ def test_execute_run_plan_can_route_to_baoma_dedicated_business_runner(tmp_path:
     assert "entry.volatility.atr_20d_bucket" in entry_context.enabled_factor_keys
 
 
+def test_execute_run_plan_can_run_baoma_entry_score_replay(tmp_path: Path, monkeypatch) -> None:
+    score_path = tmp_path / "scores.parquet"
+    pd.DataFrame(
+        [{"symbol": "000001.SZ", "entry_date": "2024-01-05", "ew_score": 0.81}]
+    ).to_parquet(score_path, index=False)
+    bars = _route_fixture_bars("000001.SZ")
+    provider = FakeRunDataProvider({"000001.SZ": bars})
+    entry_intent = TradeIntent(
+        intent_type=TradeIntentType.ENTER,
+        symbol="000001.SZ",
+        trade_date=date(2024, 1, 5),
+        method_name="baoma_entry",
+        reason_code="BAOMA_ENTRY_TRIGGERED",
+        signal_values={
+            "attribution": {
+                "values": {"symbol.close": 10.0},
+                "categories": {},
+                "checks": {"entry.check": True},
+            }
+        },
+    )
+
+    def fake_baoma_runner(*args, **kwargs):
+        return BaomaBusinessRunResult(
+            intents=(entry_intent,),
+            lifecycle_events=(),
+            lifecycle_snapshots=(),
+            closed_trades=(),
+            open_positions=(),
+        )
+
+    monkeypatch.setattr(run_plan_module, "run_baoma_v1_business", fake_baoma_runner)
+    progress_events = []
+
+    result = run_plan_module.execute_run_plan(
+        _baoma_route_run_plan_with_entry_score(tmp_path, score_path),
+        provider=provider,
+        progress_callback=progress_events.append,
+    )
+
+    assert result.entry_score_replay is not None
+    assert result.entry_score_replay["precomputed_score_contract"]["enter_event_count"] == 1
+    assert result.entry_score_replay["precomputed_score_contract"]["matched_enter_score_count"] == 1
+    assert result.entry_score_replay["executed_entries"][0]["symbol"] == "000001.SZ"
+    assert ("entry_score_replay", "started") in _stage_statuses(progress_events)
+    assert ("entry_score_replay", "completed") in _stage_statuses(progress_events)
+
+
 def _run_plan(snapshot_root: Path, *, refresh_snapshots: bool) -> RunPlan:
     return RunPlan.from_mapping(
         {
@@ -777,6 +826,28 @@ def _baoma_route_run_plan(snapshot_root: Path) -> RunPlan:
             },
         }
     )
+
+
+def _baoma_route_run_plan_with_entry_score(snapshot_root: Path, score_path: Path) -> RunPlan:
+    raw_config = _baoma_route_run_plan(snapshot_root).model_dump(mode="python")
+    raw_config["execution"]["entry_score"] = {
+        "enabled": True,
+        "score_id": "ew_seed_only_v2",
+        "score_field": "entry.score.ew_seed_only_v2",
+        "source_score_field": "ew_score",
+        "artifact_path": score_path,
+        "missing_score_policy": "fail",
+        "max_holding_count": 12,
+        "cash_reserve_ratio": 0.0,
+    }
+    return RunPlan.from_mapping(raw_config)
+
+
+def _stage_statuses(events) -> set[tuple[str, str]]:
+    return {
+        (event["stage"], event["status"])
+        for event in events
+    }
 
 
 def _index_run_plan(snapshot_root: Path) -> RunPlan:

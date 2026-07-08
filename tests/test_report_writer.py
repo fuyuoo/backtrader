@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -55,6 +56,7 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert artifacts.data_preflight_path.exists()
     assert artifacts.stock_pool_filter_path.exists()
     assert artifacts.attribution_factor_selection_path.exists()
+    assert not artifacts.entry_score_contract_path.exists()
 
     run_plan_payload = _read_json(artifacts.run_plan_path)
     result_payload = _read_json(artifacts.result_path)
@@ -105,6 +107,8 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert artifacts.equity_curve_path.name == "equity_curve.parquet"
     assert artifacts.positions_path.name == "positions.parquet"
     assert artifacts.execution_audit_path.name == "execution_audit.parquet"
+    assert artifacts.entry_score_contract_path.name == "entry_score_contract.json"
+    assert artifacts.entry_score_selected_entries_path.name == "entry_score_selected_entries.parquet"
     closed_trades = trades_payload[trades_payload["record_type"] == "closed_trade"]
     assert set(trades_payload["run_id"]) == {"writer-test"}
     assert len(closed_trades) == 2
@@ -224,6 +228,75 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert snapshots_payload["attribution_factor_selection"]["include"] == attribution_factor_selection_payload["include"]
     assert data_preflight_payload is None
     assert stock_pool_filter_payload is None
+
+
+def test_write_run_artifacts_persists_entry_score_replay_outputs(tmp_path: Path) -> None:
+    bars = read_daily_bars_csv(Path("tests/fixtures/single_stock_kdj.csv"))
+    run_plan = _run_plan(tmp_path / "snapshots")
+    result = execute_run_plan(run_plan, provider=FakeDailyProvider(bars))
+    result = replace(
+        result,
+        entry_score_replay={
+            "source": {
+                "scope": "backtest_only",
+                "artifact_path": "reports/scores.parquet",
+                "source_score_field": "ew_score",
+                "decision_event_count": 2,
+            },
+            "precomputed_score_contract": {
+                "schema": "attbacktrader.precomputed_score_portfolio_run.v1",
+                "scope": "backtest_only",
+                "score_id": "ew_seed_only_v2",
+                "score_field": "entry.score.ew_seed_only_v2",
+                "missing_score_policy": "skip",
+                "enter_event_count": 2,
+                "matched_enter_score_count": 1,
+                "missing_enter_score_count": 1,
+                "score_keys_not_in_enter_events_count": 0,
+            },
+            "executed_entries": [
+                {
+                    "symbol": "000001.SZ",
+                    "trade_date": "2024-01-05",
+                    "score": 0.9,
+                    "quantity": 100,
+                    "cost": 1000.0,
+                }
+            ],
+            "blocked_entries": [
+                {
+                    "symbol": "000002.SZ",
+                    "trade_date": "2024-01-05",
+                    "blocked_by": "SCORE_GATE",
+                    "score_status": "missing",
+                }
+            ],
+            "equity_curve": [
+                {
+                    "trade_date": "2024-01-05",
+                    "cash": 99000.0,
+                    "total_value": 100000.0,
+                    "drawdown": 0.0,
+                }
+            ],
+            "metrics": {"trade_count": 1},
+            "funnel": {"raw_entry_candidates": 2, "executed_entries": 1},
+        },
+    )
+
+    artifacts = write_run_artifacts(run_plan, result, output_root=tmp_path / "reports")
+    result_payload = _read_json(artifacts.result_path)
+    contract_payload = _read_json(artifacts.entry_score_contract_path)
+    selected_entries = pd.read_parquet(artifacts.entry_score_selected_entries_path)
+    blocked_entries = pd.read_parquet(artifacts.entry_score_blocked_entries_path)
+    equity_curve = pd.read_parquet(artifacts.entry_score_equity_curve_path)
+
+    assert contract_payload["score_id"] == "ew_seed_only_v2"
+    assert contract_payload["matched_enter_score_count"] == 1
+    assert result_payload["entry_score_replay"]["precomputed_score_contract"] == contract_payload
+    assert selected_entries.iloc[0]["symbol"] == "000001.SZ"
+    assert blocked_entries.iloc[0]["blocked_by"] == "SCORE_GATE"
+    assert equity_curve.iloc[0]["total_value"] == 100000.0
 
 
 def test_write_run_artifacts_can_persist_full_raw_audit_for_debugging(tmp_path: Path) -> None:

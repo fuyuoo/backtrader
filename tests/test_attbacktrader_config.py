@@ -167,6 +167,85 @@ def test_baoma_execution_config_accepts_atr_scale_out() -> None:
     assert run_plan.execution.baoma.second_scale_out_atr_multiple == pytest.approx(2.0)
 
 
+def test_baoma_execution_config_accepts_backtest_only_entry_score() -> None:
+    raw_config = minimal_config()
+    raw_config["strategy"] = {
+        **raw_config["strategy"],
+        "entry_method": "baoma_entry",
+        "profit_taking_method": "baoma_ma25_profit_exit",
+        "stop_loss_method": "baoma_ma60_stop",
+        "add_on_method": "baoma_add_on",
+    }
+    raw_config["execution"] = {
+        "engine": "baoma_v1_business",
+        "entry_score": {
+            "enabled": True,
+            "score_id": "ew_seed_only_v2",
+            "score_field": "entry.score.ew_seed_only_v2",
+            "source_score_field": "ew_score",
+            "artifact_path": "reports/scores.parquet",
+            "key": {
+                "symbol": "ts_code",
+                "trade_date": "entry_date",
+            },
+            "missing_score_policy": "fail",
+            "max_holding_count": 80,
+            "max_new_positions_per_day": 6,
+            "cash_reserve_ratio": 0.03,
+            "industry_max_new_per_day": 2,
+            "prefer_unheld_industries": True,
+        },
+    }
+
+    run_plan = RunPlan.from_mapping(raw_config)
+
+    assert run_plan.execution.entry_score.enabled is True
+    assert run_plan.execution.entry_score.scope == "backtest_only"
+    assert run_plan.execution.entry_score.artifact_path == Path("reports/scores.parquet")
+    assert run_plan.execution.entry_score.key.symbol == "ts_code"
+    assert run_plan.execution.entry_score.key.trade_date == "entry_date"
+    assert run_plan.execution.entry_score.missing_score_policy == "fail"
+    assert run_plan.execution.entry_score.max_holding_count == 80
+    assert run_plan.execution.entry_score.prefer_unheld_industries is True
+
+
+def test_entry_score_requires_baoma_business_runner() -> None:
+    raw_config = minimal_config()
+    raw_config["execution"] = {
+        "engine": "backtrader",
+        "entry_score": {
+            "enabled": True,
+            "score_id": "ew_seed_only_v2",
+            "score_field": "entry.score.ew_seed_only_v2",
+            "artifact_path": "reports/scores.parquet",
+        },
+    }
+
+    with pytest.raises(ValidationError, match="entry_score.enabled requires execution.engine='baoma_v1_business'"):
+        RunPlan.from_mapping(raw_config)
+
+
+def test_entry_score_enabled_requires_score_contract_fields() -> None:
+    raw_config = minimal_config()
+    raw_config["strategy"] = {
+        **raw_config["strategy"],
+        "entry_method": "baoma_entry",
+        "profit_taking_method": "baoma_ma25_profit_exit",
+        "stop_loss_method": "baoma_ma60_stop",
+        "add_on_method": "baoma_add_on",
+    }
+    raw_config["execution"] = {
+        "engine": "baoma_v1_business",
+        "entry_score": {
+            "enabled": True,
+            "score_id": "ew_seed_only_v2",
+        },
+    }
+
+    with pytest.raises(ValidationError, match="entry_score enabled requires"):
+        RunPlan.from_mapping(raw_config)
+
+
 def test_baoma_execution_config_accepts_second_scale_out_confirmation() -> None:
     raw_config = minimal_config()
     raw_config["execution"] = {
