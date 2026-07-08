@@ -1303,3 +1303,32 @@ JoinQuant / BigQuant / Choice / iFinD / Wind：
   Tushare `sw_daily` 混成同一个数据源。
 - 若要继续压缩 unknown，下一步不是再找一级行业 K 线，而是处理 membership 缺失和
   2014 新一级行业上市前的历史归属问题。
+
+### 2026-07-08 Mainline Correction: industry-enhanced first
+
+后续讨论中进一步确认，combined HS300 + CSI500 的最终行业链路已经通过覆盖审计：
+
+```text
+closed_trade_count = 42,909
+industry_mapping_status_counts = matched 42,909 / 42,909
+industry_classification_status_counts = matched 42,909 / 42,909
+industry_soil_status_counts = matched 42,909 / 42,909
+soil_with_industry_unknown_count = 0
+```
+
+因此，当前主线应切回含行业矩阵：
+
+```text
+reports/soil-with-industry-v1-sw-akshare-historical-mixed-warmup-stitch-index-warmup-earliest-membership-backfill-experimental-baoma-v1-dynamic-hs300-csi500-2006-2025/
+```
+
+no-industry 矩阵保留为 baseline，不再作为第一主线。后续研究应优先审计
+`soil_with_industry_v1_summary`、`soil_with_industry_v1_seed_summary` 和
+`soil_no_industry_v2_to_soil_with_industry_v1_cross`，判断行业土壤相对 no-industry
+baseline 的增量解释力。
+
+详细口径审计见：
+
+```text
+docs/baoma-v1-industry-enhanced-mainline-audit.md
+```
