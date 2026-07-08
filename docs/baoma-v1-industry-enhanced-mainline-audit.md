@@ -135,3 +135,44 @@ industry-enhanced mainline with explicit backfill/source audit
 1. 以 `soil_with_industry_v1_summary` 和 `soil_with_industry_v1_seed_summary` 选出保守、均衡、进攻三档候选。
 2. 与 no-industry baseline 做同口径 lift 对照。
 3. 再进入 scored portfolio / runner replay，验证真实持仓容量和资金竞争下是否仍有效。
+
+## 2026-07-08 Scorer/Gate 候选审计结果
+
+已新增可复跑脚本：
+
+```text
+scripts/audit_industry_enhanced_scorer_gate_candidates.py
+```
+
+默认输出目录：
+
+```text
+reports/industry-enhanced-scorer-gate-audit-baoma-v1-dynamic-hs300-csi500-2006-2025/
+```
+
+生成 artifact：
+
+```text
+industry_enhanced_scorer_gate_audit.json
+industry_enhanced_scorer_gate_audit.zh.md
+```
+
+三档候选结果：
+
+| 档位 | 规则 | trades | win rate | avg return | PF | net pnl | 正收益年份 | vs no-industry strong avg lift |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| 保守 | `very_strong_soil` | 14,996 | 54.53% | 2.66% | 2.02 | 2,006,044,181 | 13/20 | +0.77pct |
+| 均衡 | `very_strong_soil` 或 `strong_soil + strong_seed` | 20,517 | 53.25% | 2.17% | 1.75 | 2,093,874,365 | 14/20 | +0.28pct |
+| 进攻 | `very_strong_soil` 或 `strong/neutral_soil + strong_seed` | 25,982 | 52.96% | 1.96% | 1.67 | 2,331,401,333 | 15/20 | +0.07pct |
+
+Seed overlay 诊断：
+
+| overlay | trades | win rate | avg return | PF | 正收益年份 | 结论 |
+|---|---:|---:|---:|---:|---:|---|
+| `very_strong_soil + strong_seed` | 8,634 | 58.18% | 2.68% | 1.88 | 11/20 | 胜率更高，但样本更窄，年度稳定性弱于纯 `very_strong_soil`。 |
+
+当前建议：
+
+1. 第一轮 runner replay 使用保守档，先验证行业主轴 `very_strong_soil` 在资金竞争下是否仍有 lift。
+2. 第二轮 replay 使用均衡档，测试扩大样本后的 PF、回撤和容量。
+3. 进攻档只作为容量边界测试，不应先定为主线。
