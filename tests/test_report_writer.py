@@ -56,6 +56,7 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert artifacts.data_preflight_path.exists()
     assert artifacts.stock_pool_filter_path.exists()
     assert artifacts.attribution_factor_selection_path.exists()
+    assert not artifacts.entry_score_replay_summary_path.exists()
     assert not artifacts.entry_score_contract_path.exists()
 
     run_plan_payload = _read_json(artifacts.run_plan_path)
@@ -107,6 +108,7 @@ def test_write_run_artifacts_persists_report_plan_trades_and_snapshots(tmp_path:
     assert artifacts.equity_curve_path.name == "equity_curve.parquet"
     assert artifacts.positions_path.name == "positions.parquet"
     assert artifacts.execution_audit_path.name == "execution_audit.parquet"
+    assert artifacts.entry_score_replay_summary_path.name == "entry_score_replay_summary.json"
     assert artifacts.entry_score_contract_path.name == "entry_score_contract.json"
     assert artifacts.entry_score_selected_entries_path.name == "entry_score_selected_entries.parquet"
     closed_trades = trades_payload[trades_payload["record_type"] == "closed_trade"]
@@ -286,14 +288,20 @@ def test_write_run_artifacts_persists_entry_score_replay_outputs(tmp_path: Path)
 
     artifacts = write_run_artifacts(run_plan, result, output_root=tmp_path / "reports")
     result_payload = _read_json(artifacts.result_path)
+    summary_payload = _read_json(artifacts.entry_score_replay_summary_path)
     contract_payload = _read_json(artifacts.entry_score_contract_path)
     selected_entries = pd.read_parquet(artifacts.entry_score_selected_entries_path)
     blocked_entries = pd.read_parquet(artifacts.entry_score_blocked_entries_path)
     equity_curve = pd.read_parquet(artifacts.entry_score_equity_curve_path)
 
+    assert summary_payload == result_payload["entry_score_replay"]
+    assert summary_payload["source"]["scope"] == "backtest_only"
+    assert summary_payload["precomputed_score_contract"]["score_id"] == "ew_seed_only_v2"
+    assert summary_payload["metrics"] == {"trade_count": 1}
+    assert summary_payload["funnel"] == {"raw_entry_candidates": 2, "executed_entries": 1}
     assert contract_payload["score_id"] == "ew_seed_only_v2"
     assert contract_payload["matched_enter_score_count"] == 1
-    assert result_payload["entry_score_replay"]["precomputed_score_contract"] == contract_payload
+    assert summary_payload["precomputed_score_contract"] == contract_payload
     assert selected_entries.iloc[0]["symbol"] == "000001.SZ"
     assert blocked_entries.iloc[0]["blocked_by"] == "SCORE_GATE"
     assert equity_curve.iloc[0]["total_value"] == 100000.0

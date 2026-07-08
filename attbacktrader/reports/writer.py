@@ -73,6 +73,7 @@ class RunArtifactPaths:
     data_preflight_path: Path
     stock_pool_filter_path: Path
     attribution_factor_selection_path: Path
+    entry_score_replay_summary_path: Path
     entry_score_contract_path: Path
     entry_score_selected_entries_path: Path
     entry_score_blocked_entries_path: Path
@@ -121,6 +122,7 @@ def write_run_artifacts(
         data_preflight_path=output_dir / "data_preflight.json",
         stock_pool_filter_path=output_dir / "stock_pool_filter.json",
         attribution_factor_selection_path=output_dir / "attribution_factor_selection.json",
+        entry_score_replay_summary_path=output_dir / "entry_score_replay_summary.json",
         entry_score_contract_path=output_dir / "entry_score_contract.json",
         entry_score_selected_entries_path=output_dir / "entry_score_selected_entries.parquet",
         entry_score_blocked_entries_path=output_dir / "entry_score_blocked_entries.parquet",
@@ -234,6 +236,12 @@ def write_run_artifacts(
         result.attribution_factor_selection,
     )
     if result.entry_score_replay is not None:
+        _write_json_artifact(
+            progress_callback,
+            "entry_score_replay_summary",
+            artifact_paths.entry_score_replay_summary_path,
+            _entry_score_replay_summary(result),
+        )
         _write_json_artifact(
             progress_callback,
             "entry_score_contract",
