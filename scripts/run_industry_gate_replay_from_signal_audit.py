@@ -27,6 +27,7 @@ DEFAULT_SOURCE_RUN_DIR = Path(
 DEFAULT_OUTPUT_DIR = Path("reports/industry-gate-runner-replay-comparison-2006-2025-replay-cash-10m")
 DEFAULT_INDUSTRY_RUN_DIR = Path("reports/industry-very-strong-entry-score-runner-2006-2025-replay-cash-10m")
 DEFAULT_BALANCED_RUN_DIR = Path("reports/industry-balanced-entry-score-runner-2006-2025-replay-cash-10m")
+DEFAULT_AGGRESSIVE_RUN_DIR = Path("reports/industry-aggressive-entry-score-runner-2006-2025-replay-cash-10m")
 DEFAULT_NO_INDUSTRY_RUN_DIR = Path("reports/no-industry-strong-entry-score-runner-2006-2025-replay-cash-10m")
 FUTURE_FIELDS_EXCLUDED = (
     "exit_date",
@@ -65,6 +66,7 @@ def build_industry_gate_replay_comparison(
     source_run_dir: str | Path = DEFAULT_SOURCE_RUN_DIR,
     industry_run_dir: str | Path = DEFAULT_INDUSTRY_RUN_DIR,
     balanced_run_dir: str | Path = DEFAULT_BALANCED_RUN_DIR,
+    aggressive_run_dir: str | Path = DEFAULT_AGGRESSIVE_RUN_DIR,
     no_industry_run_dir: str | Path = DEFAULT_NO_INDUSTRY_RUN_DIR,
     start_date: str = "2006-01-01",
     end_date: str = "2025-12-31",
@@ -77,6 +79,7 @@ def build_industry_gate_replay_comparison(
     source_dir = Path(source_run_dir)
     industry_dir = Path(industry_run_dir)
     balanced_dir = Path(balanced_run_dir)
+    aggressive_dir = Path(aggressive_run_dir)
     no_industry_dir = Path(no_industry_run_dir)
     stock_pool_order = _load_stock_pool_order(source_dir / "run_plan.json")
     events, extraction = _extract_decision_events(
@@ -109,6 +112,13 @@ def build_industry_gate_replay_comparison(
             balanced_dir,
             "industry_balanced_soil_v1",
             "entry.score.industry_balanced_soil_v1",
+        ),
+        _candidate_config(
+            "industry_aggressive",
+            "含行业进攻档",
+            aggressive_dir,
+            "industry_aggressive_soil_v1",
+            "entry.score.industry_aggressive_soil_v1",
         ),
         _candidate_config(
             "no_industry_strong",
@@ -239,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         source_run_dir=args.source_run_dir,
         industry_run_dir=args.industry_run_dir,
         balanced_run_dir=args.balanced_run_dir,
+        aggressive_run_dir=args.aggressive_run_dir,
         no_industry_run_dir=args.no_industry_run_dir,
         start_date=args.start_date,
         end_date=args.end_date,
@@ -269,6 +280,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--source-run-dir", type=Path, default=DEFAULT_SOURCE_RUN_DIR)
     parser.add_argument("--industry-run-dir", type=Path, default=DEFAULT_INDUSTRY_RUN_DIR)
     parser.add_argument("--balanced-run-dir", type=Path, default=DEFAULT_BALANCED_RUN_DIR)
+    parser.add_argument("--aggressive-run-dir", type=Path, default=DEFAULT_AGGRESSIVE_RUN_DIR)
     parser.add_argument("--no-industry-run-dir", type=Path, default=DEFAULT_NO_INDUSTRY_RUN_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--start-date", default="2006-01-01")
@@ -402,7 +414,7 @@ def _comparison(results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     baseline = _as_mapping(_as_mapping(by_id["no_industry_strong"]).get("metrics"))
     comparisons = [
         _candidate_comparison(by_id, baseline, tested_candidate_id)
-        for tested_candidate_id in ("industry_very_strong", "industry_balanced")
+        for tested_candidate_id in ("industry_very_strong", "industry_balanced", "industry_aggressive")
         if tested_candidate_id in by_id
     ]
     summary_parts = [

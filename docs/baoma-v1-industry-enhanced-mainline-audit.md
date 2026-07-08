@@ -298,3 +298,75 @@ no_industry_strong
 1. 若目标是风险受控主线，优先保守档。
 2. 若目标是容量和最终收益，均衡档值得进入下一层回撤/年份弱点审计。
 3. 下一步不应先跑进攻档，应先拆均衡档为什么增加回撤，尤其看 `2008`、`2018`、`2022-2023` 和 `strong_soil + strong_seed` 增量交易。
+
+## 2026-07-08 进攻档 Runner Replay 对照
+
+按用户要求补跑进攻档。进攻档规则：
+
+```text
+very_strong_soil
+OR
+(strong_soil OR neutral_soil) + strong_seed
+```
+
+已生成进攻档 score artifact：
+
+```text
+reports/industry-aggressive-entry-score-runner-2006-2025-replay-cash-10m/entry_score_artifact.parquet
+```
+
+artifact 行数：
+
+```text
+score rows: 25,982
+very_strong_soil: 14,996
+strong_soil: 5,521
+neutral_soil: 5,465
+```
+
+同一 replay 脚本已扩展为四组对照：
+
+```text
+industry_very_strong
+industry_balanced
+industry_aggressive
+no_industry_strong
+```
+
+结果级对照：
+
+| candidate | score rows | matched enter | missing enter | selected | closed | cumulative | max drawdown | win rate | PF | final value |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 含行业保守档 `very_strong_soil` | 14,996 | 14,996 | 28,104 | 1,947 | 1,947 | 459.50% | 33.59% | 36.83% | 1.69 | 55,950,427 |
+| 含行业均衡档 | 20,517 | 20,517 | 22,583 | 2,383 | 2,383 | 463.68% | 40.92% | 37.98% | 1.55 | 56,367,763 |
+| 含行业进攻档 | 25,982 | 25,982 | 17,118 | 2,982 | 2,982 | 882.14% | 40.59% | 36.38% | 1.56 | 98,214,065 |
+| no-industry strong baseline | 23,647 | 23,647 | 19,453 | 2,387 | 2,387 | 204.42% | 37.74% | 34.52% | 1.43 | 30,441,571 |
+
+相对 no-industry strong baseline：
+
+| candidate | cumulative lift | drawdown delta | win-rate lift | PF lift | selected delta |
+|---|---:|---:|---:|---:|---:|
+| 含行业保守档 | +255.09pct | -4.15pct | +2.31pct | +0.26 | -440 |
+| 含行业均衡档 | +259.26pct | +3.18pct | +3.46pct | +0.12 | -4 |
+| 含行业进攻档 | +677.72pct | +2.85pct | +1.86pct | +0.13 | +595 |
+
+年度弱点粗看：
+
+| candidate | worst years |
+|---|---|
+| 含行业保守档 | 2008 -31.11%, 2016 -11.91%, 2012 -6.03%, 2013 -5.20%, 2011 -4.80% |
+| 含行业均衡档 | 2008 -26.29%, 2022 -20.55%, 2016 -12.08%, 2024 -8.90%, 2023 -8.31% |
+| 含行业进攻档 | 2022 -24.22%, 2012 -15.46%, 2011 -15.06%, 2016 -11.20%, 2018 -10.38% |
+| no-industry strong baseline | 2008 -25.90%, 2016 -17.00%, 2024 -12.11%, 2022 -11.58%, 2023 -11.55% |
+
+解释：
+
+- 进攻档不是单纯扩大成交数。它比 no-industry strong baseline 多选 `595` 笔，但最终资金从 `30.44M` 提升到 `98.21M`。
+- 进攻档也不是无代价胜出。它的最大回撤 `40.59%` 高于 baseline `37.74%`，接近均衡档 `40.92%`，明显高于保守档 `33.59%`。
+- 进攻档的风险结构发生变化：baseline 的弱点集中在 `2022-2024`，进攻档则暴露 `2022`、`2011-2012`、`2018`。这说明它打开了新收益空间，也引入了新的年份风险。
+
+当前修正判断：
+
+1. 保守档仍是风险受控主线。
+2. 进攻档已经值得进入下一层审计，因为它在同口径 replay 下显著提高最终资金，且 PF 仍高于 baseline。
+3. 下一步应拆进攻档相对均衡档的增量交易，重点看 `neutral_soil + strong_seed` 和 `2022`、`2011-2012`、`2018` 的亏损来源。
