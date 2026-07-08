@@ -77,8 +77,9 @@ def run_entry_score_replay(
         end_date=_date_label(config.replay_end_date) if config.replay_end_date is not None else None,
     )
     max_holding_count = config.max_holding_count or _configured_max_holding_count(run_plan)
+    replay_initial_cash = config.replay_initial_cash or run_plan.broker.initial_cash
     portfolio_controls = {
-        "initial_cash": run_plan.broker.initial_cash,
+        "initial_cash": replay_initial_cash,
         "max_holding_count": max_holding_count,
         "max_new_positions_per_day": config.max_new_positions_per_day,
         "cash_reserve_ratio": config.cash_reserve_ratio,
@@ -102,6 +103,8 @@ def run_entry_score_replay(
         "source_score_field": config.source_score_field or config.score_field,
         "replay_start_date": _date_label(config.replay_start_date) if config.replay_start_date is not None else None,
         "replay_end_date": _date_label(config.replay_end_date) if config.replay_end_date is not None else None,
+        "engine_initial_cash": float(run_plan.broker.initial_cash),
+        "replay_initial_cash": float(replay_initial_cash),
         "source_decision_event_count": len(source_events),
         "decision_event_count": len(events),
     }

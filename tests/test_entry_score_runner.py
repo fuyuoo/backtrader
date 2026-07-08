@@ -122,6 +122,30 @@ def test_run_entry_score_replay_ranks_external_scores_and_blocks_missing_scores(
     assert replay["source"]["artifact_path"] == str(score_path)
 
 
+def test_run_entry_score_replay_can_use_separate_replay_initial_cash(tmp_path: Path) -> None:
+    score_path = tmp_path / "scores.parquet"
+    pd.DataFrame(
+        [
+            {"symbol": "000001.SZ", "entry_date": "2024-01-05", "ew_score": 0.90},
+            {"symbol": "000002.SZ", "entry_date": "2024-01-05", "ew_score": 0.80},
+        ]
+    ).to_parquet(score_path, index=False)
+    run_plan = _entry_score_run_plan(tmp_path, score_path, replay_initial_cash=20_000)
+
+    replay = run_entry_score_replay(
+        run_plan,
+        intents=(
+            _enter_intent("000001.SZ", 10.0),
+            _enter_intent("000002.SZ", 10.0),
+        ),
+    )
+
+    assert replay is not None
+    assert replay["portfolio_controls"]["initial_cash"] == pytest.approx(20_000)
+    assert replay["source"]["engine_initial_cash"] == pytest.approx(100_000)
+    assert replay["source"]["replay_initial_cash"] == pytest.approx(20_000)
+
+
 def test_run_entry_score_replay_can_fail_on_missing_scores(tmp_path: Path) -> None:
     score_path = tmp_path / "scores.parquet"
     pd.DataFrame(
@@ -201,6 +225,7 @@ def _entry_score_run_plan(
     missing_score_policy: str = "skip",
     replay_start_date: str | None = None,
     replay_end_date: str | None = None,
+    replay_initial_cash: int | None = None,
 ) -> RunPlan:
     return RunPlan.from_mapping(
         {
@@ -246,6 +271,7 @@ def _entry_score_run_plan(
                     "missing_score_policy": missing_score_policy,
                     "replay_start_date": replay_start_date,
                     "replay_end_date": replay_end_date,
+                    "replay_initial_cash": replay_initial_cash,
                     "max_holding_count": 2,
                     "max_new_positions_per_day": 2,
                     "cash_reserve_ratio": 0.0,

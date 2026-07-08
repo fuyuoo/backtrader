@@ -279,6 +279,7 @@ class EntryScoreConfig(FrozenModel):
     key: EntryScoreKeyConfig = Field(default_factory=EntryScoreKeyConfig)
     replay_start_date: date | None = None
     replay_end_date: date | None = None
+    replay_initial_cash: PositiveFloat | None = None
     missing_score_policy: Literal["skip", "fail"] = "skip"
     max_holding_count: PositiveInt | None = None
     max_new_positions_per_day: PositiveInt | None = None

@@ -190,6 +190,7 @@ def test_baoma_execution_config_accepts_backtest_only_entry_score() -> None:
             },
             "replay_start_date": "2013-01-01",
             "replay_end_date": "2025-12-31",
+            "replay_initial_cash": 10_000_000,
             "missing_score_policy": "fail",
             "max_holding_count": 80,
             "max_new_positions_per_day": 6,
@@ -208,6 +209,7 @@ def test_baoma_execution_config_accepts_backtest_only_entry_score() -> None:
     assert run_plan.execution.entry_score.key.trade_date == "entry_date"
     assert run_plan.execution.entry_score.replay_start_date.isoformat() == "2013-01-01"
     assert run_plan.execution.entry_score.replay_end_date.isoformat() == "2025-12-31"
+    assert run_plan.execution.entry_score.replay_initial_cash == 10_000_000
     assert run_plan.execution.entry_score.missing_score_policy == "fail"
     assert run_plan.execution.entry_score.max_holding_count == 80
     assert run_plan.execution.entry_score.prefer_unheld_industries is True

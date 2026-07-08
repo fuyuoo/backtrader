@@ -61,6 +61,7 @@ entry_score:
     trade_date: entry_date
   replay_start_date: 2013-01-01
   replay_end_date: 2025-12-31
+  replay_initial_cash: 10000000
   missing_score_policy: skip
 ```
 
@@ -78,9 +79,12 @@ entry_score:
 | `key.trade_date` | 分数 artifact 中与 decision `trade_date` 对齐的日期列。 |
 | `replay_start_date` | 可选。只把该日期及之后的 decision events 和 score rows 纳入 entry_score replay contract。 |
 | `replay_end_date` | 可选。只把该日期及之前的 decision events 和 score rows 纳入 entry_score replay contract。 |
+| `replay_initial_cash` | 可选。只用于 entry_score replay 的组合本金；不改变 baoma engine 事件生成本金。未配置时使用 `broker.initial_cash`。 |
 | `missing_score_policy` | `skip` 或 `fail`。 |
 
 `replay_start_date` / `replay_end_date` 不改变 engine 的起跑窗口。它们只改变 entry_score replay 的计分窗口，用来支持“先用更长历史窗口恢复策略状态，再只审计目标测试窗”的回测口径。
+
+`replay_initial_cash` 不改变 engine 的事件生成口径。它只改变 `simulate_precomputed_score_portfolio(...)` 的 `portfolio_controls.initial_cash`，用于复现“旧事件源 + 新组合 replay”的 formal result。
 
 ## 缺失分数策略
 
@@ -226,6 +230,61 @@ reports/ew-seed-only-v2-entry-score-runner-warmup-2006-filter-2013-2025
 - `entry_score_blocked_entries.parquet`
 - `entry_score_equity_curve.parquet`
 
+## 事件生成本金与 replay 本金
+
+旧 formal result 的真实口径分成两段：
+
+```text
+event generation: broker.initial_cash = 10,000,000,000
+portfolio replay: initial_cash = 10,000,000
+```
+
+旧 formal 的 `decision_events_ew_seed_only_v2.parquet` 来自 10B 本金的 baoma source run；随后 formal 脚本在 `simulate_precomputed_score_portfolio(...)` 中使用 10M 本金做组合 replay。
+
+因此，不能通过把新 runner 的 `broker.initial_cash` 直接改成 10M 来复现旧 formal 数值。这样会让 baoma engine 用 10M 重新生成事件流，合同会从旧口径的 `11061` 个 enter events 变成另一条路径。
+
+要复现旧 formal 数值，新 runner 应使用：
+
+```yaml
+broker:
+  initial_cash: 10000000000
+
+execution:
+  entry_score:
+    replay_initial_cash: 10000000
+```
+
+这个配置含义是：engine 仍按旧 source run 的 10B 口径生成 decision events；entry_score replay 按旧 formal 的 10M 组合本金计算 selected、blocked、equity 和 metrics。
+
+10B 事件生成 + 10M replay 本金的全量复现已经通过旧 formal 结果级 parity 审计：
+
+```text
+engine window: 2006-01-01 -> 2025-12-31
+entry_score replay window: 2013-01-01 -> 2025-12-31
+engine_initial_cash: 10,000,000,000
+replay_initial_cash: 10,000,000
+```
+
+结果级审计结论：
+
+| 检查项 | 旧 formal | 新 runner | 差异 |
+|---|---:|---:|---:|
+| enter_event_count | 11061 | 11061 | 0 |
+| matched_enter_score_count | 11004 | 11004 | 0 |
+| missing_enter_score_count | 57 | 57 | 0 |
+| score_keys_not_in_enter_events_count | 0 | 0 | 0 |
+| selected entries | 2842 | 2842 | 0 |
+| blocked entries | 8219 | 8219 | 0 |
+| equity rows | 2854 | 2854 | 0 |
+
+`selected`、`blocked` 和 `equity_curve` 均为 key/日期/数值级等价。指标差异只剩浮点尾差，最大量级约 `1e-16`。
+
+确认输出目录：
+
+```text
+reports/ew-seed-only-v2-entry-score-runner-warmup-2006-filter-2013-2025-replay-cash-10m
+```
+
 ## 验收检查
 
 第一版 runner-level 实现满足以下条件即可接受：
@@ -237,6 +296,7 @@ reports/ew-seed-only-v2-entry-score-runner-warmup-2006-filter-2013-2025
 - 实盘运行配置会拒绝 `entry_score.enabled: true`。
 - 报告写出 `precomputed_score_contract`，包含 enter count、matched count、missing count、extra score keys、score id、score field 和 missing policy。
 - 报告写出 replay source 元数据，至少包含 `replay_start_date`、`replay_end_date`、原始 decision event count 和 replay 后 decision event count。
+- 若配置了 `replay_initial_cash`，报告写出的 replay source 元数据应同时包含 `engine_initial_cash` 和 `replay_initial_cash`。
 
 ## 实现顺序
 
@@ -262,3 +322,5 @@ reports/ew-seed-only-v2-entry-score-runner-warmup-2006-filter-2013-2025
   `reports/ew-seed-only-v2-entry-score-runner-full-hs300-only-2013-2025/entry_score_contract_boundary_audit_note.zh.md`
 - 新 runner 同口径复现：
   `reports/ew-seed-only-v2-entry-score-runner-warmup-2006-filter-2013-2025/entry_score_contract.json`
+- 新 runner 旧 formal 数值 parity：
+  `reports/ew-seed-only-v2-entry-score-runner-warmup-2006-filter-2013-2025-replay-cash-10m/formal_result_parity_replay_cash_10m_audit.zh.md`
