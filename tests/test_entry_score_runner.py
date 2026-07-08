@@ -139,11 +139,49 @@ def test_run_entry_score_replay_can_fail_on_missing_scores(tmp_path: Path) -> No
         )
 
 
-def _enter_intent(symbol: str, price: float) -> TradeIntent:
+def test_run_entry_score_replay_filters_events_and_scores_to_replay_window(tmp_path: Path) -> None:
+    score_path = tmp_path / "scores.parquet"
+    pd.DataFrame(
+        [
+            {"symbol": "000001.SZ", "entry_date": "2012-12-28", "ew_score": 9.0},
+            {"symbol": "000001.SZ", "entry_date": "2024-01-05", "ew_score": 0.25},
+            {"symbol": "000002.SZ", "entry_date": "2024-01-05", "ew_score": 0.90},
+            {"symbol": "000003.SZ", "entry_date": "2026-01-05", "ew_score": 8.0},
+        ]
+    ).to_parquet(score_path, index=False)
+    run_plan = _entry_score_run_plan(
+        tmp_path,
+        score_path,
+        replay_start_date="2024-01-01",
+        replay_end_date="2024-12-31",
+    )
+
+    replay = run_entry_score_replay(
+        run_plan,
+        intents=(
+            _enter_intent("000001.SZ", 10.0, trade_date=date(2012, 12, 28)),
+            _enter_intent("000001.SZ", 10.0, trade_date=date(2024, 1, 5)),
+            _enter_intent("000002.SZ", 10.0, trade_date=date(2024, 1, 5)),
+            _enter_intent("000003.SZ", 10.0, trade_date=date(2026, 1, 5)),
+        ),
+    )
+
+    assert replay is not None
+    contract = replay["precomputed_score_contract"]
+    assert contract["enter_event_count"] == 2
+    assert contract["matched_enter_score_count"] == 2
+    assert contract["score_keys_not_in_enter_events_count"] == 0
+    assert replay["source"]["source_decision_event_count"] == 4
+    assert replay["source"]["decision_event_count"] == 2
+    assert replay["source"]["replay_start_date"] == "2024-01-01"
+    assert replay["source"]["replay_end_date"] == "2024-12-31"
+
+
+def _enter_intent(symbol: str, price: float, *, trade_date: date = date(2024, 1, 5)) -> TradeIntent:
     return TradeIntent(
         intent_type=TradeIntentType.ENTER,
         symbol=symbol,
-        trade_date=date(2024, 1, 5),
+        trade_date=trade_date,
         method_name="baoma_entry",
         reason_code="BAOMA_ENTRY_TRIGGERED",
         signal_values={
@@ -161,6 +199,8 @@ def _entry_score_run_plan(
     score_path: Path,
     *,
     missing_score_policy: str = "skip",
+    replay_start_date: str | None = None,
+    replay_end_date: str | None = None,
 ) -> RunPlan:
     return RunPlan.from_mapping(
         {
@@ -204,6 +244,8 @@ def _entry_score_run_plan(
                     "source_score_field": "ew_score",
                     "artifact_path": score_path,
                     "missing_score_policy": missing_score_policy,
+                    "replay_start_date": replay_start_date,
+                    "replay_end_date": replay_end_date,
                     "max_holding_count": 2,
                     "max_new_positions_per_day": 2,
                     "cash_reserve_ratio": 0.0,

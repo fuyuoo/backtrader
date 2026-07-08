@@ -188,6 +188,8 @@ def test_baoma_execution_config_accepts_backtest_only_entry_score() -> None:
                 "symbol": "ts_code",
                 "trade_date": "entry_date",
             },
+            "replay_start_date": "2013-01-01",
+            "replay_end_date": "2025-12-31",
             "missing_score_policy": "fail",
             "max_holding_count": 80,
             "max_new_positions_per_day": 6,
@@ -204,6 +206,8 @@ def test_baoma_execution_config_accepts_backtest_only_entry_score() -> None:
     assert run_plan.execution.entry_score.artifact_path == Path("reports/scores.parquet")
     assert run_plan.execution.entry_score.key.symbol == "ts_code"
     assert run_plan.execution.entry_score.key.trade_date == "entry_date"
+    assert run_plan.execution.entry_score.replay_start_date.isoformat() == "2013-01-01"
+    assert run_plan.execution.entry_score.replay_end_date.isoformat() == "2025-12-31"
     assert run_plan.execution.entry_score.missing_score_policy == "fail"
     assert run_plan.execution.entry_score.max_holding_count == 80
     assert run_plan.execution.entry_score.prefer_unheld_industries is True
@@ -243,6 +247,31 @@ def test_entry_score_enabled_requires_score_contract_fields() -> None:
     }
 
     with pytest.raises(ValidationError, match="entry_score enabled requires"):
+        RunPlan.from_mapping(raw_config)
+
+
+def test_entry_score_replay_window_requires_valid_date_range() -> None:
+    raw_config = minimal_config()
+    raw_config["strategy"] = {
+        **raw_config["strategy"],
+        "entry_method": "baoma_entry",
+        "profit_taking_method": "baoma_ma25_profit_exit",
+        "stop_loss_method": "baoma_ma60_stop",
+        "add_on_method": "baoma_add_on",
+    }
+    raw_config["execution"] = {
+        "engine": "baoma_v1_business",
+        "entry_score": {
+            "enabled": True,
+            "score_id": "ew_seed_only_v2",
+            "score_field": "entry.score.ew_seed_only_v2",
+            "artifact_path": "reports/scores.parquet",
+            "replay_start_date": "2025-01-01",
+            "replay_end_date": "2024-12-31",
+        },
+    }
+
+    with pytest.raises(ValidationError, match="replay_end_date must be on or after replay_start_date"):
         RunPlan.from_mapping(raw_config)
 
 

@@ -54,10 +54,13 @@ entry_score:
   scope: backtest_only
   score_id: ew_seed_only_v2
   score_field: entry.score.ew_seed_only_v2
+  source_score_field: ew_seed_only_score
   artifact_path: reports/evidence-weighted-ranking-validation-hs300-only-2006-2025/evidence_weighted_scored_trade_detail.parquet
   key:
     symbol: symbol
     trade_date: entry_date
+  replay_start_date: 2013-01-01
+  replay_end_date: 2025-12-31
   missing_score_policy: skip
 ```
 
@@ -69,10 +72,15 @@ entry_score:
 | `scope` | 必须是 `backtest_only`；其他值应直接失败。 |
 | `score_id` | 人类可读的分数合同 id，当前为 `ew_seed_only_v2`。 |
 | `score_field` | 用于候选排序的数值分数字段。 |
+| `source_score_field` | score artifact 中实际读取的分数字段。若上游 artifact 列名与 runner 注入字段不同，用它做映射。 |
 | `artifact_path` | 预计算分数行。第一版 adapter 可以只支持 Parquet。 |
 | `key.symbol` | 分数 artifact 中的 symbol 列。 |
 | `key.trade_date` | 分数 artifact 中与 decision `trade_date` 对齐的日期列。 |
+| `replay_start_date` | 可选。只把该日期及之后的 decision events 和 score rows 纳入 entry_score replay contract。 |
+| `replay_end_date` | 可选。只把该日期及之前的 decision events 和 score rows 纳入 entry_score replay contract。 |
 | `missing_score_policy` | `skip` 或 `fail`。 |
+
+`replay_start_date` / `replay_end_date` 不改变 engine 的起跑窗口。它们只改变 entry_score replay 的计分窗口，用来支持“先用更长历史窗口恢复策略状态，再只审计目标测试窗”的回测口径。
 
 ## 缺失分数策略
 
@@ -113,6 +121,7 @@ runner-level 代码应该是 adapter，而不是新的模拟模块。它只负�
 - 校验 `scope == backtest_only`。
 - 加载 score artifact。
 - 把列归一化为 `symbol`、`trade_date` 和 `score_field`。
+- 按 `replay_start_date` / `replay_end_date` 同步过滤 decision events 和 score rows。
 - 把 decision events 和 score rows 传给 `simulate_precomputed_score_portfolio`。
 - 落盘返回的 `precomputed_score_contract`。
 
@@ -153,16 +162,81 @@ exit_reason
 
 这些字段可以存在于上游研究 artifact 中，但 runner adapter 必须在调用分数接口前丢弃它们。
 
+## 起跑边界与 replay window
+
+旧 contract 的口径不是直接从 2013 年起跑，而是：
+
+```text
+engine window: 2006-01-01 -> 2025-12-31
+entry_score replay window: 2013-01-01 -> 2025-12-31
+```
+
+也就是说，旧回测在 2013 年进入测试窗时，已经继承了 2006-2012 形成的持仓、现金和生命周期状态。
+
+因此，`2013-01-01 -> 2025-12-31` 直跑新 runner 不应被拿来和旧 contract 做强等价比较。直跑口径会丢掉 2013 年初之前的策略状态，实际审计结果已经显示差异集中在 `2013-01`：
+
+| 指标 | 旧 contract | 2013 直跑新 runner |
+|---|---:|---:|
+| enter_event_count | 11061 | 11011 |
+| matched_enter_score_count | 11004 | 10953 |
+| missing_enter_score_count | 57 | 58 |
+| score_keys_not_in_enter_events_count | 0 | 51 |
+
+enter key 差异审计结论：
+
+- 51 个旧有、新无的 enter keys 全部集中在 `2013-01-04` 到 `2013-01-17`。
+- 这 51 个 keys 全部有 score。
+- 新 runner 直跑额外多出 1 个 `601398.SH @ 2024-01-08`，且没有 score。
+
+这说明差异来自起跑边界状态，不是 score contract 接口错误。
+
+要复现旧 contract，新 runner 应使用：
+
+```yaml
+run:
+  from_date: 2006-01-01
+  to_date: 2025-12-31
+
+execution:
+  entry_score:
+    replay_start_date: 2013-01-01
+    replay_end_date: 2025-12-31
+```
+
+同口径复现结果：
+
+| 指标 | 旧 contract | 新 runner 同口径复现 |
+|---|---:|---:|
+| enter_event_count | 11061 | 11061 |
+| matched_enter_score_count | 11004 | 11004 |
+| missing_enter_score_count | 57 | 57 |
+| score_keys_not_in_enter_events_count | 0 | 0 |
+
+复现输出目录：
+
+```text
+reports/ew-seed-only-v2-entry-score-runner-warmup-2006-filter-2013-2025
+```
+
+关键产物：
+
+- `entry_score_contract.json`
+- `entry_score_replay_summary.json`
+- `entry_score_selected_entries.parquet`
+- `entry_score_blocked_entries.parquet`
+- `entry_score_equity_curve.parquet`
+
 ## 验收检查
 
 第一版 runner-level 实现满足以下条件即可接受：
 
 - 单元测试覆盖 `skip`、`fail`、重复 score key 和非有限分数。
-- 使用 `scope: backtest_only` 的回测配置能产出与当前验证相同的覆盖合同：`11004 matched`，`57 missing`。
+- 使用 `scope: backtest_only` 且 `2006-2025 engine window + 2013-2025 replay window` 的回测配置，能产出与旧 contract 相同的覆盖合同：`11061 enter`，`11004 matched`，`57 missing`，`0 extra score keys`。
 - `missing_score_policy: skip` 会把缺失候选记录为 `SCORE_GATE`。
 - `missing_score_policy: fail` 会在模拟前失败，并报告一组缺失的 `symbol@trade_date` 样例。
 - 实盘运行配置会拒绝 `entry_score.enabled: true`。
 - 报告写出 `precomputed_score_contract`，包含 enter count、matched count、missing count、extra score keys、score id、score field 和 missing policy。
+- 报告写出 replay source 元数据，至少包含 `replay_start_date`、`replay_end_date`、原始 decision event count 和 replay 后 decision event count。
 
 ## 实现顺序
 
@@ -172,6 +246,7 @@ exit_reason
 4. 把 adapter 接入 backtest-only entry ranking。
 5. 增加 runner-level 测试，覆盖 `skip`、`fail` 和实盘拒绝。
 6. 通过 runner-level 路径重新跑 HS300-only formal validation。
+7. 对旧 contract 使用 `2006-2025 engine window + 2013-2025 replay window` 做同口径复现。
 
 ## 当前参考
 
@@ -183,3 +258,7 @@ exit_reason
   `reports/ew-seed-only-v2-formal-backtest-hs300-only-2013-2025/ew_seed_only_v2_formal_backtest.zh.md`
 - 缺失分数审计：
   `reports/ew-seed-only-v2-formal-backtest-hs300-only-2013-2025/missing_score_enter_events_audit.zh.md`
+- 起跑边界差异审计：
+  `reports/ew-seed-only-v2-entry-score-runner-full-hs300-only-2013-2025/entry_score_contract_boundary_audit_note.zh.md`
+- 新 runner 同口径复现：
+  `reports/ew-seed-only-v2-entry-score-runner-warmup-2006-filter-2013-2025/entry_score_contract.json`

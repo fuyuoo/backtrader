@@ -58,13 +58,23 @@ def run_entry_score_replay(
         score_field=config.score_field,
         source_score_field=config.source_score_field or config.score_field,
     )
+    score_rows = _filter_rows_by_replay_window(
+        score_rows,
+        start_date=_date_label(config.replay_start_date) if config.replay_start_date is not None else None,
+        end_date=_date_label(config.replay_end_date) if config.replay_end_date is not None else None,
+    )
     stock_pool_order_by_symbol = {
         series.symbol: index
         for index, series in enumerate(run_plan.data.resolved_tradable_series, start=1)
     }
-    events = decision_events_from_intents(
+    source_events = decision_events_from_intents(
         intents,
         stock_pool_order_by_symbol=stock_pool_order_by_symbol,
+    )
+    events = _filter_rows_by_replay_window(
+        source_events,
+        start_date=_date_label(config.replay_start_date) if config.replay_start_date is not None else None,
+        end_date=_date_label(config.replay_end_date) if config.replay_end_date is not None else None,
     )
     max_holding_count = config.max_holding_count or _configured_max_holding_count(run_plan)
     portfolio_controls = {
@@ -90,6 +100,9 @@ def run_entry_score_replay(
         "scope": config.scope,
         "artifact_path": str(config.artifact_path),
         "source_score_field": config.source_score_field or config.score_field,
+        "replay_start_date": _date_label(config.replay_start_date) if config.replay_start_date is not None else None,
+        "replay_end_date": _date_label(config.replay_end_date) if config.replay_end_date is not None else None,
+        "source_decision_event_count": len(source_events),
         "decision_event_count": len(events),
     }
     return replay
@@ -162,6 +175,25 @@ def _configured_max_holding_count(run_plan: RunPlan) -> int:
     if value is None:
         return 200
     return int(value)
+
+
+def _filter_rows_by_replay_window(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    start_date: str | None,
+    end_date: str | None,
+) -> list[dict[str, Any]]:
+    if start_date is None and end_date is None:
+        return [dict(row) for row in rows]
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        trade_date = str(row.get("trade_date") or "")
+        if start_date is not None and trade_date < start_date:
+            continue
+        if end_date is not None and trade_date > end_date:
+            continue
+        filtered.append(dict(row))
+    return filtered
 
 
 def _decision_evidence(signal_values: Mapping[str, Any]) -> dict[str, Any]:

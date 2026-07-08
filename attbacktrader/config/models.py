@@ -277,6 +277,8 @@ class EntryScoreConfig(FrozenModel):
     source_score_field: str | None = None
     artifact_path: Path | None = None
     key: EntryScoreKeyConfig = Field(default_factory=EntryScoreKeyConfig)
+    replay_start_date: date | None = None
+    replay_end_date: date | None = None
     missing_score_policy: Literal["skip", "fail"] = "skip"
     max_holding_count: PositiveInt | None = None
     max_new_positions_per_day: PositiveInt | None = None
@@ -300,6 +302,9 @@ class EntryScoreConfig(FrozenModel):
         ]
         if missing:
             raise ValueError(f"entry_score enabled requires: {', '.join(missing)}")
+        if self.replay_start_date is not None and self.replay_end_date is not None:
+            if self.replay_end_date < self.replay_start_date:
+                raise ValueError("execution.entry_score.replay_end_date must be on or after replay_start_date")
         return self
 
 
